@@ -55,6 +55,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._dropShadowOffsetControl = null;
     this._dropShadowOffsetCircle = null;
     this._dropShadowOffsetHandle = null;
+    this._dropShadowPreviewRoot = null;
+    this._dropShadowPreviewImage = null;
     this._dropShadowOffsetMaxDistance = 40;
     this._dropShadowOffsetPointerId = null;
     this._dropShadowOffsetPointerActive = false;
@@ -232,6 +234,38 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._syncWindowTitle();
   }
 
+  _syncDropShadowPreview(preview) {
+    const root = this._dropShadowPreviewRoot;
+    const image = this._dropShadowPreviewImage;
+    if (!root || !image) return;
+    const hasPreview = preview && typeof preview === 'object' && typeof preview.src === 'string' && preview.src.length > 0;
+    if (hasPreview) {
+      if (image.src !== preview.src) image.src = preview.src;
+      if (preview.alt !== undefined) image.alt = String(preview.alt || '');
+      root.classList.remove('is-empty');
+    } else {
+      if (image.hasAttribute('src')) image.removeAttribute('src');
+      image.alt = '';
+      root.classList.add('is-empty');
+    }
+  }
+
+  applyDropShadowPreview(preview) {
+    if (!this._toolOptionState || typeof this._toolOptionState !== 'object') {
+      this._toolOptionState = {};
+    }
+    const controls = this._toolOptionState.dropShadowControls && typeof this._toolOptionState.dropShadowControls === 'object'
+      ? this._toolOptionState.dropShadowControls
+      : {};
+    if (preview && typeof preview === 'object' && typeof preview.src === 'string' && preview.src.length > 0) {
+      controls.preview = preview;
+    } else {
+      delete controls.preview;
+    }
+    this._toolOptionState.dropShadowControls = controls;
+    if (this.rendered) this._syncDropShadowPreview(controls.preview || null);
+  }
+
   render(force, options) {
     if (this.rendered) {
       if (this._resetScrollNextRender) this._pendingScrollState = { top: 0, left: 0 };
@@ -265,10 +299,48 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (this.rendered) this.render(false);
   }
 
+  _shouldForceRenderForStateChange(previousState = {}, nextState = {}) {
+    const paths = [
+      ['texturePaint', 'available'],
+      ['texturePaint', 'opacity', 'available'],
+      ['layerOpacity', 'available'],
+      ['textureOffset', 'available'],
+      ['scale', 'available'],
+      ['rotation', 'available'],
+      ['pathAppearance', 'available'],
+      ['pathAppearance', 'layerOpacity', 'available'],
+      ['pathAppearance', 'scale', 'available'],
+      ['pathAppearance', 'textureOffset', 'available'],
+      ['pathAppearance', 'tension', 'available'],
+      ['pathFeather', 'available'],
+      ['opacityFeather', 'available'],
+      ['dropShadowControls', 'available'],
+      ['dropShadow', 'available'],
+      ['flip', 'available']
+    ];
+    const valueAtPath = (state, path) => {
+      let cursor = state;
+      for (const segment of path) {
+        if (!cursor || typeof cursor !== 'object') return undefined;
+        cursor = cursor[segment];
+      }
+      return typeof cursor === 'boolean' ? cursor : !!cursor;
+    };
+    return paths.some((path) => {
+      const previous = valueAtPath(previousState, path);
+      const next = valueAtPath(nextState, path);
+      return !previous && !!next;
+    });
+  }
+
   setActiveToolOptions(options = {}, { suppressRender = false } = {}) {
-    if (!options || typeof options !== 'object') this._toolOptionState = {};
-    else this._toolOptionState = options;
-    if (this.rendered && !suppressRender) this.render(false);
+    const nextState = options && typeof options === 'object' ? options : {};
+    const previousState = this._toolOptionState && typeof this._toolOptionState === 'object'
+      ? this._toolOptionState
+      : {};
+    const forceRender = suppressRender && this.rendered && this._shouldForceRenderForStateChange(previousState, nextState);
+    this._toolOptionState = nextState;
+    if (this.rendered && (!suppressRender || forceRender)) this.render(false);
     else if (this.rendered) {
       this._syncGridSnapControl();
       this._syncDropShadowControl();
@@ -1247,6 +1319,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._dropShadowOffsetMaxDistance = Number(offsetControl.dataset.maxDistance) || 40;
     }
     this._dropShadowOffsetCircle = root.querySelector('[data-fa-nexus-drop-shadow-offset-circle]') || null;
+    this._dropShadowPreviewRoot = root.querySelector('[data-fa-nexus-drop-shadow-offset-preview]') || null;
+    this._dropShadowPreviewImage = root.querySelector('[data-fa-nexus-drop-shadow-offset-preview-image]') || null;
     this._dropShadowOffsetHandle = root.querySelector('[data-fa-nexus-drop-shadow-offset-handle]') || null;
 
     this._syncDropShadowControls();
@@ -1294,6 +1368,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._dropShadowBlurSlider = null;
     this._dropShadowOffsetControl = null;
     this._dropShadowOffsetCircle = null;
+    this._dropShadowPreviewRoot = null;
+    this._dropShadowPreviewImage = null;
     this._dropShadowOffsetHandle = null;
     this._dropShadowAlphaDisplay = null;
     this._dropShadowDilationDisplay = null;
@@ -1393,6 +1469,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._dropShadowNoteDisplay.textContent = context.note || '';
       this._dropShadowNoteDisplay.classList.toggle('is-hidden', !context.note);
     }
+    this._syncDropShadowPreview(state.preview);
   }
 
   _handleDropShadowSlider(event, handlerName, commit) {
@@ -3506,6 +3583,7 @@ class ToolOptionsController {
   constructor() {
     this._window = null;
     this._activeTools = new Map();
+    this._needsGridSnapResync = false;
     this._gridSnapEnabled = this._readGridSnapSetting();
     this._settingsHook = null;
     this._settingsAvailable = this._canAccessSettings();
@@ -3678,6 +3756,36 @@ class ToolOptionsController {
     }
   }
 
+  updateDropShadowPreview(toolId, preview) {
+    if (!toolId) return;
+    const id = String(toolId);
+    if (!this._toolOptions.has(id)) return;
+    const entry = this._toolOptions.get(id);
+    if (!entry || typeof entry !== 'object') return;
+    const state = entry.state && typeof entry.state === 'object' ? entry.state : {};
+    const controls = state.dropShadowControls && typeof state.dropShadowControls === 'object'
+      ? state.dropShadowControls
+      : {};
+    const normalized = preview && typeof preview === 'object' && typeof preview.src === 'string' && preview.src.length > 0
+      ? {
+          src: preview.src,
+          width: Number.isFinite(preview.width) ? Number(preview.width) : null,
+          height: Number.isFinite(preview.height) ? Number(preview.height) : null,
+          signature: typeof preview.signature === 'string' ? preview.signature : null,
+          updatedAt: Number.isFinite(preview.updatedAt) ? Number(preview.updatedAt) : Date.now(),
+          alt: typeof preview.alt === 'string' ? preview.alt : ''
+        }
+      : null;
+    if (normalized) controls.preview = normalized;
+    else delete controls.preview;
+    state.dropShadowControls = controls;
+    entry.state = state;
+    this._toolOptions.set(id, entry);
+    if (this._window?.activeTool?.id === id) {
+      this._window.applyDropShadowPreview(normalized);
+    }
+  }
+
   _getToolState(toolId) {
     if (!toolId) return {};
     return this._toolOptions.get(String(toolId))?.state || {};
@@ -3691,10 +3799,18 @@ class ToolOptionsController {
   supportsGridSnap() {
     this._ensureSettingsListener();
     const available = this._canAccessSettings();
-    if (this._settingsAvailable !== available) {
+    const availabilityChanged = this._settingsAvailable !== available;
+    if (availabilityChanged) {
       this._settingsAvailable = available;
-      if (this._window) this._window.setGridSnapAvailable(available);
+      if (!available) {
+        if (this._window) this._window.setGridSnapAvailable(false);
+      }
     }
+    if (available && (availabilityChanged || this._needsGridSnapResync)) {
+      const stored = this._readGridSnapSetting();
+      this._updateGridSnapState(stored, { syncWindow: true });
+    }
+    if (this._window) this._window.setGridSnapAvailable(available);
     return available;
   }
 
@@ -3759,11 +3875,17 @@ class ToolOptionsController {
   }
 
   _readGridSnapSetting() {
-    if (!this._canAccessSettings()) return true;
+    if (!this._canAccessSettings()) {
+      this._needsGridSnapResync = true;
+      return true;
+    }
     try {
-      return !!game.settings.get(MODULE_ID, GRID_SNAP_SETTING_KEY);
+      const value = !!game.settings.get(MODULE_ID, GRID_SNAP_SETTING_KEY);
+      this._needsGridSnapResync = false;
+      return value;
     } catch (error) {
       Logger.warn('ToolOptionsController.gridSnap.readFailed', error);
+      this._needsGridSnapResync = true;
       return true;
     }
   }

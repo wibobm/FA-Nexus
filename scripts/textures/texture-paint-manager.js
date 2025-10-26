@@ -245,7 +245,7 @@ export class TexturePaintManager {
         'LMB paint the texture;',
         'E to toggle erase mode.',
         'Ctrl/Cmd+Wheel adjusts brush size.',
-        'Alt+Wheel changes tile elevation (Shift boosts).',
+        'Alt+Wheel changes tile elevation (Shift=coarse, Ctrl/Cmd=fine).',
         'Press S to save the tile, ESC to exit.'
       ],
       texturePaint: { available: false },

@@ -56,60 +56,6 @@
         </div>
         <div class="fa-nexus-drop-shadow__body" data-fa-nexus-drop-shadow-body>
           <div class="fa-nexus-drop-shadow__group">
-            <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-alpha-row>
-              <div class="fa-nexus-drop-shadow__row-header">
-                <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.alpha.label}}</span>
-                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-alpha-display>{{dropShadowControls.alpha.display}}</span>
-              </div>
-              <input type="range"
-                     min="{{dropShadowControls.alpha.min}}"
-                     max="{{dropShadowControls.alpha.max}}"
-                     step="{{dropShadowControls.alpha.step}}"
-                     value="{{dropShadowControls.alpha.value}}"
-                     aria-label="{{dropShadowControls.alpha.label}}"
-                     data-fa-nexus-drop-shadow-alpha
-                     {{#if dropShadowControls.alpha.disabled}}disabled{{/if}}>
-              {{#if dropShadowControls.alpha.hint}}
-                <p class="fa-nexus-tool-options__hint fa-nexus-drop-shadow__hint">{{dropShadowControls.alpha.hint}}</p>
-              {{/if}}
-            </div>
-
-            <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-dilation-row>
-              <div class="fa-nexus-drop-shadow__row-header">
-                <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.dilation.label}}</span>
-                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-dilation-display>{{dropShadowControls.dilation.display}}</span>
-              </div>
-              <input type="range"
-                     min="{{dropShadowControls.dilation.min}}"
-                     max="{{dropShadowControls.dilation.max}}"
-                     step="{{dropShadowControls.dilation.step}}"
-                     value="{{dropShadowControls.dilation.value}}"
-                     aria-label="{{dropShadowControls.dilation.label}}"
-                     data-fa-nexus-drop-shadow-dilation
-                     {{#if dropShadowControls.dilation.disabled}}disabled{{/if}}>
-              {{#if dropShadowControls.dilation.hint}}
-                <p class="fa-nexus-tool-options__hint fa-nexus-drop-shadow__hint">{{dropShadowControls.dilation.hint}}</p>
-              {{/if}}
-            </div>
-
-            <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-blur-row>
-              <div class="fa-nexus-drop-shadow__row-header">
-                <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.blur.label}}</span>
-                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-blur-display>{{dropShadowControls.blur.display}}</span>
-              </div>
-              <input type="range"
-                     min="{{dropShadowControls.blur.min}}"
-                     max="{{dropShadowControls.blur.max}}"
-                     step="{{dropShadowControls.blur.step}}"
-                     value="{{dropShadowControls.blur.value}}"
-                     aria-label="{{dropShadowControls.blur.label}}"
-                     data-fa-nexus-drop-shadow-blur
-                     {{#if dropShadowControls.blur.disabled}}disabled{{/if}}>
-              {{#if dropShadowControls.blur.hint}}
-                <p class="fa-nexus-tool-options__hint fa-nexus-drop-shadow__hint">{{dropShadowControls.blur.hint}}</p>
-              {{/if}}
-            </div>
-
             {{#if dropShadowControls.offset}}
             <div class="fa-nexus-drop-shadow__row fa-nexus-drop-shadow__offset" data-fa-nexus-drop-shadow-offset-row>
               <div class="fa-nexus-drop-shadow__row-header">
@@ -132,6 +78,12 @@
                    data-max-distance="{{dropShadowControls.offset.maxDistance}}"
                    {{#if dropShadowControls.offset.disabled}}data-disabled="true"{{else}}data-disabled="false"{{/if}}>
                 <div class="fa-nexus-drop-shadow__offset-circle" data-fa-nexus-drop-shadow-offset-circle>
+                  <div class="fa-nexus-drop-shadow__offset-preview is-empty" data-fa-nexus-drop-shadow-offset-preview>
+                    <img class="fa-nexus-drop-shadow__offset-preview-image"
+                         data-fa-nexus-drop-shadow-offset-preview-image
+                         alt=""
+                         draggable="false">
+                  </div>
                   <div class="fa-nexus-drop-shadow__offset-crosshair fa-nexus-drop-shadow__offset-crosshair--x"></div>
                   <div class="fa-nexus-drop-shadow__offset-crosshair fa-nexus-drop-shadow__offset-crosshair--y"></div>
                   <div class="fa-nexus-drop-shadow__offset-handle" data-fa-nexus-drop-shadow-offset-handle></div>
@@ -142,6 +94,60 @@
               {{/if}}
             </div>
             {{/if}}
+
+            <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-dilation-row>
+              <div class="fa-nexus-drop-shadow__row-header">
+                <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.dilation.label}}</span>
+                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-dilation-display>{{dropShadowControls.dilation.display}}</span>
+              </div>
+              <input type="range"
+                     min="{{dropShadowControls.dilation.min}}"
+                     max="{{dropShadowControls.dilation.max}}"
+                     step="{{dropShadowControls.dilation.step}}"
+                     value="{{dropShadowControls.dilation.value}}"
+                     aria-label="{{dropShadowControls.dilation.label}}"
+                     data-fa-nexus-drop-shadow-dilation
+                     {{#if dropShadowControls.dilation.disabled}}disabled{{/if}}>
+              {{#if dropShadowControls.dilation.hint}}
+                <p class="fa-nexus-tool-options__hint fa-nexus-drop-shadow__hint">{{dropShadowControls.dilation.hint}}</p>
+              {{/if}}
+            </div>
+
+            <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-alpha-row>
+              <div class="fa-nexus-drop-shadow__row-header">
+                <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.alpha.label}}</span>
+                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-alpha-display>{{dropShadowControls.alpha.display}}</span>
+              </div>
+              <input type="range"
+                     min="{{dropShadowControls.alpha.min}}"
+                     max="{{dropShadowControls.alpha.max}}"
+                     step="{{dropShadowControls.alpha.step}}"
+                     value="{{dropShadowControls.alpha.value}}"
+                     aria-label="{{dropShadowControls.alpha.label}}"
+                     data-fa-nexus-drop-shadow-alpha
+                     {{#if dropShadowControls.alpha.disabled}}disabled{{/if}}>
+              {{#if dropShadowControls.alpha.hint}}
+                <p class="fa-nexus-tool-options__hint fa-nexus-drop-shadow__hint">{{dropShadowControls.alpha.hint}}</p>
+              {{/if}}
+            </div>
+
+            <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-blur-row>
+              <div class="fa-nexus-drop-shadow__row-header">
+                <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.blur.label}}</span>
+                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-blur-display>{{dropShadowControls.blur.display}}</span>
+              </div>
+              <input type="range"
+                     min="{{dropShadowControls.blur.min}}"
+                     max="{{dropShadowControls.blur.max}}"
+                     step="{{dropShadowControls.blur.step}}"
+                     value="{{dropShadowControls.blur.value}}"
+                     aria-label="{{dropShadowControls.blur.label}}"
+                     data-fa-nexus-drop-shadow-blur
+                     {{#if dropShadowControls.blur.disabled}}disabled{{/if}}>
+              {{#if dropShadowControls.blur.hint}}
+                <p class="fa-nexus-tool-options__hint fa-nexus-drop-shadow__hint">{{dropShadowControls.blur.hint}}</p>
+              {{/if}}
+            </div>
           </div>
         </div>
       </div>

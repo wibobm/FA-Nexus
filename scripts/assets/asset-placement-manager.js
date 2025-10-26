@@ -7,8 +7,19 @@ import { PlacementOverlay, createPlacementSpinner } from '../core/placement/plac
 import { PlacementPrefetchQueue } from '../core/placement/placement-prefetch-queue.js';
 
 const quantizeElevation = (value) => {
-  const quantized = Math.round(value * 10) / 10;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  const quantized = Math.round(numeric * 100) / 100;
   return Object.is(quantized, -0) ? 0 : quantized;
+};
+
+const formatElevation = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '0';
+  const rounded = Math.round(numeric * 100) / 100;
+  const normalized = Number(rounded.toFixed(2));
+  const safeValue = Object.is(normalized, -0) ? 0 : normalized;
+  return safeValue.toString();
 };
 
 const MIN_SCALE = 0.1;
@@ -24,6 +35,7 @@ const DEFAULT_SHADOW_SETTINGS = Object.freeze({
   offsetDistance: 0,
   offsetAngle: 135
 });
+const FREEZE_SHORTCUT_BLOCKED_INPUTS = new Set(['text', 'search', 'email', 'url', 'password', 'tel']);
 
 export class AssetPlacementManager {
   constructor(app) {
@@ -54,6 +66,9 @@ export class AssetPlacementManager {
     this._suppressDragSelect = false;
     this._lastPointer = null;
     this._lastPointerWorld = null;
+    this._previewFrozen = false;
+    this._frozenPreviewWorld = null;
+    this._frozenPointerScreen = null;
     // Track canvas zoom to keep preview sized accurately
     this._zoomWatcherId = null;
     this._lastZoom = 1;
@@ -77,6 +92,13 @@ export class AssetPlacementManager {
     this._shadowSettingsCollapsed = this._readShadowSettingsCollapsed();
     this._shadowElevationContext = { elevation: 0, tileCount: 0, hasTiles: false, source: 'default' };
     this._shadowPreviewTextureListener = null;
+    this._shadowOffsetPreview = null;
+    this._shadowPreviewFrame = null;
+    this._shadowPreviewPendingSignature = null;
+    this._shadowPreviewRendering = false;
+    this._shadowPreviewSequence = 0;
+    this._shadowPreviewRequestedId = 0;
+    this._shadowPreviewForce = false;
     this._currentRandomOffset = 0;
     this._pendingRotation = 0;
     this._scaleRandomEnabled = false;
@@ -91,6 +113,15 @@ export class AssetPlacementManager {
     this._flipRandomVerticalOffset = false;
     this._pendingFlipHorizontal = false;
     this._pendingFlipVertical = false;
+    this._editingTile = null;
+    this._isEditingExistingTile = false;
+    this._pendingEditState = null;
+    this._lastElevationUsed = 0;
+    this._editingTileObject = null;
+    this._editingTileVisibilitySnapshot = null;
+    this._editingCommitTimer = null;
+    this._editingTileShadowSuspended = false;
+    this._replaceOriginalOnPlace = false;
     this._installDropShadowSettingsHook();
     this._syncToolOptionsState();
   }
@@ -121,6 +152,7 @@ export class AssetPlacementManager {
     if (commit) {
       this._propagateShadowSettingsToElevation();
       this._notifyDropShadowChanged();
+      if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     }
     return true;
   }
@@ -164,16 +196,19 @@ export class AssetPlacementManager {
       return false;
     }
     this._applyShadowSettingsSnapshot(preset, { persist: true, notify: true, propagate: true, sync: true, force: true });
+    if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     return true;
   }
 
   _handleDropShadowReset() {
     this._applyShadowSettingsSnapshot(DEFAULT_SHADOW_SETTINGS, { persist: true, notify: true, propagate: true, sync: true, force: true });
+    if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
   }
 
   startPlacement(assetData, stickyMode = false, options = {}) {
     const previousPreference = this.isDropShadowEnabled();
     this.cancelPlacement('replace');
+    this._replaceOriginalOnPlace = false;
     this._ensurePointerSnapshot(options);
     this._dropShadowPreference = previousPreference;
     this._notifyDropShadowChanged();
@@ -182,6 +217,7 @@ export class AssetPlacementManager {
     this.currentAsset = assetData;
     this.isRandomMode = false;
     this.randomAssets = [];
+    this._pendingEditState = null;
     this.currentRotation = 0;
     this._rotationRandomEnabled = false;
     this._rotationRandomStrength = 45;
@@ -205,8 +241,10 @@ export class AssetPlacementManager {
     this._updateFlipPreview();
     this._activateToolOptions();
     try { Logger.info('Placement.start', { sticky: !!stickyMode, kind: 'single', asset: assetData?.filename || assetData?.path }); } catch (_) {}
-    this._previewElevation = 0;
-    this._previewSort = this._interactionController.computeNextSortAtElevation?.(0) ?? 0;
+    const initialElevation = Number.isFinite(this._lastElevationUsed) ? this._lastElevationUsed : 0;
+    this._previewElevation = initialElevation;
+    this._previewSort = this._interactionController.computeNextSortAtElevation?.(initialElevation) ?? 0;
+    this._lastElevationUsed = this._previewElevation;
     this._lastElevationAnnounce = 0;
     this._clearElevationAnnounceTimer();
     this._refreshShadowElevationContext({ adopt: true });
@@ -216,6 +254,113 @@ export class AssetPlacementManager {
     Promise.resolve(this._prepareCurrentAssetPreview({ initial: true })).catch((error) => {
       Logger.warn('Placement.prepare.failed', String(error?.message || error));
     });
+  }
+
+  async editTile(tileDocument, options = {}) {
+    try {
+      if (!tileDocument) throw new Error('Tile document required');
+      const doc = tileDocument.document ?? tileDocument;
+      if (!doc) throw new Error('Tile document unavailable');
+      if (!doc.texture || !doc.texture.src) throw new Error('Tile is missing a texture source');
+
+      const assetData = this._buildAssetDataFromTile(doc);
+      if (!assetData) throw new Error('Unable to derive asset data from tile');
+
+      this.cancelPlacement('replace');
+
+      this.currentAsset = assetData;
+      this.isPlacementActive = true;
+      this.isStickyMode = false;
+      this.isRandomMode = false;
+      this.randomAssets = [];
+      this._editingTile = doc;
+      this._replaceOriginalOnPlace = true;
+      this._isEditingExistingTile = true;
+      this._pendingEditState = null;
+
+      const tileObj = doc?.object || null;
+      this._editingTileObject = tileObj || null;
+      this._editingTileVisibilitySnapshot = tileObj ? this._captureTileVisibility(tileObj) : null;
+      if (tileObj) {
+        this._releaseTileSelection(tileObj);
+        this._hideTileForEditing(tileObj);
+      }
+      this._editingTileShadowSuspended = this._suspendEditingTileShadow(doc);
+
+      const centerWorld = (() => {
+        if (options.pointerWorld && Number.isFinite(options.pointerWorld.x) && Number.isFinite(options.pointerWorld.y)) {
+          return { x: Number(options.pointerWorld.x), y: Number(options.pointerWorld.y) };
+        }
+        const px = Number(doc.x || 0);
+        const py = Number(doc.y || 0);
+        const w = Number(doc.width || 0);
+        const h = Number(doc.height || 0);
+        return { x: px + w / 2, y: py + h / 2 };
+      })();
+
+      const pointerOption = (() => {
+        if (options.pointer && Number.isFinite(options.pointer.x) && Number.isFinite(options.pointer.y)) {
+          return { x: Number(options.pointer.x), y: Number(options.pointer.y) };
+        }
+        if (canvas?.stage && centerWorld) {
+          try {
+            const stagePoint = canvas.stage.worldTransform.apply(new PIXI.Point(centerWorld.x, centerWorld.y));
+            const canvasEl = canvas.app?.view || document.querySelector('canvas#board');
+            if (canvasEl) {
+              const rect = canvasEl.getBoundingClientRect();
+              return { x: rect.left + stagePoint.x, y: rect.top + stagePoint.y };
+            }
+          } catch (_) {}
+        }
+        return null;
+      })();
+
+      this._ensurePointerSnapshot({
+        pointer: pointerOption || options.pointer || null,
+        pointerWorld: options.pointerWorld || centerWorld
+      });
+
+      const initialElevation = Number.isFinite(doc.elevation) ? Number(doc.elevation) : (Number.isFinite(this._lastElevationUsed) ? this._lastElevationUsed : 0);
+      this._previewElevation = initialElevation;
+      this._lastElevationUsed = this._previewElevation;
+      this._previewSort = Number(doc.sort ?? 0) || 0;
+      this._lastElevationAnnounce = 0;
+      this._clearElevationAnnounceTimer();
+
+      this._activateToolOptions();
+      this._activateTilesLayer();
+      this._removePreviewElement();
+      this._createPreviewElement();
+
+      if (this._previewContainer) {
+        this._previewContainer.x = centerWorld.x;
+        this._previewContainer.y = centerWorld.y;
+      }
+      this._lastPointer = null;
+      this._lastPointerWorld = { ...centerWorld };
+
+      this._applyTileStateToPlacement(doc, { force: true });
+      this._isEditingExistingTile = false;
+      this._refreshShadowElevationContext({ adopt: false, sync: true });
+      this._syncToolOptionsState({ suppressRender: false });
+      this._setPlacementFreeze(true, { announce: false });
+
+      this._startInteractionSession();
+      return true;
+    } catch (error) {
+      Logger.warn('Placement.editTile.failed', String(error?.message || error));
+      ui.notifications?.error?.(`Unable to edit asset: ${error?.message || error}`);
+      this._restoreEditingTileVisibility();
+      this._resumeEditingTileShadow();
+      this._editingTileObject = null;
+      this._editingTileVisibilitySnapshot = null;
+      this._editingTile = null;
+      this._isEditingExistingTile = false;
+      this._pendingEditState = null;
+      this._replaceOriginalOnPlace = false;
+      this._editingTileShadowSuspended = false;
+      return false;
+    }
   }
 
   startPlacementRandom(assetList, stickyMode = true, options = {}) {
@@ -254,8 +399,10 @@ export class AssetPlacementManager {
       this._pendingFlipVertical = this._flipVertical;
       this._updateFlipPreview();
       this._activateToolOptions();
-    this._previewElevation = 0;
-    this._previewSort = this._interactionController.computeNextSortAtElevation?.(0) ?? 0;
+    const initialElevation = Number.isFinite(this._lastElevationUsed) ? this._lastElevationUsed : 0;
+    this._previewElevation = initialElevation;
+    this._previewSort = this._interactionController.computeNextSortAtElevation?.(initialElevation) ?? 0;
+    this._lastElevationUsed = this._previewElevation;
     this._lastElevationAnnounce = 0;
     this._clearElevationAnnounceTimer();
     Logger.info('Placement.startRandom', { sticky: !!stickyMode, count: this.randomAssets.length });
@@ -271,10 +418,28 @@ export class AssetPlacementManager {
   }
 
   cancelPlacement(reason = 'user') {
-    if (!this.isPlacementActive) return;
+    if (!this.isPlacementActive) {
+      this._setPlacementFreeze(false, { announce: false, sync: false });
+      return;
+    }
     this.isPlacementActive = false;
     this.isStickyMode = false;
     this.currentAsset = null;
+    this._restoreEditingTileVisibility();
+    this._resumeEditingTileShadow();
+    this._editingTileObject = null;
+    this._editingTileVisibilitySnapshot = null;
+    this._editingTileShadowSuspended = false;
+    this._replaceOriginalOnPlace = false;
+    if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
+    if (this._editingCommitTimer) {
+      try { clearTimeout(this._editingCommitTimer); }
+      catch (_) {}
+      this._editingCommitTimer = null;
+    }
+    this._editingTile = null;
+    this._isEditingExistingTile = false;
+    this._pendingEditState = null;
     this.isRandomMode = false;
     this.randomAssets = [];
     this._rotationRandomEnabled = false;
@@ -308,6 +473,7 @@ export class AssetPlacementManager {
     this._removePlacementFeedback();
     this._clearElevationAnnounceTimer();
     this._lastElevationAnnounce = 0;
+    this._setPlacementFreeze(false, { announce: false, sync: false });
     // Notify ESC-based cancellation so selection can be cleared by tab
     try {
       if (reason === 'esc') {
@@ -379,6 +545,7 @@ export class AssetPlacementManager {
         this._previewContainer._sprite.rotation = (rotation * Math.PI) / 180;
       }
       this._updatePreviewShadow();
+      this._scheduleShadowOffsetPreviewUpdate();
     } catch (_) {}
   }
 
@@ -431,6 +598,7 @@ export class AssetPlacementManager {
         this._applyZoomToPreview(canvas?.stage?.scale?.x || 1);
       }
       this._updatePreviewShadow();
+      this._scheduleShadowOffsetPreviewUpdate();
     } catch (_) {}
   }
 
@@ -504,6 +672,7 @@ export class AssetPlacementManager {
         if (forceShadow) this._updatePreviewShadow({ force: true });
         else this._updatePreviewShadow();
       }
+      this._scheduleShadowOffsetPreviewUpdate();
     } catch (_) {}
   }
 
@@ -590,6 +759,16 @@ export class AssetPlacementManager {
     const hint = globalEnabled
       ? ''
       : 'Enable drop shadows in the FA Nexus module settings to unlock this toggle.';
+    const freezeHint = this._previewFrozen
+      ? 'Preview frozen — press Space to resume following your cursor.'
+      : 'Press Space to freeze the preview while adjusting sliders.';
+    const hints = [
+      'Click to place; ESC to cancel.',
+      'Ctrl/Cmd+Wheel rotates (add Shift for 1° steps);',
+      'Shift+Wheel scales;',
+      'Alt+Wheel adjusts elevation (Shift=coarse, Ctrl/Cmd=fine).',
+      freezeHint
+    ];
     return {
       dropShadow: {
         available: true,
@@ -605,13 +784,106 @@ export class AssetPlacementManager {
       flip: this._buildFlipToolState(),
       scale: this._buildScaleToolState(),
       rotation: this._buildRotationToolState(),
-      hints: [
-        'Click to place; ESC to cancel.',
-        'Ctrl/Cmd+Wheel rotates;',
-        'Shift+Wheel scales;',
-        'Alt+Wheel adjusts elevation (Shift boosts).'
-      ]
+      hints
     };
+  }
+
+  _togglePlacementFreeze() {
+    return this._setPlacementFreeze(!this._previewFrozen);
+  }
+
+  _setPlacementFreeze(enabled, { announce = true, sync = true } = {}) {
+    const next = !!enabled;
+    if (next) {
+      if (!this.isPlacementActive || this._isEditingExistingTile) {
+        if (sync) this._syncToolOptionsState();
+        return false;
+      }
+      const anchor = this._getPreviewWorldPosition();
+      if (!anchor) {
+        if (announce) {
+          announceChange('asset-placement-freeze', 'Preview not ready to freeze yet.', { throttleMs: 1200, level: 'info' });
+        }
+        if (sync) this._syncToolOptionsState();
+        return false;
+      }
+      const snapped = this._applyGridSnapping(anchor);
+      this._previewFrozen = true;
+      this._frozenPreviewWorld = { x: snapped.x, y: snapped.y };
+      this._lastPointerWorld = { x: snapped.x, y: snapped.y };
+      this._refreshFrozenPointerScreen();
+      this._applyPlacementFreezeClass();
+      if (announce) {
+        announceChange('asset-placement-freeze', 'Preview frozen. Press Space again to unlock.', { throttleMs: 2000 });
+      }
+      if (sync) this._syncToolOptionsState();
+      return true;
+    }
+
+    const wasFrozen = this._previewFrozen;
+    this._previewFrozen = false;
+    this._frozenPreviewWorld = null;
+    this._frozenPointerScreen = null;
+    this._applyPlacementFreezeClass();
+    if (announce && wasFrozen) {
+      announceChange('asset-placement-freeze', 'Preview following the cursor again.', { throttleMs: 2000 });
+    }
+    if (this._loadingOverlay?.overlay && this._lastPointer) {
+      this._updateLoadingOverlayPointer(this._lastPointer.x, this._lastPointer.y);
+    }
+    if (sync) this._syncToolOptionsState();
+    return true;
+  }
+
+  _getPreviewWorldPosition() {
+    if (this._previewContainer && Number.isFinite(this._previewContainer.x) && Number.isFinite(this._previewContainer.y)) {
+      return { x: Number(this._previewContainer.x), y: Number(this._previewContainer.y) };
+    }
+    if (this._frozenPreviewWorld && Number.isFinite(this._frozenPreviewWorld.x) && Number.isFinite(this._frozenPreviewWorld.y)) {
+      return { x: this._frozenPreviewWorld.x, y: this._frozenPreviewWorld.y };
+    }
+    if (this._lastPointerWorld && Number.isFinite(this._lastPointerWorld.x) && Number.isFinite(this._lastPointerWorld.y)) {
+      return { x: this._lastPointerWorld.x, y: this._lastPointerWorld.y };
+    }
+    if (this._lastPointer && Number.isFinite(this._lastPointer.x) && Number.isFinite(this._lastPointer.y)) {
+      return this._screenToCanvas(this._lastPointer.x, this._lastPointer.y);
+    }
+    return null;
+  }
+
+  _applyPlacementFreezeClass() {
+    try {
+      const el = this.app?.element;
+      if (!el) return;
+      if (this._previewFrozen) el.classList.add('placement-frozen');
+      else el.classList.remove('placement-frozen');
+    } catch (_) {}
+  }
+
+  _refreshFrozenPointerScreen() {
+    if (!this._previewFrozen || !this._frozenPreviewWorld) {
+      this._frozenPointerScreen = null;
+      return;
+    }
+    const screen = this._canvasToScreen(this._frozenPreviewWorld.x, this._frozenPreviewWorld.y);
+    this._frozenPointerScreen = screen;
+    if (screen) {
+      this._updateLoadingOverlayPointer(screen.x, screen.y);
+    }
+  }
+
+  _shouldIgnoreFreezeShortcut(target) {
+    if (!target) return false;
+    try {
+      if (target.isContentEditable) return true;
+      const tag = String(target.tagName || '').toLowerCase();
+      if (tag === 'textarea') return true;
+      if (tag !== 'input') return false;
+      const type = String(target.type || '').toLowerCase();
+      return FREEZE_SHORTCUT_BLOCKED_INPUTS.has(type);
+    } catch (_) {
+      return false;
+    }
   }
 
   _formatFlipSummary(state) {
@@ -754,6 +1026,14 @@ export class AssetPlacementManager {
     const angleDisplay = Math.round(offsetAngle);
     const currentSnapshot = this._currentShadowSnapshot();
     const presetState = this._buildDropShadowPresetState(currentSnapshot);
+    const preview = this._shadowOffsetPreview
+      ? {
+          src: this._shadowOffsetPreview.src,
+          width: this._shadowOffsetPreview.width,
+          height: this._shadowOffsetPreview.height,
+          alt: this._shadowOffsetPreview.alt || 'Asset drop shadow preview'
+        }
+      : null;
     return {
       available: allowed,
       disabled,
@@ -799,6 +1079,7 @@ export class AssetPlacementManager {
         hint: 'Drag the handle to shift the shadow (max 40px). Outwards increases distance; clockwise changes direction.',
         disabled
       },
+      preview,
       context: this._buildDropShadowContextState()
     };
   }
@@ -806,27 +1087,30 @@ export class AssetPlacementManager {
   _buildDropShadowContextState() {
     const elevation = Number(this._previewElevation ?? 0) || 0;
     const ctx = this._shadowElevationContext || { elevation, tileCount: 0, hasTiles: false, source: 'default' };
-    let display;
-    if (!Number.isFinite(elevation)) {
-      display = '0';
-    } else if (Math.abs(elevation - Math.trunc(elevation)) < 0.001) {
-      display = String(Math.trunc(elevation));
-    } else {
-      display = elevation.toFixed(1).replace(/\.0$/, '');
-    }
+    const display = formatElevation(elevation);
     const tileCount = Number(ctx.tileCount || 0);
     const hasTiles = !!ctx.hasTiles && tileCount > 0;
     const source = ctx.source || (hasTiles ? 'existing' : 'default');
+    const mixedOffsets = !!ctx.mixedOffsets;
+    const mixedSpread = !!ctx.mixedDilation;
     let status;
     if (hasTiles) {
       const assetText = tileCount === 1 ? '1 asset' : `${tileCount} assets`;
-      status = source === 'existing'
-        ? `Matched ${assetText} on this elevation.`
-        : `Synced with ${assetText} on this elevation.`;
+      if (mixedOffsets || mixedSpread) {
+        const mixedDetails = [
+          mixedSpread ? 'spread' : null,
+          mixedOffsets ? 'offset' : null
+        ].filter(Boolean).join(' & ');
+        status = `Mixed ${mixedDetails} settings across ${assetText}.`;
+      } else {
+        status = source === 'existing'
+          ? `Matched ${assetText} on this elevation.`
+          : `Synced with ${assetText} on this elevation.`;
+      }
     } else {
       status = 'No assets on this elevation yet.';
     }
-    const note = 'Shadow settings are per elevation.';
+    const note = 'Blur & opacity follow elevation; offset & spread can be per asset.';
     return {
       display,
       status,
@@ -912,6 +1196,8 @@ export class AssetPlacementManager {
       }
       const tileCount = Number(snapshot?.tileCount || 0);
       const hasTiles = !!snapshot?.hasTiles && tileCount > 0;
+      const mixedOffsets = !!snapshot?.mixedOffset || !!snapshot?.mixedOffsetDistance || !!snapshot?.mixedOffsetAngle;
+      const mixedSpread = !!snapshot?.mixedDilation;
       let source = this._shadowElevationContext?.source || (hasTiles ? 'existing' : 'default');
       if (adopt && hasTiles) {
         this._applyShadowSettingsSnapshot(snapshot, { persist: false, notify: false, propagate: false, sync: false, force: true });
@@ -919,7 +1205,7 @@ export class AssetPlacementManager {
       } else if (!hasTiles) {
         source = 'default';
       }
-      this._shadowElevationContext = { elevation, tileCount, hasTiles, source };
+      this._shadowElevationContext = { elevation, tileCount, hasTiles, source, mixedOffsets, mixedDilation: mixedSpread };
       if (sync) {
         this._syncToolOptionsState({ suppressRender: false });
         this._updatePreviewShadow({ force: true });
@@ -945,15 +1231,9 @@ export class AssetPlacementManager {
         this._updatePreviewShadow({ force: true });
         return;
       }
-      const offset = this._computeShadowOffsetVector();
       const settings = {
         alpha: this._dropShadowAlpha,
-        dilation: this._dropShadowDilation,
-        blur: this._dropShadowBlur,
-        offsetDistance: this._dropShadowOffsetDistance,
-        offsetAngle: this._dropShadowOffsetAngle,
-        offsetX: offset.x,
-        offsetY: offset.y
+        blur: this._dropShadowBlur
       };
       const result = manager.applyElevationSettings(elevation, settings);
       const markSynced = () => {
@@ -1013,6 +1293,7 @@ export class AssetPlacementManager {
       this._dropShadowPreference = null;
       this._updatePreviewShadow({ force: true });
       this._notifyDropShadowChanged();
+      if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
       return true;
     }
     const next = !!value;
@@ -1027,6 +1308,7 @@ export class AssetPlacementManager {
     this._dropShadowPreference = next;
     this._updatePreviewShadow({ force: true });
     this._notifyDropShadowChanged();
+    if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     return true;
   }
 
@@ -1049,6 +1331,7 @@ export class AssetPlacementManager {
     if (commit) {
       this._propagateShadowSettingsToElevation();
       this._notifyDropShadowChanged();
+      if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     }
     return true;
   }
@@ -1071,6 +1354,7 @@ export class AssetPlacementManager {
     if (commit) {
       this._propagateShadowSettingsToElevation();
       this._notifyDropShadowChanged();
+      if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     }
     return true;
   }
@@ -1093,6 +1377,7 @@ export class AssetPlacementManager {
     if (commit) {
       this._propagateShadowSettingsToElevation();
       this._notifyDropShadowChanged();
+      if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     }
     return true;
   }
@@ -1115,6 +1400,7 @@ export class AssetPlacementManager {
     if (commit) {
       this._propagateShadowSettingsToElevation();
       this._notifyDropShadowChanged();
+      if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     }
     return true;
   }
@@ -1137,6 +1423,7 @@ export class AssetPlacementManager {
     if (commit) {
       this._propagateShadowSettingsToElevation();
       this._notifyDropShadowChanged();
+      if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     }
     return true;
   }
@@ -1151,6 +1438,7 @@ export class AssetPlacementManager {
     this.currentScale = normalized;
     this._updateScalePreview({ clampOffset: true });
     this._syncToolOptionsState();
+    if (this._isEditingExistingTile) this._scheduleEditingCommit();
     return true;
   }
 
@@ -1184,6 +1472,7 @@ export class AssetPlacementManager {
     this.currentRotation = normalized;
     this._updateRotationPreview({ clampOffset: true });
     this._syncToolOptionsState();
+    if (this._isEditingExistingTile) this._scheduleEditingCommit();
     return true;
   }
 
@@ -1211,6 +1500,7 @@ export class AssetPlacementManager {
     this._flipHorizontal = !this._flipHorizontal;
     this._updateFlipPreview();
     this._syncToolOptionsState({ suppressRender: false });
+    if (this._isEditingExistingTile) this._scheduleEditingCommit();
     return true;
   }
 
@@ -1218,6 +1508,7 @@ export class AssetPlacementManager {
     this._flipVertical = !this._flipVertical;
     this._updateFlipPreview();
     this._syncToolOptionsState({ suppressRender: false });
+    if (this._isEditingExistingTile) this._scheduleEditingCommit();
     return true;
   }
 
@@ -1355,6 +1646,7 @@ export class AssetPlacementManager {
       if (!container) return;
       if (!this._isPreviewShadowActive()) {
         if (container._shadowContainer) container._shadowContainer.visible = false;
+        this._scheduleShadowOffsetPreviewUpdate({ force });
         return;
       }
       const sprite = container._sprite;
@@ -1401,7 +1693,11 @@ export class AssetPlacementManager {
       const centerY = paddedHeight / 2;
 
       const signature = `${baseTexture?.uid || baseTexture?.cacheId || 'tex'}:${worldWidth}:${worldHeight}:${rotation}:${alpha}:${dilation}:${blur}:${offset.x}:${offset.y}:${zoom}:${paddedWidth}:${paddedHeight}:${flipX}:${flipY}`;
-      if (!force && container._shadowState?.signature === signature) return;
+      const previousSignature = container._shadowState?.signature || null;
+      if (!force && previousSignature === signature) {
+        this._scheduleShadowOffsetPreviewUpdate({ force: false });
+        return;
+      }
 
       const shadow = this._ensurePreviewShadowContainer();
       if (!shadow) return;
@@ -1460,6 +1756,7 @@ export class AssetPlacementManager {
       }
 
       container._shadowState = { signature };
+      this._scheduleShadowOffsetPreviewUpdate({ force });
     } catch (_) {}
   }
 
@@ -1484,6 +1781,270 @@ export class AssetPlacementManager {
       try { container._shadowContainer.visible = false; } catch (_) {}
     }
     container._shadowState = null;
+  }
+
+  _computeShadowPreviewSignature() {
+    try {
+      const container = this._previewContainer;
+      const sprite = container?._sprite;
+      if (!container || !sprite) return null;
+      const texture = sprite.texture || null;
+      const baseTexture = texture?.baseTexture || null;
+      const assetKey = (() => {
+        if (baseTexture?.uid) return baseTexture.uid;
+        if (baseTexture?.cacheId) return baseTexture.cacheId;
+        if (texture?.cacheId) return texture.cacheId;
+        if (this.currentAsset) return this._assetKey(this.currentAsset);
+        return 'fa-nexus-preview';
+      })();
+      const width = Number(sprite.width || 0).toFixed(3);
+      const height = Number(sprite.height || 0).toFixed(3);
+      const rotation = Number(sprite.rotation || 0).toFixed(4);
+      const scaleX = Number(sprite.scale?.x || 0).toFixed(4);
+      const scaleY = Number(sprite.scale?.y || 0).toFixed(4);
+      const pendingScale = Number(this._getPendingScale() || 0).toFixed(4);
+      const pendingRotation = Number(this._getPendingRotation() || 0).toFixed(4);
+      const flips = `${this._pendingFlipHorizontal ? 1 : 0}:${this._pendingFlipVertical ? 1 : 0}`;
+      const dropShadowActive = this._isPreviewShadowActive() ? 1 : 0;
+      const dropSignature = dropShadowActive
+        ? [
+            Number(this._dropShadowAlpha || 0).toFixed(3),
+            Number(this._dropShadowDilation || 0).toFixed(3),
+            Number(this._dropShadowBlur || 0).toFixed(3),
+            Number(this._dropShadowOffsetDistance || 0).toFixed(3),
+            Number(this._dropShadowOffsetAngle || 0).toFixed(3)
+          ].join(':')
+        : 'off';
+      const elevation = formatElevation(this._previewElevation || 0);
+      return `${assetKey}:${width}:${height}:${rotation}:${scaleX}:${scaleY}:${pendingScale}:${pendingRotation}:${flips}:${dropShadowActive}:${dropSignature}:${elevation}`;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _scheduleShadowOffsetPreviewUpdate({ force = false } = {}) {
+    try {
+      if (typeof window === 'undefined') return;
+      if (!this._previewContainer || !this._previewContainer._sprite) return;
+      const signature = this._computeShadowPreviewSignature();
+      const currentSignature = this._shadowOffsetPreview?.signature || null;
+      if (!force && signature && currentSignature === signature && !this._shadowPreviewPendingSignature) return;
+      this._shadowPreviewPendingSignature = signature;
+      if (force) this._shadowPreviewForce = true;
+      const requestId = ++this._shadowPreviewSequence;
+      this._shadowPreviewRequestedId = requestId;
+      if (this._shadowPreviewRendering) return;
+      if (this._shadowPreviewFrame) {
+        window.cancelAnimationFrame(this._shadowPreviewFrame);
+      }
+      this._shadowPreviewFrame = window.requestAnimationFrame(() => {
+        this._shadowPreviewFrame = null;
+        const pendingSignature = this._shadowPreviewPendingSignature;
+        const shouldForce = this._shadowPreviewForce;
+        this._shadowPreviewPendingSignature = null;
+        this._shadowPreviewForce = false;
+        if (!pendingSignature) return;
+        this._renderShadowOffsetPreview(pendingSignature, { force: shouldForce, requestId: this._shadowPreviewRequestedId });
+      });
+    } catch (_) {}
+  }
+
+  _renderShadowOffsetPreview(signature, { force = false, requestId = null } = {}) {
+    try {
+      const container = this._previewContainer;
+      const sprite = container?._sprite;
+      const renderer = canvas?.app?.renderer;
+      if (!container || !sprite || !renderer) return;
+      const texture = sprite.texture;
+      const baseTexture = texture?.baseTexture || null;
+      if (!texture || !baseTexture) return;
+      if (!baseTexture.valid) {
+        if (!this._shadowPreviewTextureListener && typeof baseTexture.once === 'function') {
+          const handler = () => {
+            if (this._shadowPreviewTextureListener === handler) this._shadowPreviewTextureListener = null;
+            this._scheduleShadowOffsetPreviewUpdate({ force: true });
+          };
+          this._shadowPreviewTextureListener = handler;
+          baseTexture.once('loaded', handler);
+          baseTexture.once('update', handler);
+        }
+        return;
+      }
+
+      const targetSignature = signature || this._computeShadowPreviewSignature();
+      if (!force && targetSignature && this._shadowOffsetPreview?.signature === targetSignature) {
+        this._shadowPreviewRendering = false;
+        return;
+      }
+
+      this._shadowPreviewRendering = true;
+      const renderId = requestId ?? ++this._shadowPreviewSequence;
+
+      const circleSize = 160;
+      const marginPx = 8;
+      const availableSize = circleSize - marginPx * 2;
+
+      const worldWidth = Math.max(0.001, Math.abs(Number(sprite.width || 0)));
+      const worldHeight = Math.max(0.001, Math.abs(Number(sprite.height || 0)));
+      const spriteScaleX = Number(sprite.scale?.x ?? 1) || 1;
+      const spriteScaleY = Number(sprite.scale?.y ?? 1) || 1;
+      const flipX = spriteScaleX < 0 ? -1 : 1;
+      const flipY = spriteScaleY < 0 ? -1 : 1;
+      const rotation = Number(sprite.rotation || 0);
+      const alpha = Math.min(1, Math.max(0, Number(this._dropShadowAlpha || 0)));
+      const dilation = Math.max(0, Number(this._dropShadowDilation || 0));
+      const blur = Math.max(0, Number(this._dropShadowBlur || 0));
+      const offset = this._computeShadowOffsetVector();
+      const blurMargin = blur * 12;
+      const marginWorldX = Math.abs(offset.x) + dilation + blurMargin;
+      const marginWorldY = Math.abs(offset.y) + dilation + blurMargin;
+      const fitWidth = worldWidth + marginWorldX * 2;
+      const fitHeight = worldHeight + marginWorldY * 2;
+      const baseScale = availableSize / Math.max(worldWidth, worldHeight);
+      const fitScale = availableSize / Math.max(fitWidth, fitHeight);
+      const minScale = baseScale * 0.68;
+      const scale = Math.max(minScale, Math.min(baseScale, fitScale));
+
+      const renderRoot = new PIXI.Container();
+      renderRoot.sortableChildren = false;
+
+      const center = circleSize / 2;
+      const createdFilters = [];
+      const createdTextures = [];
+      const sourceTint = typeof sprite.tint === 'number' ? sprite.tint : null;
+      const buildClone = () => {
+        const clone = new PIXI.Sprite(texture);
+        clone.anchor.set(0.5, 0.5);
+        clone.width = worldWidth;
+        clone.height = worldHeight;
+        clone.rotation = rotation;
+        clone.scale.x *= flipX;
+        clone.scale.y *= flipY;
+        if (sourceTint != null) clone.tint = sourceTint;
+        return clone;
+      };
+
+      const dropShadowActive = this._isPreviewShadowActive();
+      if (dropShadowActive) {
+        const shadowDraw = new PIXI.Container();
+        shadowDraw.position.set(center, center);
+        shadowDraw.scale.set(scale);
+        const dilationSamples = this._buildPreviewDilationOffsets(dilation);
+        for (const sample of dilationSamples) {
+          const clone = buildClone();
+          clone.position.set(offset.x + sample.x, offset.y + sample.y);
+          clone.tint = 0x000000;
+          clone.alpha = 1;
+          shadowDraw.addChild(clone);
+        }
+        if (blur > 0) {
+          const filter = new PIXI.BlurFilter();
+          filter.quality = 4;
+          filter.repeatEdgePixels = true;
+          filter.blur = Math.max(0.25, blur * scale);
+          shadowDraw.filters = [filter];
+          createdFilters.push(filter);
+        }
+        const shadowTexture = PIXI.RenderTexture.create({
+          width: circleSize,
+          height: circleSize,
+          scaleMode: PIXI.SCALE_MODES.LINEAR
+        });
+        renderer.render(shadowDraw, { renderTexture: shadowTexture, clear: true });
+        const shadowSprite = new PIXI.Sprite(shadowTexture);
+        shadowSprite.anchor.set(0.5, 0.5);
+        shadowSprite.position.set(center, center);
+        shadowSprite.tint = 0x000000;
+        shadowSprite.alpha = alpha;
+        shadowSprite.blendMode = PIXI.BLEND_MODES.NORMAL;
+        renderRoot.addChild(shadowSprite);
+        createdTextures.push(shadowTexture);
+        shadowDraw.destroy({ children: true, texture: false, baseTexture: false });
+      }
+
+      const assetContainer = new PIXI.Container();
+      assetContainer.position.set(center, center);
+      assetContainer.scale.set(scale);
+
+      const assetClone = buildClone();
+      assetClone.position.set(0, 0);
+      assetClone.alpha = 1;
+      assetContainer.addChild(assetClone);
+
+      renderRoot.addChild(assetContainer);
+
+      const renderTexture = PIXI.RenderTexture.create({
+        width: circleSize,
+        height: circleSize,
+        scaleMode: PIXI.SCALE_MODES.LINEAR
+      });
+      renderer.render(renderRoot, { renderTexture, clear: true });
+      const extraction = renderer.extract?.base64?.(renderTexture);
+
+      const cleanup = () => {
+        try { renderRoot.destroy({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+        for (const filter of createdFilters) {
+          if (filter && typeof filter.destroy === 'function') {
+            try { filter.destroy(true); } catch (_) {}
+          }
+        }
+        for (const tex of createdTextures) {
+          if (tex && !tex.destroyed) {
+            try { tex.destroy(true); } catch (_) {}
+          }
+        }
+        if (renderTexture && !renderTexture.destroyed) {
+          try { renderTexture.destroy(true); } catch (_) {}
+        }
+      };
+
+      const finalize = (dataUrl, ok = true) => {
+        cleanup();
+        const latestRequested = this._shadowPreviewRequestedId;
+        const hasPending = this._shadowPreviewPendingSignature != null;
+        if (ok && renderId === latestRequested && !hasPending && typeof dataUrl === 'string' && dataUrl.length) {
+          const previewData = {
+            src: dataUrl,
+            width: circleSize,
+            height: circleSize,
+            signature: targetSignature || null,
+            updatedAt: typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now(),
+            alt: 'Asset drop shadow preview'
+          };
+          this._shadowOffsetPreview = previewData;
+          try { toolOptionsController.updateDropShadowPreview('asset.placement', previewData); } catch (_) {}
+        }
+        this._shadowPreviewRendering = false;
+        if (this._shadowPreviewPendingSignature) {
+          this._scheduleShadowOffsetPreviewUpdate({ force: this._shadowPreviewForce });
+        }
+      };
+
+      if (extraction && typeof extraction.then === 'function') {
+        extraction.then((dataUrl) => finalize(dataUrl, true)).catch(() => finalize(null, false));
+      } else {
+        finalize(extraction, true);
+      }
+    } catch (_) {
+      this._shadowPreviewRendering = false;
+    }
+  }
+
+  _clearShadowOffsetPreview({ notify = true } = {}) {
+    try {
+      if (this._shadowPreviewFrame) {
+        window.cancelAnimationFrame(this._shadowPreviewFrame);
+        this._shadowPreviewFrame = null;
+      }
+    } catch (_) {
+      this._shadowPreviewFrame = null;
+    }
+    this._shadowPreviewPendingSignature = null;
+    this._shadowPreviewRendering = false;
+    if (notify) {
+      try { toolOptionsController.updateDropShadowPreview('asset.placement', null); } catch (_) {}
+    }
+    this._shadowOffsetPreview = null;
   }
 
   _createPreviewElement() {
@@ -1566,10 +2127,12 @@ export class AssetPlacementManager {
     this._applyPendingFlipToPreview({ forceShadow: true });
     this._updatePreviewShadow({ force: true });
 
-    // Position at current pointer
+    // Position at current pointer or frozen world
     try {
       let world = null;
-      if (this._lastPointerWorld && Number.isFinite(this._lastPointerWorld.x) && Number.isFinite(this._lastPointerWorld.y)) {
+      if (this._previewFrozen && this._frozenPreviewWorld && Number.isFinite(this._frozenPreviewWorld.x) && Number.isFinite(this._frozenPreviewWorld.y)) {
+        world = { x: this._frozenPreviewWorld.x, y: this._frozenPreviewWorld.y };
+      } else if (this._lastPointerWorld && Number.isFinite(this._lastPointerWorld.x) && Number.isFinite(this._lastPointerWorld.y)) {
         world = { x: this._lastPointerWorld.x, y: this._lastPointerWorld.y };
       } else if (this._lastPointer && Number.isFinite(this._lastPointer.x) && Number.isFinite(this._lastPointer.y)) {
         world = this._screenToCanvas(this._lastPointer.x, this._lastPointer.y);
@@ -1581,8 +2144,19 @@ export class AssetPlacementManager {
       if (world) {
         container.x = world.x;
         container.y = world.y;
+        if (this._previewFrozen) {
+          this._frozenPreviewWorld = { x: world.x, y: world.y };
+          this._refreshFrozenPointerScreen();
+        }
       }
     } catch (_) {}
+
+    if (this._pendingEditState?.doc) {
+      this._applyTileStateToPlacement(this._pendingEditState.doc, { force: true });
+    } else if ((this._isEditingExistingTile || this._replaceOriginalOnPlace) && this._editingTile) {
+      this._applyTileStateToPlacement(this._editingTile, { force: true });
+    }
+    this._scheduleShadowOffsetPreviewUpdate({ force: true });
   }
 
   _ensurePointerSnapshot(options = {}) {
@@ -1724,6 +2298,308 @@ export class AssetPlacementManager {
     }
   }
 
+  _buildAssetDataFromTile(tileDocument) {
+    try {
+      const doc = tileDocument?.document ?? tileDocument;
+      if (!doc) return null;
+      const texture = doc.texture || {};
+      const src = String(texture.src || '').trim();
+      if (!src) return null;
+      const gridSize = Number(canvas?.scene?.grid?.size || 100) || 100;
+      const width = Math.max(1, Number(doc.width || 0) || gridSize);
+      const height = Math.max(1, Number(doc.height || 0) || gridSize);
+      const gridWidth = Math.max(0.01, width / gridSize);
+      const gridHeight = Math.max(0.01, height / gridSize);
+      const isRemote = /^https?:/i.test(src);
+      const filename = src.split('/').pop() || '';
+      return {
+        source: isRemote ? 'cloud' : 'local',
+        tier: isRemote ? 'premium' : 'local',
+        file_path: src,
+        folder_path: '',
+        cachedLocalPath: src,
+        path: src,
+        url: src,
+        filename,
+        grid_width: gridWidth,
+        grid_height: gridHeight,
+        width,
+        height,
+        actual_width: width,
+        actual_height: height
+      };
+    } catch (error) {
+      Logger.warn('Placement.assetDataFromTile.failed', String(error?.message || error));
+      return null;
+    }
+  }
+
+  _captureTileVisibility(tileObject) {
+    try {
+      if (!tileObject) return null;
+      const snapshot = {
+        visible: tileObject.visible,
+        renderable: typeof tileObject.renderable === 'boolean' ? tileObject.renderable : undefined,
+        alpha: Number.isFinite(tileObject.alpha) ? tileObject.alpha : undefined,
+        mesh: null,
+        sprite: null,
+        root: null
+      };
+      const mesh = tileObject.mesh;
+      if (mesh) {
+        snapshot.mesh = {
+          visible: mesh.visible,
+          renderable: typeof mesh.renderable === 'boolean' ? mesh.renderable : undefined,
+          alpha: Number.isFinite(mesh.alpha) ? mesh.alpha : undefined
+        };
+      }
+      const sprite = tileObject.sprite;
+      if (sprite) {
+        snapshot.sprite = {
+          visible: sprite.visible,
+          renderable: typeof sprite.renderable === 'boolean' ? sprite.renderable : undefined,
+          alpha: Number.isFinite(sprite.alpha) ? sprite.alpha : undefined
+        };
+      }
+      const root = tileObject.root;
+      if (root) {
+        snapshot.root = {
+          visible: root.visible,
+          renderable: typeof root.renderable === 'boolean' ? root.renderable : undefined,
+          alpha: Number.isFinite(root.alpha) ? root.alpha : undefined
+        };
+      }
+      return snapshot;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _applyTileVisibilitySnapshot(tileObject, snapshot) {
+    if (!tileObject || !snapshot) return;
+    if (tileObject.destroyed) return;
+    try {
+      if (snapshot.visible !== undefined) tileObject.visible = snapshot.visible;
+      if (snapshot.renderable !== undefined && typeof tileObject.renderable === 'boolean') {
+        tileObject.renderable = snapshot.renderable;
+      }
+      if (snapshot.alpha !== undefined && Number.isFinite(snapshot.alpha)) tileObject.alpha = snapshot.alpha;
+      const mesh = tileObject.mesh;
+      const meshSnap = snapshot.mesh;
+      if (mesh && !mesh.destroyed && meshSnap) {
+        if (meshSnap.visible !== undefined) mesh.visible = meshSnap.visible;
+        if (meshSnap.renderable !== undefined && typeof mesh.renderable === 'boolean') {
+          mesh.renderable = meshSnap.renderable;
+        }
+        if (meshSnap.alpha !== undefined && Number.isFinite(meshSnap.alpha)) mesh.alpha = meshSnap.alpha;
+      }
+      const sprite = tileObject.sprite;
+      const spriteSnap = snapshot.sprite;
+      if (sprite && !sprite.destroyed && spriteSnap) {
+        if (spriteSnap.visible !== undefined) sprite.visible = spriteSnap.visible;
+        if (spriteSnap.renderable !== undefined && typeof sprite.renderable === 'boolean') {
+          sprite.renderable = spriteSnap.renderable;
+        }
+        if (spriteSnap.alpha !== undefined && Number.isFinite(spriteSnap.alpha)) sprite.alpha = spriteSnap.alpha;
+      }
+      const root = tileObject.root;
+      const rootSnap = snapshot.root;
+      if (root && !root.destroyed && rootSnap) {
+        if (rootSnap.visible !== undefined) root.visible = rootSnap.visible;
+        if (rootSnap.renderable !== undefined && typeof root.renderable === 'boolean') {
+          root.renderable = rootSnap.renderable;
+        }
+        if (rootSnap.alpha !== undefined && Number.isFinite(rootSnap.alpha)) root.alpha = rootSnap.alpha;
+      }
+    } catch (_) {}
+  }
+
+  _hideTileForEditing(tileObject) {
+    if (!tileObject || tileObject.destroyed) return;
+    try {
+      tileObject.visible = false;
+      if (typeof tileObject.renderable === 'boolean') tileObject.renderable = false;
+      if (Number.isFinite(tileObject.alpha)) tileObject.alpha = 0;
+      const mesh = tileObject.mesh;
+      if (mesh && !mesh.destroyed) {
+        mesh.visible = false;
+        if (typeof mesh.renderable === 'boolean') mesh.renderable = false;
+        if (Number.isFinite(mesh.alpha)) mesh.alpha = 0;
+      }
+      const sprite = tileObject.sprite;
+      if (sprite && !sprite.destroyed) {
+        sprite.visible = false;
+        if (typeof sprite.renderable === 'boolean') sprite.renderable = false;
+        if (Number.isFinite(sprite.alpha)) sprite.alpha = 0;
+      }
+      const root = tileObject.root;
+      if (root && !root.destroyed) {
+        root.visible = false;
+        if (typeof root.renderable === 'boolean') root.renderable = false;
+        if (Number.isFinite(root.alpha)) root.alpha = 0;
+      }
+    } catch (_) {}
+  }
+
+  _releaseTileSelection(tileObject) {
+    try {
+      if (tileObject?.controlled && typeof tileObject.release === 'function') {
+        tileObject.release();
+      }
+      const layer = canvas?.tiles;
+      const controlled = Array.isArray(layer?.controlled) ? layer.controlled : null;
+      if (layer && Array.isArray(controlled) && controlled.length) {
+        try { layer.releaseAll?.(); }
+        catch (_) {
+          for (const placeable of controlled) {
+            try { placeable.release?.(); }
+            catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  _restoreEditingTileVisibility() {
+    try {
+      const tileObject = this._editingTileObject;
+      const snapshot = this._editingTileVisibilitySnapshot;
+      if (!tileObject || !snapshot) {
+        this._editingTileVisibilitySnapshot = null;
+        return;
+      }
+      this._applyTileVisibilitySnapshot(tileObject, snapshot);
+    } catch (_) {
+      // ignore restore failures
+    } finally {
+      this._editingTileVisibilitySnapshot = null;
+    }
+  }
+
+  _suspendEditingTileShadow(doc) {
+    try {
+      const manager = getAssetShadowManager(this.app);
+      if (!manager || typeof manager.suspendTile !== 'function') return false;
+      return !!manager.suspendTile(doc);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  _resumeEditingTileShadow() {
+    if (!this._editingTileShadowSuspended) return;
+    try {
+      const manager = getAssetShadowManager(this.app);
+      if (manager && typeof manager.resumeTile === 'function' && this._editingTile) {
+        manager.resumeTile(this._editingTile);
+      }
+    } catch (_) {
+      // ignore resume failures
+    } finally {
+      this._editingTileShadowSuspended = false;
+    }
+  }
+
+  _applyTileStateToPlacement(tileDocument, { force = false } = {}) {
+    try {
+      if (!tileDocument) return;
+      const doc = tileDocument.document ?? tileDocument;
+      if (!doc) return;
+      this._editingTile = doc;
+      const shadowEnabled = !!doc.getFlag('fa-nexus', 'shadow');
+      this._dropShadowPreference = shadowEnabled ? true : false;
+
+      const readFlag = (key, fallback) => {
+        try {
+          const value = doc.getFlag('fa-nexus', key);
+          if (value === undefined || value === null) return fallback;
+          const numeric = Number(value);
+          return Number.isFinite(numeric) ? numeric : fallback;
+        } catch (_) {
+          return fallback;
+        }
+      };
+
+      const alpha = readFlag('shadowAlpha', this._dropShadowAlpha);
+      this._dropShadowAlpha = Math.min(1, Math.max(0, Number.isFinite(alpha) ? alpha : this._dropShadowAlpha));
+
+      const blur = readFlag('shadowBlur', this._dropShadowBlur);
+      this._dropShadowBlur = Math.max(0, Number.isFinite(blur) ? blur : this._dropShadowBlur);
+
+      const dilation = readFlag('shadowDilation', this._dropShadowDilation);
+      this._dropShadowDilation = Math.min(MAX_SHADOW_DILATION, Math.max(0, Number.isFinite(dilation) ? dilation : this._dropShadowDilation));
+
+      let offsetDistance = readFlag('shadowOffsetDistance', this._dropShadowOffsetDistance);
+      offsetDistance = Math.min(MAX_SHADOW_OFFSET, Math.max(0, Number.isFinite(offsetDistance) ? offsetDistance : this._dropShadowOffsetDistance));
+      let offsetAngle = readFlag('shadowOffsetAngle', this._dropShadowOffsetAngle);
+      offsetAngle = this._normalizeShadowAngle(Number.isFinite(offsetAngle) ? offsetAngle : this._dropShadowOffsetAngle);
+      let offsetX = readFlag('shadowOffsetX', null);
+      let offsetY = readFlag('shadowOffsetY', null);
+      if (Number.isFinite(offsetX) && Number.isFinite(offsetY)) {
+        offsetDistance = Math.min(MAX_SHADOW_OFFSET, Math.hypot(offsetX, offsetY));
+        offsetAngle = this._normalizeShadowAngle(Math.atan2(offsetY, offsetX) * (180 / Math.PI));
+      } else {
+        const vecFallback = this._computeShadowOffsetVector(offsetDistance, offsetAngle);
+        offsetX = vecFallback.x;
+        offsetY = vecFallback.y;
+      }
+      this._dropShadowOffsetDistance = offsetDistance;
+      this._dropShadowOffsetAngle = offsetAngle;
+
+      const canApply = this._isEditingExistingTile || force;
+      if (!canApply) {
+        this._pendingEditState = { doc };
+        this._refreshShadowElevationContext({ adopt: false, sync: true });
+        this._notifyDropShadowChanged();
+        return;
+      }
+      if (!this._previewContainer) {
+        this._pendingEditState = { doc };
+        this._refreshShadowElevationContext({ adopt: false, sync: true });
+        this._notifyDropShadowChanged();
+        return;
+      }
+
+      this._pendingEditState = null;
+
+      const center = {
+        x: Number(doc.x || 0) + Number(doc.width || 0) / 2,
+        y: Number(doc.y || 0) + Number(doc.height || 0) / 2
+      };
+      this._lastPointerWorld = { ...center };
+      this._previewContainer.x = center.x;
+      this._previewContainer.y = center.y;
+
+      this._previewElevation = Number(doc.elevation ?? 0) || 0;
+      this._lastElevationUsed = this._previewElevation;
+      this._previewSort = Number(doc.sort ?? 0) || 0;
+      this._syncPreviewOrdering();
+
+      this.currentRotation = this._normalizeRotation(doc.rotation || 0);
+      this._pendingRotation = this.currentRotation;
+      this._updateRotationPreview({ clampOffset: true });
+
+      this.currentScale = 1;
+      this._pendingScale = this.currentScale;
+      this._updateScalePreview({ clampOffset: true });
+
+      const texScaleX = Number(doc?.texture?.scaleX ?? 1);
+      const texScaleY = Number(doc?.texture?.scaleY ?? 1);
+      this._flipHorizontal = texScaleX < 0;
+      this._flipVertical = texScaleY < 0;
+      this._pendingFlipHorizontal = this._flipHorizontal;
+      this._pendingFlipVertical = this._flipVertical;
+      this._applyPendingFlipToPreview({ forceShadow: true });
+
+      this._updatePreviewShadow({ force: true });
+
+      this._refreshShadowElevationContext({ adopt: false, sync: true });
+      this._notifyDropShadowChanged();
+    } catch (error) {
+      Logger.warn('Placement.applyTileState.failed', String(error?.message || error));
+    }
+  }
+
   _computeWorldSizeForAsset(asset, scaleMul = this._getPendingScale()) {
     try {
       const assetPx = this._getAssetBasePxPerSquare();
@@ -1742,7 +2618,12 @@ export class AssetPlacementManager {
 
   _showLoadingOverlay(dimensions = { worldWidth: 200, worldHeight: 200 }) {
     try {
-      const pointer = this._lastPointer ? { x: this._lastPointer.x, y: this._lastPointer.y } : null;
+      const pointer = (() => {
+        if (this._previewFrozen && this._frozenPointerScreen) {
+          return { x: this._frozenPointerScreen.x, y: this._frozenPointerScreen.y };
+        }
+        return this._lastPointer ? { x: this._lastPointer.x, y: this._lastPointer.y } : null;
+      })();
       const worldWidth = Math.max(0.01, Number(dimensions.worldWidth || 200));
       const worldHeight = Math.max(0.01, Number(dimensions.worldHeight || 200));
       this._hideLoadingOverlay();
@@ -1883,28 +2764,45 @@ export class AssetPlacementManager {
   }
 
   _removePreviewElement() {
-     try {
-       if (this._previewContainer) {
-         this._cleanupPreviewShadowResources(this._previewContainer);
-         this._previewContainer.parent?.removeChild(this._previewContainer);
-         this._previewContainer.destroy({ children: true });
-       }
-     } catch (_) {}
-     this._previewContainer = null;
-     this.previewElement = null;
+    try {
+      if (this._previewContainer) {
+        this._cleanupPreviewShadowResources(this._previewContainer);
+        this._previewContainer.parent?.removeChild(this._previewContainer);
+        this._previewContainer.destroy({ children: true });
+      }
+    } catch (_) {}
+    this._previewContainer = null;
+    this.previewElement = null;
     this._shadowPreviewTextureListener = null;
-   }
+    this._clearShadowOffsetPreview();
+  }
 
   _startInteractionSession() {
     this._stopInteractionSession();
 
     const pointerMoveHandler = (event, { pointer }) => {
       if (!this.isPlacementActive) return;
+      if (this._isEditingExistingTile) return;
       if (pointer?.screen) {
         this._lastPointer = { x: pointer.screen.x, y: pointer.screen.y };
-        if (this._loadingOverlay?.overlay) {
-          this._updateLoadingOverlayPointer(pointer.screen.x, pointer.screen.y);
+      }
+      const overlayPointer = (() => {
+        if (this._previewFrozen) {
+          if (this._frozenPointerScreen) return this._frozenPointerScreen;
+          const frozenWorld = this._frozenPreviewWorld;
+          if (frozenWorld) {
+            const screen = this._canvasToScreen(frozenWorld.x, frozenWorld.y);
+            if (screen) {
+              this._frozenPointerScreen = screen;
+              return screen;
+            }
+          }
+          return null;
         }
+        return pointer?.screen || null;
+      })();
+      if (this._loadingOverlay?.overlay && overlayPointer) {
+        this._updateLoadingOverlayPointer(overlayPointer.x, overlayPointer.y);
       }
 
       let worldCoords = pointer?.world || null;
@@ -1918,7 +2816,7 @@ export class AssetPlacementManager {
       if (displayCoords && this.currentAsset) {
         displayCoords = this._applyGridSnapping(displayCoords);
       }
-      if (this._previewContainer && displayCoords) {
+      if (this._previewContainer && displayCoords && !this._previewFrozen) {
         this._previewContainer.x = displayCoords.x;
         this._previewContainer.y = displayCoords.y;
       }
@@ -1934,28 +2832,18 @@ export class AssetPlacementManager {
 
     const wheelHandler = (event, { pointer }) => {
       if (!this.isPlacementActive) return;
+      if (this._isEditingExistingTile) return;
       const screen = pointer?.screen;
       if (!pointer?.overCanvas || !pointer.zOk || !screen) return;
 
-      if (event.ctrlKey || event.metaKey) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation?.();
-        const step = Number(this._rotationStep || 15) || 15;
-        const dir = event.deltaY > 0 ? 1 : -1;
-        this.currentRotation = ((this.currentRotation + dir * step) % 360 + 360) % 360;
-        this._updateRotationPreview({ clampOffset: true });
-        this._syncToolOptionsState();
-        return;
-      }
-
-      if (event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (event.altKey) {
         try {
           event.preventDefault();
           event.stopPropagation();
           event.stopImmediatePropagation?.();
           const dir = event.deltaY < 0 ? 1 : -1;
-          const baseStep = 0.1;
+          const fineModifier = event.ctrlKey || event.metaKey;
+          const baseStep = fineModifier ? 0.01 : 0.1;
           const step = event.shiftKey ? baseStep * 5 : baseStep;
           const minElev = -1000;
           const maxElev = 1000;
@@ -1965,11 +2853,25 @@ export class AssetPlacementManager {
           const next = quantizeElevation(clamped);
           if (next !== this._previewElevation) {
             this._previewElevation = next;
+            this._lastElevationUsed = this._previewElevation;
             this._syncPreviewOrdering();
             this._refreshShadowElevationContext({ adopt: true });
             this._announcePreviewElevation(pointer?.world || null);
           }
         } catch (_) { /* no-op */ }
+        return;
+      }
+
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        const baseStep = Number(this._rotationStep || 15) || 15;
+        const step = event.shiftKey ? 1 : baseStep;
+        const dir = event.deltaY > 0 ? 1 : -1;
+        this.currentRotation = ((this.currentRotation + dir * step) % 360 + 360) % 360;
+        this._updateRotationPreview({ clampOffset: true });
+        this._syncToolOptionsState();
         return;
       }
 
@@ -2027,6 +2929,14 @@ export class AssetPlacementManager {
     const pointerDownHandler = async (event, { pointer }) => {
       if (!this.isPlacementActive) return;
       if (event.button !== 0) return;
+      if (this._isEditingExistingTile) {
+        try {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation?.();
+        } catch (_) {}
+        return false;
+      }
       const screen = pointer?.screen;
       if (!pointer?.overCanvas || !pointer.zOk || !screen) return;
       if (screen) {
@@ -2040,7 +2950,10 @@ export class AssetPlacementManager {
       }
       this._suppressDragSelect = true;
       if (this.isDownloading) {
-        this.queuedPlacement = { x: screen.x, y: screen.y };
+        const queued = (this._previewFrozen && this._frozenPointerScreen)
+          ? { x: this._frozenPointerScreen.x, y: this._frozenPointerScreen.y }
+          : { x: screen.x, y: screen.y };
+        this.queuedPlacement = queued;
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
@@ -2066,7 +2979,16 @@ export class AssetPlacementManager {
         event.stopPropagation();
         event.stopImmediatePropagation?.();
         this.cancelPlacement('esc');
+        return;
       }
+      if (this._isEditingExistingTile) return;
+      const isSpace = event.code === 'Space' || event.key === ' ';
+      if (!isSpace || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (this._shouldIgnoreFreezeShortcut(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      this._togglePlacementFreeze();
     };
 
     this._gestureSession = createCanvasGestureSession({
@@ -2101,6 +3023,19 @@ export class AssetPlacementManager {
 
   async _handleCanvasPlacement(event, pointerContext = null) {
     try {
+      if (this._isEditingExistingTile) {
+        return;
+      }
+      if (this._previewFrozen && this._frozenPreviewWorld) {
+        const frozenWorld = { x: this._frozenPreviewWorld.x, y: this._frozenPreviewWorld.y };
+        const screen = this._frozenPointerScreen ? { ...this._frozenPointerScreen } : null;
+        await this._placeAtWorldCoordinates(frozenWorld, {
+          screenX: screen?.x ?? null,
+          screenY: screen?.y ?? null,
+          reason: 'frozen'
+        });
+        return;
+      }
       const screen = pointerContext?.screen;
       const screenX = Number(screen?.x ?? event?.clientX);
       const screenY = Number(screen?.y ?? event?.clientY);
@@ -2116,31 +3051,61 @@ export class AssetPlacementManager {
     try {
       const world = this._screenToCanvas(screenX, screenY);
       if (!world) return;
+      await this._placeAtWorldCoordinates(world, { screenX, screenY, reason: 'screen' });
+    } catch (e) {
+      console.error('fa-nexus | place asset failed', e);
+      ui.notifications?.error?.(`Failed to place asset: ${e?.message || e}`);
+    }
+  }
+
+  async _placeAtWorldCoordinates(world, { screenX = null, screenY = null } = {}) {
+    try {
+      if (!world || !Number.isFinite(world.x) || !Number.isFinite(world.y)) return;
+      const worldPoint = { x: Number(world.x), y: Number(world.y) };
       if (Number.isFinite(screenX) && Number.isFinite(screenY)) {
         this._lastPointer = { x: Number(screenX), y: Number(screenY) };
+      } else {
+        const estimated = this._canvasToScreen(worldPoint.x, worldPoint.y);
+        if (estimated && Number.isFinite(estimated.x) && Number.isFinite(estimated.y)) {
+          this._lastPointer = { x: estimated.x, y: estimated.y };
+        }
       }
-      if (Number.isFinite(world.x) && Number.isFinite(world.y)) {
-        this._lastPointerWorld = { x: Number(world.x), y: Number(world.y) };
-      }
-      const snappedWorld = this._applyGridSnapping(world);
+      this._lastPointerWorld = { x: worldPoint.x, y: worldPoint.y };
+      const snappedWorld = this._applyGridSnapping(worldPoint);
       this._announcePreviewElevation(snappedWorld, { immediate: true });
+      if (this._previewFrozen) {
+        this._frozenPreviewWorld = { x: snappedWorld.x, y: snappedWorld.y };
+        this._refreshFrozenPointerScreen();
+      }
       if (!this.currentAsset) return;
+      const editingDoc = ((this._isEditingExistingTile || this._replaceOriginalOnPlace) && this._editingTile) ? this._editingTile : null;
       // Re-evaluate sort order before every placement so consecutive drops
       // during the same session continue stacking correctly.
-      try {
-        const controller = this._interactionController;
-        const computed = controller?.computeNextSortAtElevation?.(this._previewElevation);
-        if (Number.isFinite(computed)) {
-          this._previewSort = computed;
-          if (this._previewContainer) {
-            this._previewContainer.sort = computed;
-            this._previewContainer.faNexusSort = computed;
-            const parent = this._previewContainer.parent;
-            if (parent && 'sortDirty' in parent) parent.sortDirty = true;
-            parent?.sortChildren?.();
-          }
+      if (editingDoc) {
+        this._previewSort = Number(editingDoc.sort ?? 0) || 0;
+        if (this._previewContainer) {
+          this._previewContainer.sort = this._previewSort;
+          this._previewContainer.faNexusSort = this._previewSort;
+          const parent = this._previewContainer.parent;
+          if (parent && 'sortDirty' in parent) parent.sortDirty = true;
+          parent?.sortChildren?.();
         }
-      } catch (_) { /* no-op */ }
+      } else {
+        try {
+          const controller = this._interactionController;
+          const computed = controller?.computeNextSortAtElevation?.(this._previewElevation);
+          if (Number.isFinite(computed)) {
+            this._previewSort = computed;
+            if (this._previewContainer) {
+              this._previewContainer.sort = computed;
+              this._previewContainer.faNexusSort = computed;
+              const parent = this._previewContainer.parent;
+              if (parent && 'sortDirty' in parent) parent.sortDirty = true;
+              parent?.sortChildren?.();
+            }
+          }
+        } catch (_) { /* no-op */ }
+      }
       // If in random lazy mode and the current asset is cloud without local cache, ensure now
       if (this.isRandomMode && this.currentAsset && String(this.currentAsset.source || '').toLowerCase() === 'cloud' && !this.currentAsset.cachedLocalPath) {
         try {
@@ -2204,14 +3169,79 @@ export class AssetPlacementManager {
         tileData.flags['fa-nexus'] = moduleFlags;
       }
       if (!canvas || !canvas.scene) throw new Error('Canvas unavailable');
+
+      const replaceDoc = (this._replaceOriginalOnPlace && this._editingTile) ? this._editingTile : null;
+
+      if (editingDoc && !replaceDoc) {
+        const update = {
+          _id: editingDoc.id,
+          x,
+          y,
+          width: placedWidth,
+          height: placedHeight,
+          rotation: placementRotation,
+          elevation: this._previewElevation,
+          sort: this._previewSort,
+          'texture.scaleX': textureConfig.scaleX,
+          'texture.scaleY': textureConfig.scaleY
+        };
+        if (textureConfig.src && textureConfig.src !== editingDoc.texture?.src) {
+          update['texture.src'] = textureConfig.src;
+        }
+        if (dropShadowEnabled) {
+          update['flags.fa-nexus.shadow'] = true;
+          update['flags.fa-nexus.shadowAlpha'] = this._roundShadowValue(this._dropShadowAlpha, 3);
+          update['flags.fa-nexus.shadowDilation'] = this._roundShadowValue(this._dropShadowDilation, 3);
+          update['flags.fa-nexus.shadowBlur'] = this._roundShadowValue(this._dropShadowBlur, 3);
+          update['flags.fa-nexus.shadowOffsetDistance'] = this._roundShadowValue(this._dropShadowOffsetDistance, 2);
+          update['flags.fa-nexus.shadowOffsetAngle'] = this._roundShadowValue(this._normalizeShadowAngle(this._dropShadowOffsetAngle), 1);
+          const offsetVec = this._computeShadowOffsetVector();
+          update['flags.fa-nexus.shadowOffsetX'] = this._roundShadowValue(offsetVec.x, 2);
+          update['flags.fa-nexus.shadowOffsetY'] = this._roundShadowValue(offsetVec.y, 2);
+        } else {
+          update['flags.fa-nexus.shadow'] = false;
+          update['flags.fa-nexus.shadowAlpha'] = null;
+          update['flags.fa-nexus.shadowDilation'] = null;
+          update['flags.fa-nexus.shadowBlur'] = null;
+          update['flags.fa-nexus.shadowOffsetDistance'] = null;
+          update['flags.fa-nexus.shadowOffsetAngle'] = null;
+          update['flags.fa-nexus.shadowOffsetX'] = null;
+          update['flags.fa-nexus.shadowOffsetY'] = null;
+        }
+        const updated = await canvas.scene.updateEmbeddedDocuments('Tile', [update], { diff: false });
+        if (Array.isArray(updated) && updated[0]) {
+          this._editingTile = updated[0];
+        }
+        this._setPlacementFreeze(false, { announce: false });
+        this.cancelPlacement('completed');
+        return;
+      }
+
       const created = await canvas.scene.createEmbeddedDocuments('Tile', [tileData]);
+      const createdDocs = Array.isArray(created) ? created : [created];
+      const primaryCreated = createdDocs[0] || null;
       try { Logger.info('Placement.placed', { path: this.currentAsset?.path, w: placedWidth, h: placedHeight, x, y, rot: placementRotation }); } catch (_) {}
+
+      if (replaceDoc) {
+        try {
+          await canvas.scene.deleteEmbeddedDocuments('Tile', [replaceDoc.id]);
+        } catch (error) {
+          Logger.warn('Placement.replaceTile.delete.failed', String(error?.message || error));
+          ui.notifications?.warn?.(`Failed to remove original tile: ${error?.message || error}`);
+          this._restoreEditingTileVisibility();
+          this._resumeEditingTileShadow();
+        }
+        this._editingTileObject = null;
+        this._editingTileVisibilitySnapshot = null;
+        this._editingTile = primaryCreated ?? null;
+        this._replaceOriginalOnPlace = false;
+        this._editingTileShadowSuspended = false;
+      }
 
       if (dropShadowEnabled) {
         try {
           const manager = getAssetShadowManager(this.app);
-          const docs = Array.isArray(created) ? created : [created];
-          for (const doc of docs) {
+          for (const doc of createdDocs) {
             manager?.registerTile?.(doc);
           }
           this._refreshShadowElevationContext({ adopt: false });
@@ -2227,6 +3257,7 @@ export class AssetPlacementManager {
         this._prepareNextPlacementScale();
         this._prepareNextPlacementFlip();
       }
+      this._setPlacementFreeze(false, { announce: false });
       
       // Continue random mode by switching preview to next asset
       if (this.isStickyMode && this.isRandomMode) {
@@ -2246,6 +3277,22 @@ export class AssetPlacementManager {
     try {
       const world = this._interactionController.worldFromScreen?.(screenX, screenY);
       return world ? { x: world.x, y: world.y } : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _canvasToScreen(worldX, worldY) {
+    try {
+      if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return null;
+      const stage = canvas?.stage;
+      const canvasEl = this._interactionController?.getCanvasElement?.() || document.querySelector('canvas#board');
+      if (!stage || !canvasEl || !stage.worldTransform) return null;
+      if (typeof PIXI === 'undefined' || typeof PIXI.Point !== 'function') return null;
+      const point = stage.worldTransform.apply(new PIXI.Point(worldX, worldY));
+      if (!point) return null;
+      const rect = canvasEl.getBoundingClientRect();
+      return { x: rect.left + point.x, y: rect.top + point.y };
     } catch (_) {
       return null;
     }
@@ -2389,6 +3436,94 @@ export class AssetPlacementManager {
     return Math.round(numeric * factor) / factor;
   }
 
+  _scheduleEditingCommit(immediate = false) {
+    if (!this._isEditingExistingTile) return;
+    if (this._editingCommitTimer) {
+      try { clearTimeout(this._editingCommitTimer); }
+      catch (_) {}
+      this._editingCommitTimer = null;
+    }
+    if (immediate) {
+      this._commitEditingShadowChanges();
+      return;
+    }
+    this._editingCommitTimer = setTimeout(() => {
+      this._editingCommitTimer = null;
+      this._commitEditingShadowChanges();
+    }, 150);
+  }
+
+  _commitEditingShadowChanges() {
+    if (!this._isEditingExistingTile || !this._editingTile || !canvas?.scene) return;
+    if (this._editingCommitTimer) {
+      try { clearTimeout(this._editingCommitTimer); }
+      catch (_) {}
+      this._editingCommitTimer = null;
+    }
+    const doc = this._editingTile;
+    const enabled = this.isDropShadowEnabled();
+    const offsetVec = this._computeShadowOffsetVector();
+    let placedWidth = null;
+    let placedHeight = null;
+    try {
+      const dims = this._computeWorldSizeForAsset(this.currentAsset, this._getPendingScale());
+      if (dims && Number.isFinite(dims.worldWidth) && Number.isFinite(dims.worldHeight)) {
+        placedWidth = Math.max(1, Math.round(dims.worldWidth));
+        placedHeight = Math.max(1, Math.round(dims.worldHeight));
+      }
+    } catch (_) {}
+    const rotation = this._getPendingRotation();
+    const flipState = this._getPendingFlipState();
+
+    const payload = {
+      _id: doc.id,
+      'flags.fa-nexus.shadow': !!enabled,
+      'flags.fa-nexus.shadowAlpha': this._roundShadowValue(this._dropShadowAlpha, 3),
+      'flags.fa-nexus.shadowBlur': this._roundShadowValue(this._dropShadowBlur, 3),
+      'flags.fa-nexus.shadowDilation': this._roundShadowValue(this._dropShadowDilation, 3),
+      'flags.fa-nexus.shadowOffsetDistance': this._roundShadowValue(this._dropShadowOffsetDistance, 2),
+      'flags.fa-nexus.shadowOffsetAngle': this._roundShadowValue(this._normalizeShadowAngle(this._dropShadowOffsetAngle), 1),
+      'flags.fa-nexus.shadowOffsetX': this._roundShadowValue(offsetVec.x, 2),
+      'flags.fa-nexus.shadowOffsetY': this._roundShadowValue(offsetVec.y, 2)
+    };
+
+    if (placedWidth !== null) payload.width = placedWidth;
+    if (placedHeight !== null) payload.height = placedHeight;
+    if (Number.isFinite(rotation)) payload.rotation = rotation;
+    payload['texture.scaleX'] = flipState.horizontal ? -1 : 1;
+    payload['texture.scaleY'] = flipState.vertical ? -1 : 1;
+
+    const applyUpdates = canvas.scene.updateEmbeddedDocuments('Tile', [payload], { diff: false })
+      .then((updated) => {
+        const nextDoc = (Array.isArray(updated) && updated[0]) ? updated[0] : doc;
+        if (this._isEditingExistingTile && nextDoc) this._editingTile = nextDoc;
+        if (this.currentAsset && nextDoc) {
+          try {
+            this.currentAsset.width = nextDoc.width;
+            this.currentAsset.height = nextDoc.height;
+            const sceneGridSize = Number(canvas?.scene?.grid?.size || 100) || 100;
+            const gw = Number(nextDoc.width || 0) / sceneGridSize;
+            const gh = Number(nextDoc.height || 0) / sceneGridSize;
+            if (Number.isFinite(gw) && gw > 0) this.currentAsset.grid_width = gw;
+            if (Number.isFinite(gh) && gh > 0) this.currentAsset.grid_height = gh;
+            this.currentAsset.actual_width = nextDoc.width;
+            this.currentAsset.actual_height = nextDoc.height;
+          } catch (_) {}
+        }
+        try {
+          const manager = getAssetShadowManager(this.app);
+          const elevation = Number((nextDoc && nextDoc.elevation) ?? doc.elevation ?? 0) || 0;
+          manager?._scheduleRebuild?.(elevation, true);
+        } catch (_) {}
+        this._refreshShadowElevationContext({ adopt: false, sync: true });
+      })
+      .catch((error) => {
+        try { Logger.warn('Placement.editTile.update.failed', String(error?.message || error)); }
+        catch (_) {}
+      });
+    if (applyUpdates?.catch) applyUpdates.catch(() => {});
+  }
+
   _computeShadowOffsetVector(distance = this._dropShadowOffsetDistance, angle = this._dropShadowOffsetAngle) {
     const dist = Math.min(MAX_SHADOW_OFFSET, Math.max(0, Number(distance) || 0));
     const theta = this._normalizeShadowAngle(angle) * (Math.PI / 180);
@@ -2458,7 +3593,7 @@ export class AssetPlacementManager {
       this._lastElevationAnnounce = Date.now();
       const worldPoint = this._pendingElevationAnnouncePoint ?? null;
       this._pendingElevationAnnouncePoint = null;
-      const text = `Elevation: ${this._previewElevation}`;
+      const text = `Elevation: ${formatElevation(this._previewElevation)}`;
       if (worldPoint && canvas?.interface?.createScrollingText && globalThis.CONST?.TEXT_ANCHOR_POINTS) {
         canvas.interface.createScrollingText(worldPoint, text, {
           anchor: CONST.TEXT_ANCHOR_POINTS.CENTER,
@@ -2490,14 +3625,16 @@ export class AssetPlacementManager {
       this.app?.element?.classList?.add?.('placement-active'); 
       // Always show sticky mode since it's now the default
       this.app?.element?.classList?.add?.('placement-sticky');
+      this._applyPlacementFreezeClass();
     } catch (_) {} 
-    const message = 'Click to place. Wheel zooms to cursor. Ctrl/Cmd+Wheel rotates. Alt+Wheel adjusts elevation. Shift+Wheel scales preview. Right-click or ESC to cancel.';
+    const message = 'Click to place. Wheel zooms to cursor. Ctrl/Cmd+Wheel rotates (Shift=1°). Alt+Wheel adjusts elevation (Shift=coarse, Ctrl/Cmd=fine). Shift+Wheel scales preview. Right-click or ESC to cancel.';
     announceChange('asset-placement', message, { throttleMs: 800 });
   }
   _removePlacementFeedback() { 
     try { 
       this.app?.element?.classList?.remove?.('placement-active'); 
       this.app?.element?.classList?.remove?.('placement-sticky'); 
+      this.app?.element?.classList?.remove?.('placement-frozen');
     } catch (_) {} 
   }
 
@@ -2529,6 +3666,7 @@ export class AssetPlacementManager {
       this._applyPendingFlipToPreview({ syncShadow: false });
       this._updateLoadingOverlaySize(worldWidth, worldHeight);
       this._updatePreviewShadow();
+      this._scheduleShadowOffsetPreviewUpdate();
     } catch (_) { /* no-op */ }
   }
 
@@ -2542,9 +3680,11 @@ export class AssetPlacementManager {
           this._lastZoom = z;
           this._applyZoomToPreview(z);
         }
+        if (this._previewFrozen) this._refreshFrozenPointerScreen();
         this._zoomWatcherId = window.requestAnimationFrame(loop);
       };
       this._lastZoom = canvas?.stage?.scale?.x || 1;
+      if (this._previewFrozen) this._refreshFrozenPointerScreen();
       this._zoomWatcherId = window.requestAnimationFrame(loop);
     } catch (_) { /* no-op */ }
   }
@@ -2590,10 +3730,21 @@ export class AssetPlacementManager {
       }
     }
     this.currentAsset = next;
-    const lastWorld = (this._lastPointerWorld && Number.isFinite(this._lastPointerWorld.x) && Number.isFinite(this._lastPointerWorld.y))
-      ? { x: this._lastPointerWorld.x, y: this._lastPointerWorld.y }
-      : null;
-    const lastScreen = this._lastPointer || null;
+    const lastWorld = (() => {
+      if (this._previewFrozen && this._frozenPreviewWorld && Number.isFinite(this._frozenPreviewWorld.x) && Number.isFinite(this._frozenPreviewWorld.y)) {
+        return { x: this._frozenPreviewWorld.x, y: this._frozenPreviewWorld.y };
+      }
+      if (this._lastPointerWorld && Number.isFinite(this._lastPointerWorld.x) && Number.isFinite(this._lastPointerWorld.y)) {
+        return { x: this._lastPointerWorld.x, y: this._lastPointerWorld.y };
+      }
+      return null;
+    })();
+    const lastScreen = (() => {
+      if (this._previewFrozen && this._frozenPointerScreen && Number.isFinite(this._frozenPointerScreen.x) && Number.isFinite(this._frozenPointerScreen.y)) {
+        return { x: this._frozenPointerScreen.x, y: this._frozenPointerScreen.y };
+      }
+      return this._lastPointer || null;
+    })();
     this._removePreviewElement();
     this._hideLoadingOverlay();
     this._createPreviewElement();

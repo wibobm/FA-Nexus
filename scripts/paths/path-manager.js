@@ -228,7 +228,7 @@ export class PathManager {
       'Shift+LMB inserts along the path;',
       'Alt+LMB deletes the closest point.',
       'Ctrl/Cmd+Wheel adjusts scale;',
-      'Alt+Wheel changes elevation (Shift boosts).',
+      'Alt+Wheel changes elevation (Shift=coarse, Ctrl/Cmd=fine).',
       'Press S to save the path; ESC to exit.'
     ];
     let delegateState = {};

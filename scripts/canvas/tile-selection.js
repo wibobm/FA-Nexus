@@ -158,6 +158,7 @@ export class TilePixelSelection {
 
   static _pointHasVisibleAlpha(tile, worldX, worldY) {
     try {
+      if (!this._tileHasVisibleAlpha(tile)) return false;
       const mesh = tile?.mesh;
       if (!mesh || mesh.destroyed) return true;
 
@@ -187,6 +188,17 @@ export class TilePixelSelection {
       Logger.debug('TilePixelSelection._pointHasVisibleAlpha failed', err);
       return true;
     }
+  }
+
+  static _tileHasVisibleAlpha(tile) {
+    if (!tile) return true;
+    const documentAlpha = Number(tile.document?.alpha);
+    if (Number.isFinite(documentAlpha) && documentAlpha <= 0) return false;
+    const tileAlpha = Number(tile.alpha);
+    if (Number.isFinite(tileAlpha) && tileAlpha <= 0) return false;
+    const meshAlpha = Number(tile.mesh?.worldAlpha ?? tile.mesh?.alpha);
+    if (Number.isFinite(meshAlpha) && meshAlpha <= 0) return false;
+    return true;
   }
 
   static _resolveMeshTexture(mesh) {

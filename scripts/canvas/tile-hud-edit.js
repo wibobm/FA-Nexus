@@ -21,6 +21,8 @@ function getTileMode(doc) {
   try {
     if (doc.getFlag('fa-nexus', 'path')) return 'paths';
     if (doc.getFlag('fa-nexus', 'maskedTiling')) return 'textures';
+    const src = String(doc.texture?.src || '').trim();
+    if (src) return 'assets';
   } catch (error) {
     Logger.warn('TileHud.checkFlags.failed', { error: String(error?.message || error) });
   }
@@ -52,7 +54,11 @@ function ensureButton(root, mode) {
     button.innerHTML = '<i class="fas fa-pen"></i>';
     column.appendChild(button);
   }
-  const label = mode === 'paths' ? 'Edit Path in FA Nexus' : 'Edit Mask in FA Nexus';
+  const label = mode === 'paths'
+    ? 'Edit Path in FA Nexus'
+    : mode === 'textures'
+      ? 'Edit Mask in FA Nexus'
+      : 'Edit Asset in FA Nexus';
   button.dataset.mode = mode;
   button.dataset.tooltip = label;
   button.setAttribute('aria-label', label);
@@ -130,7 +136,10 @@ async function launchEditor(doc, mode) {
   app?.bringToFront?.();
   try { canvas?.tiles?.activate?.(); } catch (_) {}
   const tab = await openTab(app, mode);
-  const manager = mode === 'paths' ? tab?.pathManager : tab?.texturePaintManager;
+  let manager = null;
+  if (mode === 'paths') manager = tab?.pathManager;
+  else if (mode === 'textures') manager = tab?.texturePaintManager;
+  else manager = tab?.placementManager;
   if (!manager) throw new Error('FA Nexus editor manager unavailable');
   const options = {};
   if (pointerPayload.pointer) options.pointer = pointerPayload.pointer;

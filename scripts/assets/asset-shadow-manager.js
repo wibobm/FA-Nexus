@@ -21,6 +21,7 @@ export class AssetShadowManager {
     this._rebuildTimers = new Map();
     this._renderer = null;
     this._hooksBound = false;
+    this._suspendedTiles = new Map(); // tile id -> { doc, elevation }
     this._sceneRect = { x: 0, y: 0, width: 0, height: 0 };
     this._options = {
       alpha: 0.65,
@@ -51,6 +52,7 @@ export class AssetShadowManager {
   registerTile(tileDocument) {
     try {
       if (!tileDocument || !this._isShadowTile(tileDocument)) return;
+      if (this._suspendedTiles.has(tileDocument.id)) this._suspendedTiles.delete(tileDocument.id);
       this._addTile(tileDocument);
     } catch (e) {
       Logger.warn('AssetShadow.registerTile.failed', String(e?.message || e));
@@ -127,9 +129,20 @@ export class AssetShadowManager {
     const hasShadow = this._isShadowTile(doc);
     const tileId = doc.id;
     const prevElevation = this._tileIndex.get(tileId);
+    const suspendedEntry = tileId ? this._suspendedTiles.get(tileId) : null;
 
     if (!hasShadow) {
-      if (prevElevation !== undefined) this._removeTile(doc);
+      if (suspendedEntry) {
+        this._suspendedTiles.delete(tileId);
+      } else if (prevElevation !== undefined) {
+        this._removeTile(doc);
+      }
+      return;
+    }
+
+    if (suspendedEntry) {
+      suspendedEntry.doc = doc;
+      suspendedEntry.elevation = this._getTileElevation(doc);
       return;
     }
 
@@ -142,6 +155,9 @@ export class AssetShadowManager {
 
   _onDeleteTile(doc) {
     if (!doc) return;
+    if (this._suspendedTiles.has(doc.id)) {
+      this._suspendedTiles.delete(doc.id);
+    }
     if (!this._tileIndex.has(doc.id)) return;
     this._removeTile(doc);
   }
@@ -176,6 +192,7 @@ export class AssetShadowManager {
       if (!tileId || !this._tileIndex.has(tileId)) return;
       const elevation = this._tileIndex.get(tileId);
       this._tileIndex.delete(tileId);
+      this._suspendedTiles.delete(tileId);
       const layer = this._layers.get(elevation);
       if (!layer) return;
       layer.tiles.delete(tileId);
@@ -186,6 +203,45 @@ export class AssetShadowManager {
       this._scheduleRebuild(elevation);
     } catch (e) {
       Logger.warn('AssetShadow.removeTile.failed', String(e?.message || e));
+    }
+  }
+
+  suspendTile(tileDocument) {
+    try {
+      const doc = tileDocument?.document ?? tileDocument;
+      if (!doc) return false;
+      const tileId = doc.id;
+      if (!tileId) return false;
+      if (this._suspendedTiles.has(tileId)) return true;
+      const elevation = this._tileIndex.get(tileId);
+      if (elevation === undefined) return false;
+      const layer = this._layers.get(elevation);
+      if (!layer || !layer.tiles.has(tileId)) return false;
+      layer.tiles.delete(tileId);
+      this._tileIndex.delete(tileId);
+      this._suspendedTiles.set(tileId, { doc, elevation });
+      this._scheduleRebuild(elevation, true);
+      return true;
+    } catch (e) {
+      Logger.warn('AssetShadow.suspendTile.failed', String(e?.message || e));
+      return false;
+    }
+  }
+
+  resumeTile(tileDocument) {
+    try {
+      const doc = tileDocument?.document ?? tileDocument;
+      if (!doc) return false;
+      const tileId = doc.id;
+      if (!tileId) return false;
+      const entry = this._suspendedTiles.get(tileId);
+      if (!entry) return false;
+      this._suspendedTiles.delete(tileId);
+      this._addTile(doc);
+      return true;
+    } catch (e) {
+      Logger.warn('AssetShadow.resumeTile.failed', String(e?.message || e));
+      return false;
     }
   }
 
@@ -237,65 +293,39 @@ export class AssetShadowManager {
         return;
       }
 
-      // Update layer options from first tile's flags
+      // Resolve shared layer settings and per-tile configuration
       const firstDoc = docs[0];
-      const layerOptions = { ...this._options };
-      try {
-        const alpha = firstDoc.getFlag('fa-nexus', 'shadowAlpha');
-        if (alpha !== undefined) {
-          const numericAlpha = Number(alpha);
-          if (Number.isFinite(numericAlpha)) layerOptions.alpha = Math.min(1, Math.max(0, numericAlpha));
-        }
-        const dilation = firstDoc.getFlag('fa-nexus', 'shadowDilation');
-        if (dilation !== undefined) {
-          const numericDilation = Number(dilation);
-          if (Number.isFinite(numericDilation)) layerOptions.dilation = Math.max(0, numericDilation);
-        }
-        const blur = firstDoc.getFlag('fa-nexus', 'shadowBlur');
-        if (blur !== undefined) {
-          const numericBlur = Number(blur);
-          if (Number.isFinite(numericBlur)) layerOptions.blur = Math.max(0, numericBlur);
-        }
-        let explicitOffset = null;
-        const offsetDistance = firstDoc.getFlag('fa-nexus', 'shadowOffsetDistance');
-        if (offsetDistance !== undefined) {
-          const numericDistance = Number(offsetDistance);
-          if (Number.isFinite(numericDistance)) layerOptions.offsetDistance = Math.min(MAX_OFFSET_DISTANCE, Math.max(0, numericDistance));
-        }
-        const offsetAngle = firstDoc.getFlag('fa-nexus', 'shadowOffsetAngle');
-        if (offsetAngle !== undefined) {
-          const numericAngle = Number(offsetAngle);
-          if (Number.isFinite(numericAngle)) layerOptions.offsetAngle = this._normalizeAngle(numericAngle);
-        }
-        const offsetXFlag = firstDoc.getFlag('fa-nexus', 'shadowOffsetX');
-        const offsetYFlag = firstDoc.getFlag('fa-nexus', 'shadowOffsetY');
-        if (offsetXFlag !== undefined || offsetYFlag !== undefined) {
-          const ox = Number(offsetXFlag);
-          const oy = Number(offsetYFlag);
-          const finiteX = Number.isFinite(ox) ? ox : 0;
-          const finiteY = Number.isFinite(oy) ? oy : 0;
-          if (Number.isFinite(ox) || Number.isFinite(oy)) {
-            explicitOffset = { x: finiteX, y: finiteY };
-          }
-        }
-        if (explicitOffset) {
-          layerOptions.offsetX = explicitOffset.x;
-          layerOptions.offsetY = explicitOffset.y;
-          const dist = Math.min(MAX_OFFSET_DISTANCE, Math.hypot(explicitOffset.x, explicitOffset.y));
-          if (dist > 0.0001) {
-            layerOptions.offsetDistance = dist;
-            layerOptions.offsetAngle = this._normalizeAngle(Math.atan2(explicitOffset.y, explicitOffset.x) * (180 / Math.PI));
-          }
-        }
-      } catch (_) {}
-      const computedOffset = this._computeOffsetVector(layerOptions.offsetDistance, layerOptions.offsetAngle);
-      layerOptions.offsetX = Number.isFinite(Number(layerOptions.offsetX)) ? Number(layerOptions.offsetX) : computedOffset.x;
-      layerOptions.offsetY = Number.isFinite(Number(layerOptions.offsetY)) ? Number(layerOptions.offsetY) : computedOffset.y;
+      const baseOptions = this._extractShadowBaseOptions(firstDoc);
+      const tileConfigs = [];
+      let maxOffsetX = Math.abs(baseOptions.offsetX);
+      let maxOffsetY = Math.abs(baseOptions.offsetY);
+      let maxDilation = baseOptions.dilation;
+
+      for (const doc of docs) {
+        const cfg = this._extractTileShadowConfig(doc, baseOptions);
+        tileConfigs.push({ doc, config: cfg });
+        if (Math.abs(cfg.offsetX) > maxOffsetX) maxOffsetX = Math.abs(cfg.offsetX);
+        if (Math.abs(cfg.offsetY) > maxOffsetY) maxOffsetY = Math.abs(cfg.offsetY);
+        if (cfg.dilation > maxDilation) maxDilation = cfg.dilation;
+      }
+
+      const layerOptions = {
+        alpha: baseOptions.alpha,
+        blur: baseOptions.blur,
+        maxOffsetX,
+        maxOffsetY,
+        maxDilation
+      };
       layer.options = layerOptions;
 
       const baseRect = this._getSceneRect();
       let sr = this._expandSceneRectForDocs(baseRect, docs);
-      sr = this._applyShadowMargins(sr, layerOptions);
+      sr = this._applyShadowMargins(sr, {
+        offsetX: maxOffsetX,
+        offsetY: maxOffsetY,
+        dilation: maxDilation,
+        blur: layerOptions.blur
+      });
       this._sceneRect = sr;
       const scale = this._computeTextureScale(sr);
       const texWidth = Math.max(4, Math.round(sr.width * scale));
@@ -316,12 +346,19 @@ export class AssetShadowManager {
 
       const drawContainer = new PIXI.Container();
       const tempSprites = [];
-      const dilationWorld = Math.max(0, Number(layer.options.dilation || 0));
-      const dilationOffsets = this._buildDilationOffsets(dilationWorld * scale);
-      const offsetXScaled = Number(layer.options.offsetX ?? 0) * scale;
-      const offsetYScaled = Number(layer.options.offsetY ?? 0) * scale;
+      const dilationCache = new Map();
 
-      for (const doc of docs) {
+      const getOffsetsForRadius = (radius) => {
+        const key = Number.isFinite(radius) ? radius.toFixed(3) : '0';
+        if (dilationCache.has(key)) return dilationCache.get(key);
+        const list = this._buildDilationOffsets(radius);
+        dilationCache.set(key, list);
+        return list;
+      };
+
+      for (const entry of tileConfigs) {
+        const doc = entry.doc;
+        const cfg = entry.config;
         try {
           const tex = await this._obtainTexture(doc?.texture?.src);
           if (!tex) continue;
@@ -337,7 +374,12 @@ export class AssetShadowManager {
           const baseY = dy * scale;
           const rotationDeg = Number(doc.rotation || 0) * (Math.PI / 180);
 
-          for (const offset of dilationOffsets) {
+          const dilationRadius = Math.max(0, Number(cfg.dilation || 0)) * scale;
+          const offsets = getOffsetsForRadius(dilationRadius);
+          const offsetXScaled = Number(cfg.offsetX ?? 0) * scale;
+          const offsetYScaled = Number(cfg.offsetY ?? 0) * scale;
+
+          for (const offset of offsets) {
             const sprite = new PIXI.Sprite(tex);
             sprite.anchor.set(0.5, 0.5);
             sprite.width = baseWidth;
@@ -389,6 +431,124 @@ export class AssetShadowManager {
     } catch (e) {
       Logger.warn('AssetShadow.applyTexture.failed', String(e?.message || e));
     }
+  }
+
+  _extractShadowBaseOptions(doc) {
+    const defaults = {
+      alpha: Math.min(1, Math.max(0, Number(this._options.alpha ?? 0.65))),
+      blur: Math.max(0, Number(this._options.blur ?? 0)),
+      dilation: Math.max(0, Number(this._options.dilation ?? 0)),
+      offsetDistance: Math.min(MAX_OFFSET_DISTANCE, Math.max(0, Number(this._options.offsetDistance ?? 0))),
+      offsetAngle: this._normalizeAngle(this._options.offsetAngle ?? 135)
+    };
+
+    const read = (key) => {
+      try {
+        const value = doc?.getFlag?.('fa-nexus', key);
+        if (value === undefined || value === null) return undefined;
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : undefined;
+      } catch (_) {
+        return undefined;
+      }
+    };
+
+    const alpha = (() => {
+      const value = read('shadowAlpha');
+      return value !== undefined ? Math.min(1, Math.max(0, value)) : defaults.alpha;
+    })();
+
+    const blur = (() => {
+      const value = read('shadowBlur');
+      return value !== undefined ? Math.max(0, value) : defaults.blur;
+    })();
+
+    const dilation = (() => {
+      const value = read('shadowDilation');
+      return value !== undefined ? Math.max(0, value) : defaults.dilation;
+    })();
+
+    const offsetDistance = (() => {
+      const value = read('shadowOffsetDistance');
+      return value !== undefined
+        ? Math.min(MAX_OFFSET_DISTANCE, Math.max(0, value))
+        : defaults.offsetDistance;
+    })();
+
+    const offsetAngle = (() => {
+      const value = read('shadowOffsetAngle');
+      return value !== undefined ? this._normalizeAngle(value) : defaults.offsetAngle;
+    })();
+
+    let offsetX = read('shadowOffsetX');
+    let offsetY = read('shadowOffsetY');
+    if (!Number.isFinite(offsetX) || !Number.isFinite(offsetY)) {
+      const vec = this._computeOffsetVector(offsetDistance, offsetAngle);
+      offsetX = vec.x;
+      offsetY = vec.y;
+    } else {
+      offsetX = Math.max(-MAX_OFFSET_DISTANCE, Math.min(MAX_OFFSET_DISTANCE, offsetX));
+      offsetY = Math.max(-MAX_OFFSET_DISTANCE, Math.min(MAX_OFFSET_DISTANCE, offsetY));
+    }
+
+    return {
+      alpha,
+      blur,
+      dilation,
+      offsetDistance,
+      offsetAngle,
+      offsetX,
+      offsetY
+    };
+  }
+
+  _extractTileShadowConfig(doc, defaults) {
+    const base = defaults || this._extractShadowBaseOptions(null);
+    const read = (key) => {
+      try {
+        const value = doc?.getFlag?.('fa-nexus', key);
+        if (value === undefined || value === null) return undefined;
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : undefined;
+      } catch (_) {
+        return undefined;
+      }
+    };
+
+    const dilation = (() => {
+      const value = read('shadowDilation');
+      return value !== undefined ? Math.max(0, value) : Math.max(0, base.dilation);
+    })();
+
+    const offsetDistance = (() => {
+      const value = read('shadowOffsetDistance');
+      return value !== undefined
+        ? Math.min(MAX_OFFSET_DISTANCE, Math.max(0, value))
+        : Math.min(MAX_OFFSET_DISTANCE, Math.max(0, base.offsetDistance));
+    })();
+
+    const offsetAngle = (() => {
+      const value = read('shadowOffsetAngle');
+      return value !== undefined ? this._normalizeAngle(value) : this._normalizeAngle(base.offsetAngle);
+    })();
+
+    let offsetX = read('shadowOffsetX');
+    let offsetY = read('shadowOffsetY');
+    if (!Number.isFinite(offsetX) || !Number.isFinite(offsetY)) {
+      const vec = this._computeOffsetVector(offsetDistance, offsetAngle);
+      offsetX = vec.x;
+      offsetY = vec.y;
+    }
+    offsetX = Math.max(-MAX_OFFSET_DISTANCE, Math.min(MAX_OFFSET_DISTANCE, Number(offsetX || 0)));
+    offsetY = Math.max(-MAX_OFFSET_DISTANCE, Math.min(MAX_OFFSET_DISTANCE, Number(offsetY || 0)));
+
+    return {
+      dilation,
+      offsetDistance,
+      offsetAngle,
+      offsetX,
+      offsetY
+    };
   }
 
   _buildDilationOffsets(radius) {
@@ -647,7 +807,8 @@ export class AssetShadowManager {
       }
 
       const doc = docs[0];
-      const readFlag = (key, fallback) => {
+      const approx = (a, b) => Math.abs(Number(a || 0) - Number(b || 0)) < 0.0005;
+      const readDocFlag = (key, fallback) => {
         try {
           const value = doc.getFlag('fa-nexus', key);
           if (value === undefined || value === null) return fallback;
@@ -658,29 +819,34 @@ export class AssetShadowManager {
         }
       };
 
-      const alpha = Math.min(1, Math.max(0, readFlag('shadowAlpha', baseOptions.alpha)));
-      const dilation = Math.max(0, readFlag('shadowDilation', baseOptions.dilation));
-      const blur = Math.max(0, readFlag('shadowBlur', baseOptions.blur));
-      const offsetDistance = Math.min(MAX_OFFSET_DISTANCE, Math.max(0, readFlag('shadowOffsetDistance', baseOptions.offsetDistance)));
-      const offsetAngle = this._normalizeAngle(readFlag('shadowOffsetAngle', baseOptions.offsetAngle));
-      let offsetX = readFlag('shadowOffsetX', undefined);
-      let offsetY = readFlag('shadowOffsetY', undefined);
-      if (!Number.isFinite(offsetX) || !Number.isFinite(offsetY)) {
-        const vec = this._computeOffsetVector(offsetDistance, offsetAngle);
-        offsetX = vec.x;
-        offsetY = vec.y;
+      const firstConfig = this._extractTileShadowConfig(doc, baseOptions);
+      let dilationMixed = false;
+      let offsetMixed = false;
+      let distanceMixed = false;
+      let angleMixed = false;
+
+      for (let i = 1; i < docs.length; i += 1) {
+        const otherConfig = this._extractTileShadowConfig(docs[i], baseOptions);
+        if (!dilationMixed && !approx(otherConfig.dilation, firstConfig.dilation)) dilationMixed = true;
+        if (!offsetMixed && (!approx(otherConfig.offsetX, firstConfig.offsetX) || !approx(otherConfig.offsetY, firstConfig.offsetY))) offsetMixed = true;
+        if (!distanceMixed && !approx(otherConfig.offsetDistance, firstConfig.offsetDistance)) distanceMixed = true;
+        if (!angleMixed && !approx(otherConfig.offsetAngle, firstConfig.offsetAngle)) angleMixed = true;
       }
 
       return {
-        alpha,
-        dilation,
-        blur,
-        offsetDistance,
-        offsetAngle,
-        offsetX,
-        offsetY,
+        alpha: Math.min(1, Math.max(0, readDocFlag('shadowAlpha', layer?.options?.alpha ?? this._options.alpha ?? 0.65))),
+        dilation: Math.max(0, firstConfig.dilation),
+        blur: Math.max(0, readDocFlag('shadowBlur', layer?.options?.blur ?? this._options.blur ?? 0)),
+        offsetDistance: Math.min(MAX_OFFSET_DISTANCE, Math.max(0, firstConfig.offsetDistance)),
+        offsetAngle: this._normalizeAngle(firstConfig.offsetAngle),
+        offsetX: firstConfig.offsetX,
+        offsetY: firstConfig.offsetY,
         tileCount,
-        hasTiles: tileCount > 0
+        hasTiles: tileCount > 0,
+        mixedDilation: dilationMixed,
+        mixedOffset: offsetMixed,
+        mixedOffsetDistance: distanceMixed,
+        mixedOffsetAngle: angleMixed
       };
     } catch (error) {
       Logger.warn('AssetShadow.getElevation.failed', String(error?.message || error));
@@ -693,16 +859,46 @@ export class AssetShadowManager {
       if (!canvas?.scene) return false;
       const docs = this._collectShadowTilesAtElevation(elevation);
       if (!docs.length) return false;
-      const alpha = Math.min(1, Math.max(0, Number(settings.alpha ?? this._options.alpha ?? 0.65)));
-      const dilation = Math.max(0, Number(settings.dilation ?? this._options.dilation ?? 0));
-      const blur = Math.max(0, Number(settings.blur ?? this._options.blur ?? 0));
-      const offsetDistance = Math.min(MAX_OFFSET_DISTANCE, Math.max(0, Number(settings.offsetDistance ?? this._options.offsetDistance ?? 0)));
-      const offsetAngle = this._normalizeAngle(settings.offsetAngle ?? this._options.offsetAngle ?? 135);
-      const explicitOffsetX = Number(settings.offsetX);
-      const explicitOffsetY = Number(settings.offsetY);
-      const vector = (Number.isFinite(explicitOffsetX) && Number.isFinite(explicitOffsetY))
-        ? { x: explicitOffsetX, y: explicitOffsetY }
-        : this._computeOffsetVector(offsetDistance, offsetAngle);
+      const hasAlpha = Object.prototype.hasOwnProperty.call(settings, 'alpha');
+      const hasBlur = Object.prototype.hasOwnProperty.call(settings, 'blur');
+      const hasDilation = Object.prototype.hasOwnProperty.call(settings, 'dilation');
+      const hasOffsetDistance = Object.prototype.hasOwnProperty.call(settings, 'offsetDistance');
+      const hasOffsetAngle = Object.prototype.hasOwnProperty.call(settings, 'offsetAngle');
+      const hasOffsetX = Object.prototype.hasOwnProperty.call(settings, 'offsetX');
+      const hasOffsetY = Object.prototype.hasOwnProperty.call(settings, 'offsetY');
+      const wantsOffsets = hasOffsetDistance || hasOffsetAngle || hasOffsetX || hasOffsetY;
+
+      const alpha = hasAlpha
+        ? Math.min(1, Math.max(0, Number(settings.alpha)))
+        : null;
+      const blur = hasBlur
+        ? Math.max(0, Number(settings.blur))
+        : null;
+      const dilation = hasDilation
+        ? Math.max(0, Number(settings.dilation))
+        : null;
+      const offsetDistance = hasOffsetDistance
+        ? Math.min(MAX_OFFSET_DISTANCE, Math.max(0, Number(settings.offsetDistance)))
+        : null;
+      const offsetAngle = hasOffsetAngle
+        ? this._normalizeAngle(settings.offsetAngle)
+        : null;
+      const explicitOffsetX = hasOffsetX ? Number(settings.offsetX) : null;
+      const explicitOffsetY = hasOffsetY ? Number(settings.offsetY) : null;
+
+      let vector = null;
+      if (wantsOffsets) {
+        if (Number.isFinite(explicitOffsetX) && Number.isFinite(explicitOffsetY)) {
+          vector = {
+            x: Math.max(-MAX_OFFSET_DISTANCE, Math.min(MAX_OFFSET_DISTANCE, explicitOffsetX)),
+            y: Math.max(-MAX_OFFSET_DISTANCE, Math.min(MAX_OFFSET_DISTANCE, explicitOffsetY))
+          };
+        } else {
+          const dist = offsetDistance !== null ? offsetDistance : Math.min(MAX_OFFSET_DISTANCE, Math.max(0, Number(this._options.offsetDistance ?? 0)));
+          const ang = offsetAngle !== null ? offsetAngle : this._normalizeAngle(this._options.offsetAngle ?? 135);
+          vector = this._computeOffsetVector(dist, ang);
+        }
+      }
 
       const updates = [];
       const approx = (a, b) => Math.abs(Number(a || 0) - Number(b || 0)) < 0.0005;
@@ -727,15 +923,23 @@ export class AssetShadowManager {
           changed = true;
         }
 
-        assign('shadowAlpha', alpha);
-        assign('shadowDilation', dilation);
-        assign('shadowBlur', blur);
-        assign('shadowOffsetDistance', offsetDistance);
-        assign('shadowOffsetAngle', offsetAngle);
-        assign('shadowOffsetX', vector.x);
-        assign('shadowOffsetY', vector.y);
+        if (hasAlpha && alpha !== null) assign('shadowAlpha', alpha);
+        if (hasDilation && dilation !== null) assign('shadowDilation', dilation);
+        if (hasBlur && blur !== null) assign('shadowBlur', blur);
+        if (wantsOffsets && vector) {
+          if (hasOffsetDistance && offsetDistance !== null) assign('shadowOffsetDistance', offsetDistance);
+          if (hasOffsetAngle && offsetAngle !== null) assign('shadowOffsetAngle', offsetAngle);
+          assign('shadowOffsetX', vector.x);
+          assign('shadowOffsetY', vector.y);
+        }
 
         if (changed) updates.push(update);
+      }
+
+      const layer = this._layers.get(Number(elevation ?? 0) || 0) || null;
+      if (layer) {
+        if (hasAlpha && alpha !== null) layer.options.alpha = Math.min(1, Math.max(0, Number(alpha)));
+        if (hasBlur && blur !== null) layer.options.blur = Math.max(0, Number(blur));
       }
 
       if (!updates.length) return false;
