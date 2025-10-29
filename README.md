@@ -34,6 +34,8 @@ FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Found
 - **Bookmark anything:** Save your favorite combinations of search terms and folder filters for Tokens, Assets, Textures, or Paths. Bookmarks show in a toolbar, overflow gracefully, and can be dragged to reorder.
 - **Search memory:** Each tab remembers its last query and folder state, so hopping between views doesn’t wipe your work.
 
+https://github.com/user-attachments/assets/aff82b2e-ca87-43ef-ba2e-80dc75011351
+
 ---
 
 ## Tokens Tab
@@ -45,6 +47,8 @@ FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Found
 - **Grid savvy:** Snap to grid, rotate, mirror, or randomize facing before every drop.
 - **Super Wildcards:** Combination of the systems above allow you to essentially havea "super" wildcard placement. e.g. Multiselect All our NPCs, Activate "Random Color on Placement", choose "Commoner" statblock as "Place Token As" , activate random rotation and flip & start placing!  You'll get a random NPC with random color and random rotation with each click!
 
+https://github.com/user-attachments/assets/e56e7491-11c2-4c55-9150-387ea38731c2
+
 ---
 
 ## Assets Tab
@@ -52,6 +56,8 @@ FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Found
 - **Elevation on the fly:** Hold `Alt` + scroll to bump placement elevation by 0.1 increments. Decimal elevations keep assets layered without jumping ahead of tokens (override in settings if you prefer Foundry defaults).
 - **Shadow presets per elevation:** Customize drop shadow alpha, blur, dilation, angle, and distance for each elevation level. Save up to five presets and reapply them with a click.
 - **Multi-select randomizer:** Select several assets and let Nexus randomize which one lands next. Combine with random rotation and scale!
+
+https://github.com/user-attachments/assets/b39f4b08-660e-4cac-af7e-9c4360ad513e
 
 ---
 
