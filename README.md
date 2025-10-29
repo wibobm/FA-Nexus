@@ -1,5 +1,8 @@
 # FA Nexus
 
+<img width="1416" height="800" alt="image" src="https://github.com/user-attachments/assets/78f48919-864c-4e2d-8021-cc1788bef675" />
+
+
 ![Foundry VTT v13](https://img.shields.io/badge/Foundry%20VTT-v13+-green)
 ![Version](https://img.shields.io/badge/version-0.1.3-orange)
 ![Status](https://img.shields.io/badge/status-Beta-yellow)
