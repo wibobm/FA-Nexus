@@ -41,6 +41,13 @@ export class PathManager {
       this._delegate = instance;
       try { instance.attachHost?.(this); }
       catch (_) {}
+      try {
+        Logger.info?.('PathEditor.bundle.loaded', { version: instance?.version || '0.0.15' });
+        const hooks = globalThis?.Hooks;
+        hooks?.callAll?.('fa-nexus-path-editor-loaded', { version: instance?.version || '0.0.15' });
+      } catch (logError) {
+        Logger.warn?.('PathEditor.bundle.loaded.logFailed', String(logError?.message || logError));
+      }
       return instance;
     })();
     try {

@@ -308,6 +308,74 @@
                    {{#if pathAppearance.scale.disabled}}disabled{{/if}}>
           </div>
         {{/if}}
+
+{{#if flip.available}}
+      <div class="fa-nexus-tool-options__control fa-nexus-flip" data-fa-nexus-flip-root>
+        <div class="fa-nexus-tool-options__control-header">
+          <span class="fa-nexus-tool-options__label">Flip / Mirror</span>
+          <span class="fa-nexus-flip__status">
+            <span class="fa-nexus-tool-options__value" data-fa-nexus-flip-display>{{flip.display}}</span>
+            {{#if flip.previewDisplay}}
+              <span class="fa-nexus-flip__preview" data-fa-nexus-flip-preview>{{flip.previewDisplay}}</span>
+            {{/if}}
+          </span>
+        </div>
+        <div class="fa-nexus-flip__body">
+          <div class="fa-nexus-flip__axes">
+            <div class="fa-nexus-flip__axis">
+              <button type="button"
+                      class="fa-nexus-flip__button {{#if flip.horizontal.active}}is-active{{/if}} {{#if flip.horizontal.previewDiff}}has-preview-diff{{/if}}"
+                      data-fa-nexus-flip-horizontal
+                      aria-pressed="{{flip.horizontal.active}}"
+                      aria-label="{{flip.horizontal.aria}}"
+                      title="{{flip.horizontal.tooltip}}"
+                      {{#if flip.horizontal.disabled}}disabled{{/if}}>
+                <span>{{flip.horizontal.label}}</span>
+              </button>
+              {{#if flip.horizontal.randomButtonVisible}}
+                <button type="button"
+                        class="fa-nexus-flip__random {{#if flip.horizontal.randomEnabled}}is-active{{/if}} {{#if flip.horizontal.randomPreviewDiff}}has-preview-diff{{/if}}"
+                        data-fa-nexus-flip-horizontal-random
+                        aria-pressed="{{flip.horizontal.randomEnabled}}"
+                        aria-label="{{flip.horizontal.randomAria}}"
+                        title="{{flip.horizontal.randomTooltip}}"
+                        {{#if flip.horizontal.randomDisabled}}disabled{{/if}}>
+                  <i class="fas fa-random" aria-hidden="true"></i>
+                  <span>{{flip.horizontal.randomLabel}}</span>
+                </button>
+              {{/if}}
+            </div>
+            <div class="fa-nexus-flip__axis">
+              <button type="button"
+                      class="fa-nexus-flip__button {{#if flip.vertical.active}}is-active{{/if}} {{#if flip.vertical.previewDiff}}has-preview-diff{{/if}}"
+                      data-fa-nexus-flip-vertical
+                      aria-pressed="{{flip.vertical.active}}"
+                      aria-label="{{flip.vertical.aria}}"
+                      title="{{flip.vertical.tooltip}}"
+                      {{#if flip.vertical.disabled}}disabled{{/if}}>
+                <span>{{flip.vertical.label}}</span>
+              </button>
+              {{#if flip.vertical.randomButtonVisible}}
+                <button type="button"
+                        class="fa-nexus-flip__random {{#if flip.vertical.randomEnabled}}is-active{{/if}} {{#if flip.vertical.randomPreviewDiff}}has-preview-diff{{/if}}"
+                        data-fa-nexus-flip-vertical-random
+                        aria-pressed="{{flip.vertical.randomEnabled}}"
+                        aria-label="{{flip.vertical.randomAria}}"
+                        title="{{flip.vertical.randomTooltip}}"
+                        {{#if flip.vertical.randomDisabled}}disabled{{/if}}>
+                  <i class="fas fa-random" aria-hidden="true"></i>
+                  <span>{{flip.vertical.randomLabel}}</span>
+                </button>
+              {{/if}}
+            </div>
+          </div>
+        </div>
+        {{#if flip.randomHint}}
+          <p class="fa-nexus-tool-options__hint fa-nexus-flip__hint">{{flip.randomHint}}</p>
+        {{/if}}
+      </div>
+    {{/if}}
+
         {{#if pathAppearance.textureOffset.available}}
           <div class="fa-nexus-tool-options__control fa-nexus-path-offset" data-fa-nexus-path-offset-root>
             <div class="fa-nexus-tool-options__control-header">
@@ -411,7 +479,7 @@
           <p class="fa-nexus-tool-options__hint fa-nexus-path-feather__hint" data-fa-nexus-feather-hint>{{pathFeather.hint}}</p>
         {{/if}}
       </div>
-    {{/if}}
+    {{/if}} 
 
     {{#if opacityFeather.available}}
       <div class="fa-nexus-tool-options__control fa-nexus-opacity-feather" data-fa-nexus-opacity-feather>
@@ -459,70 +527,117 @@
       </div>
     {{/if}}
 
-    {{#if flip.available}}
-      <div class="fa-nexus-tool-options__control fa-nexus-flip" data-fa-nexus-flip-root>
-        <div class="fa-nexus-tool-options__control-header">
-          <span class="fa-nexus-tool-options__label">Flip / Mirror</span>
-          <span class="fa-nexus-flip__status">
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-flip-display>{{flip.display}}</span>
-            {{#if flip.previewDisplay}}
-              <span class="fa-nexus-flip__preview" data-fa-nexus-flip-preview>{{flip.previewDisplay}}</span>
-            {{/if}}
-          </span>
+    {{#if pathShadow.available}}
+      <div class="fa-nexus-tool-options__control fa-nexus-path-shadow" data-fa-nexus-path-shadow>
+        <div class="fa-nexus-path-shadow__toggles">
+          <label class="fa-nexus-tool-options__toggle">
+            <input type="checkbox"
+                   data-fa-nexus-path-shadow-toggle
+                   {{#if pathShadow.enabled}}checked{{/if}}>
+            <span>Path Shadow</span>
+          </label>
+          <label class="fa-nexus-tool-options__toggle">
+            <input type="checkbox"
+                   data-fa-nexus-path-shadow-edit
+                   {{#if pathShadow.editMode}}checked{{/if}}
+                   {{#unless pathShadow.enabled}}disabled{{/unless}}>
+            <span>Edit shadow geometry</span>
+          </label>
         </div>
-        <div class="fa-nexus-flip__body">
-          <div class="fa-nexus-flip__axes">
-            <div class="fa-nexus-flip__axis">
+        <div class="fa-nexus-path-shadow__context-block">
+          <span class="fa-nexus-path-shadow__elevation" data-fa-nexus-path-shadow-elevation>
+            Elevation {{pathShadow.context.display}}
+          </span>
+          {{#if pathShadow.context.note}}
+            <p class="fa-nexus-tool-options__hint fa-nexus-path-shadow__hint" data-fa-nexus-path-shadow-note>{{pathShadow.context.note}}</p>
+          {{/if}}
+        </div>
+        {{#if pathShadow.presets.length}}
+          <div class="fa-nexus-path-shadow__presets" data-fa-nexus-path-shadow-presets>
+            {{#each pathShadow.presets as |preset|}}
               <button type="button"
-                      class="fa-nexus-flip__button {{#if flip.horizontal.active}}is-active{{/if}} {{#if flip.horizontal.previewDiff}}has-preview-diff{{/if}}"
-                      data-fa-nexus-flip-horizontal
-                      aria-pressed="{{flip.horizontal.active}}"
-                      aria-label="{{flip.horizontal.aria}}"
-                      title="{{flip.horizontal.tooltip}}"
-                      {{#if flip.horizontal.disabled}}disabled{{/if}}>
-                <span>{{flip.horizontal.label}}</span>
+                      class="fa-nexus-path-shadow__preset{{#if preset.active}} is-active{{/if}}{{#unless preset.saved}} is-empty{{/unless}}"
+                      data-fa-nexus-path-shadow-preset="{{preset.index}}"
+                      title="{{preset.tooltip}}">
+                {{preset.label}}
               </button>
-              {{#if flip.horizontal.randomButtonVisible}}
-                <button type="button"
-                        class="fa-nexus-flip__random {{#if flip.horizontal.randomEnabled}}is-active{{/if}} {{#if flip.horizontal.randomPreviewDiff}}has-preview-diff{{/if}}"
-                        data-fa-nexus-flip-horizontal-random
-                        aria-pressed="{{flip.horizontal.randomEnabled}}"
-                        aria-label="{{flip.horizontal.randomAria}}"
-                        title="{{flip.horizontal.randomTooltip}}"
-                        {{#if flip.horizontal.randomDisabled}}disabled{{/if}}>
-                  <i class="fas fa-random" aria-hidden="true"></i>
-                  <span>{{flip.horizontal.randomLabel}}</span>
-                </button>
-              {{/if}}
+            {{/each}}
+            <button type="button"
+                    class="fa-nexus-path-shadow__reset"
+                    data-fa-nexus-path-shadow-reset
+                    title="Reset shadow settings to defaults"
+                    {{#if pathShadow.reset.disabled}}disabled{{/if}}>
+              Reset Shadow
+            </button>
+          </div>
+        {{/if}}
+        <div class="fa-nexus-path-shadow__sliders">
+          <div class="fa-nexus-path-shadow__slider">
+            <div class="fa-nexus-path-shadow__header">
+              <span class="fa-nexus-path-shadow__label">Scale</span>
+              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-scale-display>{{pathShadow.scale.display}}</span>
             </div>
-            <div class="fa-nexus-flip__axis">
-              <button type="button"
-                      class="fa-nexus-flip__button {{#if flip.vertical.active}}is-active{{/if}} {{#if flip.vertical.previewDiff}}has-preview-diff{{/if}}"
-                      data-fa-nexus-flip-vertical
-                      aria-pressed="{{flip.vertical.active}}"
-                      aria-label="{{flip.vertical.aria}}"
-                      title="{{flip.vertical.tooltip}}"
-                      {{#if flip.vertical.disabled}}disabled{{/if}}>
-                <span>{{flip.vertical.label}}</span>
-              </button>
-              {{#if flip.vertical.randomButtonVisible}}
-                <button type="button"
-                        class="fa-nexus-flip__random {{#if flip.vertical.randomEnabled}}is-active{{/if}} {{#if flip.vertical.randomPreviewDiff}}has-preview-diff{{/if}}"
-                        data-fa-nexus-flip-vertical-random
-                        aria-pressed="{{flip.vertical.randomEnabled}}"
-                        aria-label="{{flip.vertical.randomAria}}"
-                        title="{{flip.vertical.randomTooltip}}"
-                        {{#if flip.vertical.randomDisabled}}disabled{{/if}}>
-                  <i class="fas fa-random" aria-hidden="true"></i>
-                  <span>{{flip.vertical.randomLabel}}</span>
-                </button>
-              {{/if}}
+            <input type="range"
+                   min="{{pathShadow.scale.min}}"
+                   max="{{pathShadow.scale.max}}"
+                   step="{{pathShadow.scale.step}}"
+                   value="{{pathShadow.scale.value}}"
+                   data-fa-nexus-path-shadow-scale
+                   {{#if pathShadow.scale.disabled}}disabled{{/if}}>
+          </div>
+          <div class="fa-nexus-path-shadow__slider">
+            <div class="fa-nexus-path-shadow__header">
+              <span class="fa-nexus-path-shadow__label">Offset</span>
+              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-offset-display>{{pathShadow.offset.display}}</span>
             </div>
+            <input type="range"
+                   min="{{pathShadow.offset.min}}"
+                   max="{{pathShadow.offset.max}}"
+                   step="{{pathShadow.offset.step}}"
+                   value="{{pathShadow.offset.value}}"
+                   data-fa-nexus-path-shadow-offset
+                   {{#if pathShadow.offset.disabled}}disabled{{/if}}>
+          </div>
+          <div class="fa-nexus-path-shadow__slider">
+            <div class="fa-nexus-path-shadow__header">
+              <span class="fa-nexus-path-shadow__label">Opacity</span>
+              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-alpha-display>{{pathShadow.alpha.display}}</span>
+            </div>
+            <input type="range"
+                   min="{{pathShadow.alpha.min}}"
+                   max="{{pathShadow.alpha.max}}"
+                   step="{{pathShadow.alpha.step}}"
+                   value="{{pathShadow.alpha.value}}"
+                   data-fa-nexus-path-shadow-alpha
+                   {{#if pathShadow.alpha.disabled}}disabled{{/if}}>
+          </div>
+          <div class="fa-nexus-path-shadow__slider">
+            <div class="fa-nexus-path-shadow__header">
+              <span class="fa-nexus-path-shadow__label">Blur</span>
+              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-blur-display>{{pathShadow.blur.display}}</span>
+            </div>
+            <input type="range"
+                   min="{{pathShadow.blur.min}}"
+                   max="{{pathShadow.blur.max}}"
+                   step="{{pathShadow.blur.step}}"
+                   value="{{pathShadow.blur.value}}"
+                   data-fa-nexus-path-shadow-blur
+                   {{#if pathShadow.blur.disabled}}disabled{{/if}}>
+          </div>
+          <div class="fa-nexus-path-shadow__slider">
+            <div class="fa-nexus-path-shadow__header">
+              <span class="fa-nexus-path-shadow__label">Dilation</span>
+              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-dilation-display>{{pathShadow.dilation.display}}</span>
+            </div>
+            <input type="range"
+                   min="{{pathShadow.dilation.min}}"
+                   max="{{pathShadow.dilation.max}}"
+                   step="{{pathShadow.dilation.step}}"
+                   value="{{pathShadow.dilation.value}}"
+                   data-fa-nexus-path-shadow-dilation
+                   {{#if pathShadow.dilation.disabled}}disabled{{/if}}>
           </div>
         </div>
-        {{#if flip.randomHint}}
-          <p class="fa-nexus-tool-options__hint fa-nexus-flip__hint">{{flip.randomHint}}</p>
-        {{/if}}
       </div>
     {{/if}}
 

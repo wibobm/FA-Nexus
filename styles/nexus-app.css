@@ -395,7 +395,8 @@
   margin-top: 6px;
 }
 
-.fa-nexus-drop-shadow__presets {
+.fa-nexus-drop-shadow__presets,
+.fa-nexus-path-shadow__presets {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -403,7 +404,9 @@
 }
 
 .fa-nexus-drop-shadow__preset,
-.fa-nexus-drop-shadow__reset {
+.fa-nexus-drop-shadow__reset,
+.fa-nexus-path-shadow__preset,
+.fa-nexus-path-shadow__reset {
   min-width: 32px;
   height: 28px;
   border-radius: 4px;
@@ -420,23 +423,28 @@
   padding: 0 10px;
 }
 
-.fa-nexus-drop-shadow__preset {
+.fa-nexus-drop-shadow__preset,
+.fa-nexus-path-shadow__preset {
   padding: 0;
 }
 
 .fa-nexus-drop-shadow__preset:hover,
-.fa-nexus-drop-shadow__reset:hover {
+.fa-nexus-drop-shadow__reset:hover,
+.fa-nexus-path-shadow__preset:hover,
+.fa-nexus-path-shadow__reset:hover {
   border-color: rgba(255, 255, 255, 0.35);
   background: rgba(255, 255, 255, 0.08);
 }
 
-.fa-nexus-drop-shadow__preset.is-active {
+.fa-nexus-drop-shadow__preset.is-active,
+.fa-nexus-path-shadow__preset.is-active {
   border-color: rgba(95, 188, 255, 0.7);
   background: rgba(95, 188, 255, 0.15);
   color: #dceeff;
 }
 
-.fa-nexus-drop-shadow__preset.is-empty {
+.fa-nexus-drop-shadow__preset.is-empty,
+.fa-nexus-path-shadow__preset.is-empty {
   opacity: 0.65;
 }
 
@@ -820,6 +828,68 @@
 
 .fa-nexus-opacity-feather__hint {
   margin-top: -4px;
+}
+
+.fa-nexus-path-shadow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fa-nexus-path-shadow__toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fa-nexus-path-shadow__context-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fa-nexus-path-shadow__elevation {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fa-text-muted, #bbb);
+}
+
+.fa-nexus-path-shadow__hint {
+  margin: 0;
+  color: var(--fa-text-muted, #bbb);
+}
+
+.fa-nexus-path-shadow__sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fa-nexus-path-shadow__slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fa-nexus-path-shadow__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--color-text-light-6);
+}
+
+.fa-nexus-path-shadow__label {
+  font-weight: 600;
+  color: var(--color-text-light-5);
+}
+
+.fa-nexus-path-shadow__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.fa-nexus-path-shadow__slider input[type="range"] {
+  width: 100%;
 }
 
 .fa-nexus-texture-layer input[type="range"] {

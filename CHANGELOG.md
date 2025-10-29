@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2025-10-29
+
+### Added
+- Premium paths now supports elevation based shadows with shadow geometry editing (Shift+click inserts points, Alt+click deletes), dedicated path shadow scale, offset, blur, opacity and dialation sliders, and adds saved presets.
+
+### Changed
+- Texture painting and Path placement remembers elevation between uses.
+
+
 ## [0.1.1] - 2025-10-26
 
 ### Added

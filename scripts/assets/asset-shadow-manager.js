@@ -1,4 +1,12 @@
 import { NexusLogger as Logger } from '../core/nexus-logger.js';
+import {
+  computeSamplesFromPoints as computePathSamples,
+  computeBoundsFromSamples as computePathBounds,
+  createMeshFromSamples as createPathMesh,
+  loadPathTexture,
+  DEFAULT_SEGMENT_SAMPLES as PATH_DEFAULT_SEGMENT_SAMPLES,
+  MIN_POINTS_TO_RENDER as PATH_MIN_POINTS
+} from '../paths/path-geometry.js';
 
 let _singleton = null;
 const MAX_OFFSET_DISTANCE = 40;
@@ -297,13 +305,16 @@ export class AssetShadowManager {
       const firstDoc = docs[0];
       const baseOptions = this._extractShadowBaseOptions(firstDoc);
       const tileConfigs = [];
+      const pathBoundsList = [];
       let maxOffsetX = Math.abs(baseOptions.offsetX);
       let maxOffsetY = Math.abs(baseOptions.offsetY);
       let maxDilation = baseOptions.dilation;
 
       for (const doc of docs) {
         const cfg = this._extractTileShadowConfig(doc, baseOptions);
-        tileConfigs.push({ doc, config: cfg });
+        const pathDescriptor = this._resolvePathShadowDescriptor(doc);
+        if (pathDescriptor?.bounds) pathBoundsList.push(pathDescriptor.bounds);
+        tileConfigs.push({ doc, config: cfg, path: pathDescriptor });
         if (Math.abs(cfg.offsetX) > maxOffsetX) maxOffsetX = Math.abs(cfg.offsetX);
         if (Math.abs(cfg.offsetY) > maxOffsetY) maxOffsetY = Math.abs(cfg.offsetY);
         if (cfg.dilation > maxDilation) maxDilation = cfg.dilation;
@@ -320,6 +331,9 @@ export class AssetShadowManager {
 
       const baseRect = this._getSceneRect();
       let sr = this._expandSceneRectForDocs(baseRect, docs);
+      if (pathBoundsList.length) {
+        sr = this._expandRectWithPathBounds(sr, pathBoundsList);
+      }
       sr = this._applyShadowMargins(sr, {
         offsetX: maxOffsetX,
         offsetY: maxOffsetY,
@@ -345,7 +359,7 @@ export class AssetShadowManager {
       }
 
       const drawContainer = new PIXI.Container();
-      const tempSprites = [];
+      const tempDisplayObjects = [];
       const dilationCache = new Map();
 
       const getOffsetsForRadius = (radius) => {
@@ -357,9 +371,31 @@ export class AssetShadowManager {
       };
 
       for (const entry of tileConfigs) {
-        const doc = entry.doc;
-        const cfg = entry.config;
+        const { doc, config: cfg, path } = entry;
         try {
+          const dilationRadius = Math.max(0, Number(cfg.dilation || 0)) * scale;
+          const offsets = getOffsetsForRadius(dilationRadius);
+          const offsetXScaled = Number(cfg.offsetX ?? 0) * scale;
+          const offsetYScaled = Number(cfg.offsetY ?? 0) * scale;
+          const applyOffsetX = path ? 0 : offsetXScaled;
+          const applyOffsetY = path ? 0 : offsetYScaled;
+
+          if (path && Array.isArray(path.samples) && path.samples.length >= PATH_MIN_POINTS) {
+            for (const offset of offsets) {
+              const mesh = await this._createPathShadowMesh(path, {
+                scale,
+                sceneRect: sr,
+                dilationOffset: offset,
+                offsetX: applyOffsetX,
+                offsetY: applyOffsetY
+              });
+              if (!mesh) continue;
+              drawContainer.addChild(mesh);
+              tempDisplayObjects.push(mesh);
+            }
+            continue;
+          }
+
           const tex = await this._obtainTexture(doc?.texture?.src);
           if (!tex) continue;
           const texScaleX = Number(doc?.texture?.scaleX ?? 1) || 1;
@@ -374,11 +410,6 @@ export class AssetShadowManager {
           const baseY = dy * scale;
           const rotationDeg = Number(doc.rotation || 0) * (Math.PI / 180);
 
-          const dilationRadius = Math.max(0, Number(cfg.dilation || 0)) * scale;
-          const offsets = getOffsetsForRadius(dilationRadius);
-          const offsetXScaled = Number(cfg.offsetX ?? 0) * scale;
-          const offsetYScaled = Number(cfg.offsetY ?? 0) * scale;
-
           for (const offset of offsets) {
             const sprite = new PIXI.Sprite(tex);
             sprite.anchor.set(0.5, 0.5);
@@ -386,11 +417,11 @@ export class AssetShadowManager {
             sprite.height = baseHeight;
             if (flipX < 0) sprite.scale.x *= -1;
             if (flipY < 0) sprite.scale.y *= -1;
-            sprite.position.set(baseX + offset.x + offsetXScaled, baseY + offset.y + offsetYScaled);
+            sprite.position.set(baseX + offset.x + applyOffsetX, baseY + offset.y + applyOffsetY);
             sprite.rotation = rotationDeg;
             sprite.alpha = 1;
             drawContainer.addChild(sprite);
-            tempSprites.push(sprite);
+            tempDisplayObjects.push(sprite);
           }
         } catch (e) {
           Logger.warn('AssetShadow.sprite.failed', String(e?.message || e));
@@ -399,8 +430,8 @@ export class AssetShadowManager {
 
       renderer.render(drawContainer, { renderTexture: rt, clear: true });
 
-      for (const sprite of tempSprites) {
-        try { sprite.destroy({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+      for (const displayObject of tempDisplayObjects) {
+        try { displayObject.destroy({ children: true, texture: false, baseTexture: false }); } catch (_) {}
       }
       try { drawContainer.destroy({ children: false }); } catch (_) {}
 
@@ -551,6 +582,67 @@ export class AssetShadowManager {
     };
   }
 
+  _resolvePathShadowDescriptor(doc) {
+    try {
+      const pathFlags = doc?.getFlag?.('fa-nexus', 'path');
+      const shadow = pathFlags?.shadow;
+      if (!shadow || !shadow.enabled) return null;
+      const pointsRaw = Array.isArray(shadow.points) ? shadow.points : [];
+      if (pointsRaw.length < PATH_MIN_POINTS) return null;
+      const tileX = Number(doc?.x) || 0;
+      const tileY = Number(doc?.y) || 0;
+      const points = [];
+      for (const raw of pointsRaw) {
+        if (!raw) continue;
+        const px = tileX + (Number(raw.x) || 0);
+        const py = tileY + (Number(raw.y) || 0);
+        if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+        points.push({
+          x: px,
+          y: py,
+          widthLeft: Number.isFinite(raw.widthLeft) ? Number(raw.widthLeft) : 1,
+          widthRight: Number.isFinite(raw.widthRight) ? Number(raw.widthRight) : 1
+        });
+      }
+      if (points.length < PATH_MIN_POINTS) return null;
+      const sampleCount = Math.max(2, Math.floor(pathFlags?.samplesPerSegment || PATH_DEFAULT_SEGMENT_SAMPLES));
+      const tension = Number(pathFlags?.tension ?? 0) || 0;
+      const closed = !!pathFlags?.closed && points.length >= PATH_MIN_POINTS;
+      const samples = computePathSamples(points, sampleCount, tension, { closed });
+      if (!Array.isArray(samples) || !samples.length) return null;
+      const shadowScale = Math.max(0.05, Number(pathFlags?.shadow?.scale) || 1);
+      const baseWidth = Math.max(1, Number(pathFlags?.width) || Number(doc?.width) || 1);
+      const pathWidth = baseWidth * shadowScale;
+      const repeatBase = Math.max(1e-3, Number(pathFlags?.repeatSpacing) || baseWidth);
+      const repeatSpacing = repeatBase * shadowScale;
+      const meshOptions = {
+        textureOffset: {
+          x: Number(pathFlags?.textureOffset?.x) || 0,
+          y: Number(pathFlags?.textureOffset?.y) || 0
+        },
+        textureFlip: {
+          horizontal: !!pathFlags?.textureFlip?.horizontal,
+          vertical: !!pathFlags?.textureFlip?.vertical
+        },
+        feather: pathFlags?.feather || {},
+        opacityFeather: pathFlags?.opacityFeather || {}
+      };
+      const bounds = computePathBounds(samples, pathWidth);
+      const textureSrc = pathFlags?.baseSrc || doc?.texture?.src || null;
+      return {
+        samples,
+        width: pathWidth,
+        repeatSpacing,
+        meshOptions,
+        bounds,
+        textureSrc
+      };
+    } catch (error) {
+      Logger.warn('AssetShadow.pathDescriptor.failed', String(error?.message || error));
+      return null;
+    }
+  }
+
   _buildDilationOffsets(radius) {
     const offsets = [{ x: 0, y: 0 }];
     const r = Math.max(0, Number(radius || 0));
@@ -569,6 +661,70 @@ export class AssetShadowManager {
       }
     }
     return offsets;
+  }
+
+  async _obtainPathShadowTexture(src) {
+    if (!src) return null;
+    const encoded = AssetShadowManager._encode(src);
+    const key = `path:${encoded}`;
+    const cached = this._textureCache.get(key);
+    if (cached && cached.texture && !cached.texture.baseTexture?.destroyed) {
+      return cached.texture;
+    }
+    try {
+      const texture = await loadPathTexture(src, { attempts: 2, timeout: 6000, bustCacheOnRetry: false });
+      const base = texture?.baseTexture;
+      if (base) {
+        try { base.wrapMode = PIXI.WRAP_MODES.REPEAT; } catch (_) {}
+        try { base.mipmap = PIXI.MIPMAP_MODES.OFF; } catch (_) {}
+      }
+      this._textureCache.set(key, { texture, ts: Date.now() });
+      return texture;
+    } catch (error) {
+      Logger.warn('AssetShadow.pathTexture.failed', String(error?.message || error));
+      return null;
+    }
+  }
+
+  async _createPathShadowMesh(descriptor, context = {}) {
+    try {
+      if (!descriptor || !Array.isArray(descriptor.samples) || !descriptor.samples.length) return null;
+      const texture = await this._obtainPathShadowTexture(descriptor.textureSrc);
+      if (!texture) return null;
+      const mesh = createPathMesh(
+        descriptor.samples,
+        descriptor.width,
+        descriptor.repeatSpacing,
+        texture,
+        descriptor.meshOptions || {}
+      );
+      if (!mesh) return null;
+      mesh.eventMode = 'none';
+      const uniforms = mesh.shader?.uniforms;
+      if (uniforms?.uColor instanceof Float32Array) {
+        uniforms.uColor[0] = 0;
+        uniforms.uColor[1] = 0;
+        uniforms.uColor[2] = 0;
+        uniforms.uColor[3] = 1;
+      } else if (uniforms) {
+        mesh.shader.uniforms.uColor = new Float32Array([0, 0, 0, 1]);
+      }
+      const scale = Number(context.scale) || 1;
+      const sceneRect = context.sceneRect || { x: 0, y: 0 };
+      mesh.scale.set(scale, scale);
+      const offset = context.dilationOffset || { x: 0, y: 0 };
+      const offsetX = Number(context.offsetX || 0);
+      const offsetY = Number(context.offsetY || 0);
+      mesh.position.set(
+        (-sceneRect.x * scale) + offset.x + offsetX,
+        (-sceneRect.y * scale) + offset.y + offsetY
+      );
+      mesh.alpha = 1;
+      return mesh;
+    } catch (error) {
+      Logger.warn('AssetShadow.pathMesh.failed', String(error?.message || error));
+      return null;
+    }
   }
 
   _applyShadowMargins(sceneRect, options = {}) {
@@ -949,6 +1105,34 @@ export class AssetShadowManager {
     } catch (error) {
       Logger.warn('AssetShadow.applyElevation.failed', String(error?.message || error));
       return false;
+    }
+  }
+
+  _expandRectWithPathBounds(rect, boundsList) {
+    try {
+      if (!rect || !Array.isArray(boundsList) || !boundsList.length) return rect;
+      let minX = Number.isFinite(rect?.x) ? rect.x : Infinity;
+      let minY = Number.isFinite(rect?.y) ? rect.y : Infinity;
+      let maxX = Number.isFinite(rect?.x + rect?.width) ? rect.x + rect.width : -Infinity;
+      let maxY = Number.isFinite(rect?.y + rect?.height) ? rect.y + rect.height : -Infinity;
+      for (const bounds of boundsList) {
+        if (!bounds) continue;
+        if (Number.isFinite(bounds.minX)) minX = Math.min(minX, bounds.minX);
+        if (Number.isFinite(bounds.minY)) minY = Math.min(minY, bounds.minY);
+        if (Number.isFinite(bounds.maxX)) maxX = Math.max(maxX, bounds.maxX);
+        if (Number.isFinite(bounds.maxY)) maxY = Math.max(maxY, bounds.maxY);
+      }
+      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+        return rect;
+      }
+      return {
+        x: Math.floor(minX),
+        y: Math.floor(minY),
+        width: Math.max(1, Math.ceil(maxX - minX)),
+        height: Math.max(1, Math.ceil(maxY - minY))
+      };
+    } catch (_) {
+      return rect;
     }
   }
 

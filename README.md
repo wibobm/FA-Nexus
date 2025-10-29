@@ -1,7 +1,7 @@
 # FA Nexus
 
 ![Foundry VTT v13](https://img.shields.io/badge/Foundry%20VTT-v13+-green)
-![Version](https://img.shields.io/badge/version-0.1.0-orange)
+![Version](https://img.shields.io/badge/version-0.1.3-orange)
 ![Status](https://img.shields.io/badge/status-Beta-yellow)
 
 FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Foundry VTT. It brings tokens, assets, premium texture tools, and path editing into a single streamlined window. Launch the app from the FA Nexus button above the player list and dive straight into the full catalog of free Forgotten Adventures content—no manual setup required.
@@ -80,7 +80,7 @@ https://github.com/user-attachments/assets/9d5898ea-319b-4c3a-8363-1f766b4e2b7b
 - **Path Texture controls:** Set scale, opacity, flip and offsets on the fly.
 - **Feathered endings:** Taper opacity, shrink width on both ends independently for natural blends.
 - **Per-point width control:** Pinch or bulge individual points for finer width adjustments.
-- **Instant interactivity cleanup:** Cancel or stop sessions to release canvas locks and restore default tile interaction automatically.
+- **Path Shadows:**  Elevation based shadows (same as Assets) with path shadow geometry editing.
 - **Texture swap:** Simply select a different texture from the main window to swap textures during editing.
 - **Save as Tile**: Once you are happywith the masked texture, press S to save as Foundry Tile!
 

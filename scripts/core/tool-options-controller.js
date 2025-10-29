@@ -200,6 +200,37 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._boundRotationInput = (event) => this._handleRotationInput(event);
     this._boundRotationStrength = (event) => this._handleRotationStrength(event);
     this._boundRotationRandom = (event) => this._handleRotationRandom(event);
+    this._pathShadowRoot = null;
+    this._pathShadowToggle = null;
+    this._pathShadowEditToggle = null;
+    this._pathShadowOffsetSlider = null;
+    this._pathShadowOffsetDisplay = null;
+    this._pathShadowAlphaSlider = null;
+    this._pathShadowAlphaDisplay = null;
+    this._pathShadowBlurSlider = null;
+    this._pathShadowBlurDisplay = null;
+    this._pathShadowDilationSlider = null;
+    this._pathShadowDilationDisplay = null;
+    this._pathShadowPresetsRoot = null;
+    this._pathShadowPresetButtons = [];
+    this._pathShadowResetButton = null;
+    this._pathShadowElevationDisplay = null;
+    this._pathShadowNoteDisplay = null;
+    this._boundPathShadowToggle = (event) => this._handlePathShadowToggle(event);
+    this._boundPathShadowEditToggle = (event) => this._handlePathShadowEdit(event);
+    this._boundPathShadowScaleInput = (event) => this._handlePathShadowSlider(event, 'setPathShadowScale', false);
+    this._boundPathShadowScaleCommit = (event) => this._handlePathShadowSlider(event, 'setPathShadowScale', true);
+    this._boundPathShadowOffsetInput = (event) => this._handlePathShadowSlider(event, 'setPathShadowOffset', false);
+    this._boundPathShadowOffsetCommit = (event) => this._handlePathShadowSlider(event, 'setPathShadowOffset', true);
+    this._boundPathShadowAlphaInput = (event) => this._handlePathShadowSlider(event, 'setPathShadowAlpha', false);
+    this._boundPathShadowAlphaCommit = (event) => this._handlePathShadowSlider(event, 'setPathShadowAlpha', true);
+    this._boundPathShadowBlurInput = (event) => this._handlePathShadowSlider(event, 'setPathShadowBlur', false);
+    this._boundPathShadowBlurCommit = (event) => this._handlePathShadowSlider(event, 'setPathShadowBlur', true);
+    this._boundPathShadowDilationInput = (event) => this._handlePathShadowSlider(event, 'setPathShadowDilation', false);
+    this._boundPathShadowDilationCommit = (event) => this._handlePathShadowSlider(event, 'setPathShadowDilation', true);
+    this._boundPathShadowPresetClick = (event) => this._handlePathShadowPresetClick(event);
+    this._boundPathShadowPresetContext = (event) => this._handlePathShadowPresetContext(event);
+    this._boundPathShadowReset = (event) => this._handlePathShadowReset(event);
     this._pathFeatherRoot = null;
     this._pathFeatherStartToggle = null;
     this._pathFeatherEndToggle = null;
@@ -312,6 +343,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       ['pathAppearance', 'scale', 'available'],
       ['pathAppearance', 'textureOffset', 'available'],
       ['pathAppearance', 'tension', 'available'],
+      ['pathShadow', 'available'],
       ['pathFeather', 'available'],
       ['opacityFeather', 'available'],
       ['dropShadowControls', 'available'],
@@ -354,6 +386,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._syncFlipControls();
       this._syncScaleControls();
       this._syncRotationControls();
+      this._syncPathShadowControls();
       this._syncPathFeatherControls();
       this._syncOpacityFeatherControls();
       this._syncShortcutsControls();
@@ -426,6 +459,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     const texturePaint = this._prepareTexturePaintContext(options.texturePaint);
     const textureOffset = this._prepareTextureOffsetContext(options.textureOffset);
     const layerOpacity = this._prepareLayerOpacityContext(options.layerOpacity);
+    const pathShadow = this._preparePathShadowContext(options.pathShadow);
     const pathAppearance = this._preparePathAppearanceContext(options.pathAppearance);
     const pathFeather = this._preparePathFeatherContext(options.pathFeather);
     const opacityFeather = this._prepareOpacityFeatherContext(options.opacityFeather);
@@ -451,6 +485,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       texturePaint,
       textureOffset,
       layerOpacity,
+      pathShadow,
       pathAppearance,
       pathFeather,
       opacityFeather
@@ -791,6 +826,80 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     };
   }
 
+  _preparePathShadowContext(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) {
+      return { available: false };
+    }
+    const coerceNumber = (value, fallback) => {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : fallback;
+    };
+    const coerceString = (value, fallback = '') => (typeof value === 'string' ? value : fallback);
+    const coerceBool = (value) => !!value;
+    const normalizeSlider = (config = {}, defaults = {}) => ({
+      min: coerceNumber(config.min, defaults.min ?? 0),
+      max: coerceNumber(config.max, defaults.max ?? 1),
+      step: coerceNumber(config.step, defaults.step ?? 0.1),
+      value: coerceNumber(config.value, defaults.value ?? 0),
+      display: coerceString(config.display, defaults.display ?? String(coerceNumber(config.value, defaults.value ?? 0))),
+      disabled: coerceBool(config.disabled),
+      hint: coerceString(config.hint, '')
+    });
+    const normalizePreset = (entry, index) => {
+      const data = entry && typeof entry === 'object' ? entry : {};
+      const saved = coerceBool(data.saved);
+      const idx = Number.isInteger(data.index) ? Number(data.index) : index;
+      const label = coerceString(data.label, String(index + 1));
+      const baseTooltip = saved
+        ? `Click to apply preset ${index + 1}.`
+        : `Shift+Click to save preset ${index + 1}.`;
+      const tooltip = coerceString(data.tooltip, baseTooltip);
+      return {
+        index: idx,
+        label,
+        saved,
+        active: coerceBool(data.active),
+        tooltip
+      };
+    };
+    return {
+      available: true,
+      enabled: coerceBool(raw.enabled),
+      disabled: coerceBool(raw.disabled),
+      editMode: coerceBool(raw.editMode),
+      editDisabled: coerceBool(raw.editDisabled),
+      activePreset: Number.isInteger(raw.activePreset) ? Number(raw.activePreset) : -1,
+      presets: Array.isArray(raw.presets) ? raw.presets.map((entry, index) => normalizePreset(entry, index)) : [],
+      presetsHint: coerceString(raw.presetsHint, ''),
+      reset: (() => {
+        const resetRaw = raw.reset && typeof raw.reset === 'object' ? raw.reset : {};
+        return {
+          disabled: coerceBool(resetRaw.disabled),
+          tooltip: coerceString(resetRaw.tooltip, '')
+        };
+      })(),
+      context: (() => {
+        const contextRaw = raw.context && typeof raw.context === 'object' ? raw.context : {};
+        return {
+          display: coerceString(contextRaw.display, '0'),
+          note: coerceString(contextRaw.note, '')
+        };
+      })(),
+      scale: normalizeSlider(raw.scale, {
+        min: 10,
+        max: 250,
+        step: 1,
+        value: 100,
+        display: '100%',
+        disabled: false
+      }),
+      offset: normalizeSlider(raw.offset, { min: 0, max: 0, step: 0.1, value: 0, display: '0' }),
+      alpha: normalizeSlider(raw.alpha, { min: 0, max: 1, step: 0.01, value: 1, display: '100%' }),
+      blur: normalizeSlider(raw.blur, { min: 0, max: 5, step: 0.1, value: 0, display: '0 px' }),
+      dilation: normalizeSlider(raw.dilation, { min: 0, max: 5, step: 0.1, value: 0, display: '0 px' })
+    };
+  }
+
   _prepareDropShadowControls(raw, dropShadowState) {
     if (!raw || typeof raw !== 'object' || !raw.available) {
       return { available: false };
@@ -1055,6 +1164,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._bindFlipControls();
       this._bindScaleControls();
       this._bindRotationControls();
+      this._bindPathShadowControls();
       this._bindPathFeatherControls();
       this._bindOpacityFeatherControls();
       this._bindCustomToggles();
@@ -1124,6 +1234,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._unbindFlipControls();
     this._unbindScaleControls();
     this._unbindRotationControls();
+    this._unbindPathShadowControls();
     this._unbindPathFeatherControls();
     this._unbindOpacityFeatherControls();
     this._unbindShortcutsControls();
@@ -2828,6 +2939,364 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     event?.preventDefault?.();
     if (this._controller?.invokeToolHandler) {
       this._controller.invokeToolHandler('toggleRotationRandom');
+    }
+  }
+
+  _bindPathShadowControls() {
+    const root = this.element?.querySelector('[data-fa-nexus-path-shadow]') || null;
+    if (!root) {
+      this._unbindPathShadowControls();
+      return;
+    }
+    if (this._pathShadowRoot === root) {
+      this._syncPathShadowControls();
+      return;
+    }
+    this._unbindPathShadowControls();
+    this._pathShadowRoot = root;
+    const toggle = root.querySelector('[data-fa-nexus-path-shadow-toggle]') || null;
+    if (toggle) {
+      toggle.addEventListener('change', this._boundPathShadowToggle);
+      this._pathShadowToggle = toggle;
+    }
+    const editToggle = root.querySelector('[data-fa-nexus-path-shadow-edit]') || null;
+    if (editToggle) {
+      editToggle.addEventListener('change', this._boundPathShadowEditToggle);
+      this._pathShadowEditToggle = editToggle;
+    }
+    this._pathShadowPresetsRoot = root.querySelector('[data-fa-nexus-path-shadow-presets]') || null;
+    if (this._pathShadowPresetsRoot) {
+      this._pathShadowPresetButtons = Array.from(this._pathShadowPresetsRoot.querySelectorAll('[data-fa-nexus-path-shadow-preset]'));
+      for (const button of this._pathShadowPresetButtons) {
+        button.addEventListener('click', this._boundPathShadowPresetClick);
+        button.addEventListener('contextmenu', this._boundPathShadowPresetContext);
+      }
+    } else {
+      this._pathShadowPresetButtons = [];
+    }
+    this._pathShadowResetButton = root.querySelector('[data-fa-nexus-path-shadow-reset]') || null;
+    if (this._pathShadowResetButton) {
+      this._pathShadowResetButton.addEventListener('click', this._boundPathShadowReset);
+    }
+    this._pathShadowElevationDisplay = root.querySelector('[data-fa-nexus-path-shadow-elevation]') || null;
+    this._pathShadowNoteDisplay = root.querySelector('[data-fa-nexus-path-shadow-note]') || null;
+    const scaleSlider = root.querySelector('[data-fa-nexus-path-shadow-scale]') || null;
+    if (scaleSlider) {
+      scaleSlider.addEventListener('input', this._boundPathShadowScaleInput);
+      scaleSlider.addEventListener('change', this._boundPathShadowScaleCommit);
+      this._pathShadowScaleSlider = scaleSlider;
+    }
+    const offsetSlider = root.querySelector('[data-fa-nexus-path-shadow-offset]') || null;
+    if (offsetSlider) {
+      offsetSlider.addEventListener('input', this._boundPathShadowOffsetInput);
+      offsetSlider.addEventListener('change', this._boundPathShadowOffsetCommit);
+      this._pathShadowOffsetSlider = offsetSlider;
+    }
+    const alphaSlider = root.querySelector('[data-fa-nexus-path-shadow-alpha]') || null;
+    if (alphaSlider) {
+      alphaSlider.addEventListener('input', this._boundPathShadowAlphaInput);
+      alphaSlider.addEventListener('change', this._boundPathShadowAlphaCommit);
+      this._pathShadowAlphaSlider = alphaSlider;
+    }
+    const blurSlider = root.querySelector('[data-fa-nexus-path-shadow-blur]') || null;
+    if (blurSlider) {
+      blurSlider.addEventListener('input', this._boundPathShadowBlurInput);
+      blurSlider.addEventListener('change', this._boundPathShadowBlurCommit);
+      this._pathShadowBlurSlider = blurSlider;
+    }
+    const dilationSlider = root.querySelector('[data-fa-nexus-path-shadow-dilation]') || null;
+    if (dilationSlider) {
+      dilationSlider.addEventListener('input', this._boundPathShadowDilationInput);
+      dilationSlider.addEventListener('change', this._boundPathShadowDilationCommit);
+      this._pathShadowDilationSlider = dilationSlider;
+    }
+    this._pathShadowScaleDisplay = root.querySelector('[data-fa-nexus-path-shadow-scale-display]') || null;
+    this._pathShadowOffsetDisplay = root.querySelector('[data-fa-nexus-path-shadow-offset-display]') || null;
+    this._pathShadowAlphaDisplay = root.querySelector('[data-fa-nexus-path-shadow-alpha-display]') || null;
+    this._pathShadowBlurDisplay = root.querySelector('[data-fa-nexus-path-shadow-blur-display]') || null;
+    this._pathShadowDilationDisplay = root.querySelector('[data-fa-nexus-path-shadow-dilation-display]') || null;
+    this._syncPathShadowControls();
+  }
+
+  _unbindPathShadowControls() {
+    if (this._pathShadowToggle) {
+      try { this._pathShadowToggle.removeEventListener('change', this._boundPathShadowToggle); }
+      catch (_) {}
+    }
+    if (this._pathShadowEditToggle) {
+      try { this._pathShadowEditToggle.removeEventListener('change', this._boundPathShadowEditToggle); }
+      catch (_) {}
+    }
+    if (Array.isArray(this._pathShadowPresetButtons) && this._pathShadowPresetButtons.length) {
+      for (const button of this._pathShadowPresetButtons) {
+        try { button.removeEventListener('click', this._boundPathShadowPresetClick); } catch (_) {}
+        try { button.removeEventListener('contextmenu', this._boundPathShadowPresetContext); } catch (_) {}
+      }
+    }
+    if (this._pathShadowResetButton) {
+      try { this._pathShadowResetButton.removeEventListener('click', this._boundPathShadowReset); }
+      catch (_) {}
+    }
+    if (this._pathShadowScaleSlider) {
+      try {
+        this._pathShadowScaleSlider.removeEventListener('input', this._boundPathShadowScaleInput);
+        this._pathShadowScaleSlider.removeEventListener('change', this._boundPathShadowScaleCommit);
+      } catch (_) {}
+    }
+    if (this._pathShadowOffsetSlider) {
+      try {
+        this._pathShadowOffsetSlider.removeEventListener('input', this._boundPathShadowOffsetInput);
+        this._pathShadowOffsetSlider.removeEventListener('change', this._boundPathShadowOffsetCommit);
+      } catch (_) {}
+    }
+    if (this._pathShadowAlphaSlider) {
+      try {
+        this._pathShadowAlphaSlider.removeEventListener('input', this._boundPathShadowAlphaInput);
+        this._pathShadowAlphaSlider.removeEventListener('change', this._boundPathShadowAlphaCommit);
+      } catch (_) {}
+    }
+    if (this._pathShadowBlurSlider) {
+      try {
+        this._pathShadowBlurSlider.removeEventListener('input', this._boundPathShadowBlurInput);
+        this._pathShadowBlurSlider.removeEventListener('change', this._boundPathShadowBlurCommit);
+      } catch (_) {}
+    }
+    if (this._pathShadowDilationSlider) {
+      try {
+        this._pathShadowDilationSlider.removeEventListener('input', this._boundPathShadowDilationInput);
+        this._pathShadowDilationSlider.removeEventListener('change', this._boundPathShadowDilationCommit);
+      } catch (_) {}
+    }
+    this._pathShadowRoot = null;
+    this._pathShadowToggle = null;
+    this._pathShadowEditToggle = null;
+    this._pathShadowPresetsRoot = null;
+    this._pathShadowPresetButtons = [];
+    this._pathShadowResetButton = null;
+    this._pathShadowScaleSlider = null;
+    this._pathShadowOffsetSlider = null;
+    this._pathShadowAlphaSlider = null;
+    this._pathShadowBlurSlider = null;
+    this._pathShadowDilationSlider = null;
+    this._pathShadowScaleDisplay = null;
+    this._pathShadowOffsetDisplay = null;
+    this._pathShadowAlphaDisplay = null;
+    this._pathShadowBlurDisplay = null;
+    this._pathShadowDilationDisplay = null;
+    this._pathShadowElevationDisplay = null;
+    this._pathShadowNoteDisplay = null;
+  }
+
+  _syncPathShadowControls() {
+    const state = this._toolOptionState?.pathShadow || { available: false };
+    if (this._pathShadowRoot) {
+      this._pathShadowRoot.classList.toggle('is-hidden', !state.available);
+    }
+    if (!state.available) return;
+    if (this._pathShadowToggle) {
+      this._pathShadowToggle.checked = !!state.enabled;
+      this._pathShadowToggle.disabled = !!state.disabled;
+    }
+    if (this._pathShadowEditToggle) {
+      this._pathShadowEditToggle.checked = !!state.editMode;
+      this._pathShadowEditToggle.disabled = !state.enabled || !!state.editDisabled;
+    }
+    if (this._pathShadowElevationDisplay) {
+      const displayValue = state.context?.display ?? '0';
+      this._pathShadowElevationDisplay.textContent = `Elevation ${displayValue}`;
+    }
+    if (this._pathShadowNoteDisplay) {
+      const note = state.context?.note ?? '';
+      if (note) {
+        this._pathShadowNoteDisplay.textContent = note;
+        this._pathShadowNoteDisplay.classList.remove('is-hidden');
+      } else {
+        this._pathShadowNoteDisplay.textContent = '';
+        this._pathShadowNoteDisplay.classList.add('is-hidden');
+      }
+    }
+    const hasPresets = Array.isArray(state.presets) && state.presets.length > 0;
+    if (this._pathShadowPresetsRoot) {
+      this._pathShadowPresetsRoot.classList.toggle('is-hidden', !hasPresets);
+    }
+    if (hasPresets && Array.isArray(this._pathShadowPresetButtons) && this._pathShadowPresetButtons.length) {
+      for (const button of this._pathShadowPresetButtons) {
+        const index = Number(button.dataset.faNexusPathShadowPreset);
+        const preset = state.presets.find((entry) => Number(entry?.index) === index)
+          ?? state.presets[index] ?? null;
+        const saved = !!preset?.saved;
+        const active = !!preset?.active;
+        button.classList.toggle('is-active', active);
+        button.classList.toggle('is-empty', !saved);
+        if (preset?.label) button.textContent = preset.label;
+        if (preset?.tooltip) button.title = preset.tooltip;
+        button.disabled = !!state.disabled;
+      }
+    }
+    if (this._pathShadowResetButton) {
+      const disabled = !!state.reset?.disabled;
+      this._pathShadowResetButton.disabled = disabled;
+      const tooltip = state.reset?.tooltip;
+      if (tooltip && tooltip.length) this._pathShadowResetButton.title = tooltip;
+    }
+    if (this._pathShadowScaleSlider && state.scale) {
+      const cfg = state.scale;
+      if (cfg.min !== undefined) this._pathShadowScaleSlider.min = String(cfg.min);
+      if (cfg.max !== undefined) this._pathShadowScaleSlider.max = String(cfg.max);
+      if (cfg.step !== undefined) this._pathShadowScaleSlider.step = String(cfg.step);
+      if (cfg.value !== undefined) {
+        const next = String(cfg.value);
+        if (this._pathShadowScaleSlider.value !== next) this._pathShadowScaleSlider.value = next;
+      }
+      this._pathShadowScaleSlider.disabled = !!cfg.disabled;
+      if (this._pathShadowScaleDisplay && cfg.display !== undefined) {
+        this._pathShadowScaleDisplay.textContent = String(cfg.display);
+      }
+    }
+    if (this._pathShadowOffsetSlider && state.offset) {
+      const cfg = state.offset;
+      if (cfg.min !== undefined) this._pathShadowOffsetSlider.min = String(cfg.min);
+      if (cfg.max !== undefined) this._pathShadowOffsetSlider.max = String(cfg.max);
+      if (cfg.step !== undefined) this._pathShadowOffsetSlider.step = String(cfg.step);
+      if (cfg.value !== undefined) {
+        const next = String(cfg.value);
+        if (this._pathShadowOffsetSlider.value !== next) this._pathShadowOffsetSlider.value = next;
+      }
+      this._pathShadowOffsetSlider.disabled = !!cfg.disabled;
+      if (this._pathShadowOffsetDisplay && cfg.display !== undefined) {
+        this._pathShadowOffsetDisplay.textContent = String(cfg.display);
+      }
+    }
+    if (this._pathShadowAlphaSlider && state.alpha) {
+      const cfg = state.alpha;
+      if (cfg.min !== undefined) this._pathShadowAlphaSlider.min = String(cfg.min);
+      if (cfg.max !== undefined) this._pathShadowAlphaSlider.max = String(cfg.max);
+      if (cfg.step !== undefined) this._pathShadowAlphaSlider.step = String(cfg.step);
+      if (cfg.value !== undefined) {
+        const next = String(cfg.value);
+        if (this._pathShadowAlphaSlider.value !== next) this._pathShadowAlphaSlider.value = next;
+      }
+      this._pathShadowAlphaSlider.disabled = !!cfg.disabled;
+      if (this._pathShadowAlphaDisplay && cfg.display !== undefined) {
+        this._pathShadowAlphaDisplay.textContent = String(cfg.display);
+      }
+    }
+    if (this._pathShadowBlurSlider && state.blur) {
+      const cfg = state.blur;
+      if (cfg.min !== undefined) this._pathShadowBlurSlider.min = String(cfg.min);
+      if (cfg.max !== undefined) this._pathShadowBlurSlider.max = String(cfg.max);
+      if (cfg.step !== undefined) this._pathShadowBlurSlider.step = String(cfg.step);
+      if (cfg.value !== undefined) {
+        const next = String(cfg.value);
+        if (this._pathShadowBlurSlider.value !== next) this._pathShadowBlurSlider.value = next;
+      }
+      this._pathShadowBlurSlider.disabled = !!cfg.disabled;
+      if (this._pathShadowBlurDisplay && cfg.display !== undefined) {
+        this._pathShadowBlurDisplay.textContent = String(cfg.display);
+      }
+    }
+    if (this._pathShadowDilationSlider && state.dilation) {
+      const cfg = state.dilation;
+      if (cfg.min !== undefined) this._pathShadowDilationSlider.min = String(cfg.min);
+      if (cfg.max !== undefined) this._pathShadowDilationSlider.max = String(cfg.max);
+      if (cfg.step !== undefined) this._pathShadowDilationSlider.step = String(cfg.step);
+      if (cfg.value !== undefined) {
+        const next = String(cfg.value);
+        if (this._pathShadowDilationSlider.value !== next) this._pathShadowDilationSlider.value = next;
+      }
+      this._pathShadowDilationSlider.disabled = !!cfg.disabled;
+      if (this._pathShadowDilationDisplay && cfg.display !== undefined) {
+        this._pathShadowDilationDisplay.textContent = String(cfg.display);
+      }
+    }
+  }
+
+  _handlePathShadowToggle(event) {
+    if (!this._controller?.invokeToolHandler) return;
+    const enabled = !!(event?.currentTarget?.checked ?? event?.target?.checked);
+    try { this._controller.invokeToolHandler('setPathShadowEnabled', enabled); }
+    catch (_) {}
+  }
+
+  _handlePathShadowEdit(event) {
+    if (!this._controller?.invokeToolHandler) return;
+    const enabled = !!(event?.currentTarget?.checked ?? event?.target?.checked);
+    try { this._controller.invokeToolHandler('setPathShadowEditMode', enabled); }
+    catch (_) {}
+  }
+
+  _handlePathShadowSlider(event, handlerId, commit) {
+    if (!this._controller?.invokeToolHandler) return;
+    const value = event?.currentTarget?.value ?? event?.target?.value;
+    const numeric = Number(value);
+    const payload = Number.isFinite(numeric) ? numeric : value;
+    try { this._controller.invokeToolHandler(handlerId, payload, !!commit); }
+    catch (_) {}
+  }
+
+  _handlePathShadowPresetClick(event) {
+    const button = event?.currentTarget || event?.target;
+    if (!button) return;
+    const index = Number(button.dataset.faNexusPathShadowPreset);
+    if (!Number.isInteger(index)) return;
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const save = !!(event?.shiftKey || event?.altKey || event?.metaKey);
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('handlePathShadowPreset', index, save);
+      if (result?.then) {
+        result.catch(() => {}).finally(() => this._syncPathShadowControls());
+      } else {
+        this._syncPathShadowControls();
+      }
+    } catch (_) {
+      this._syncPathShadowControls();
+    }
+  }
+
+  _handlePathShadowPresetContext(event) {
+    const button = event?.currentTarget || event?.target;
+    if (!button) return;
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const index = Number(button.dataset.faNexusPathShadowPreset);
+    if (!Number.isInteger(index)) return;
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('handlePathShadowPreset', index, true);
+      if (result?.then) {
+        result.catch(() => {}).finally(() => this._syncPathShadowControls());
+      } else {
+        this._syncPathShadowControls();
+      }
+    } catch (_) {
+      this._syncPathShadowControls();
+    }
+  }
+
+  _handlePathShadowReset(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('resetPathShadowSettings');
+      if (result?.then) {
+        result.catch(() => {}).finally(() => this._syncPathShadowControls());
+      } else {
+        this._syncPathShadowControls();
+      }
+    } catch (_) {
+      this._syncPathShadowControls();
     }
   }
 

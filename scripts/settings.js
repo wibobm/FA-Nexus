@@ -112,6 +112,13 @@ export function registerFaNexusSettings() {
     config: false,
     onChange: notifyShadowSetting('assetDropShadowPresets')
   });
+  client('pathShadowPresets', {
+    name: 'Path Shadow Presets',
+    type: String,
+    default: '[]',
+    config: false,
+    onChange: notifyShadowSetting('pathShadowPresets')
+  });
   client('tokenElevationOffset', {
     name: 'Keep Tokens Above Tile Elevations',
     type: Boolean,
