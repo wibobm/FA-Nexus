@@ -69,6 +69,10 @@ https://github.com/user-attachments/assets/b39f4b08-660e-4cac-af7e-9c4360ad513e
 - **Texture swap:** Simply select a different texture from the main window to swap textures during editing.
 - **Save as Tile**: Once you are happywith the masked texture, press S to save as Foundry Tile!
 
+
+https://github.com/user-attachments/assets/9d5898ea-319b-4c3a-8363-1f766b4e2b7b
+
+
 ---
 
 ## Premium Path Placement *(Adventurer tier $7+)*
@@ -79,6 +83,8 @@ https://github.com/user-attachments/assets/b39f4b08-660e-4cac-af7e-9c4360ad513e
 - **Instant interactivity cleanup:** Cancel or stop sessions to release canvas locks and restore default tile interaction automatically.
 - **Texture swap:** Simply select a different texture from the main window to swap textures during editing.
 - **Save as Tile**: Once you are happywith the masked texture, press S to save as Foundry Tile!
+
+https://github.com/user-attachments/assets/5e8b8d4e-74a4-4776-a6e5-0868053bfc29
 
 ---
 
