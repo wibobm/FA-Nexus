@@ -901,6 +901,66 @@
   margin-top: 14px;
 }
 
+.fa-nexus-tile-flatten {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem 0.5rem 0.5rem;
+}
+
+.fa-nexus-dialog-header > h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.fa-nexus-dialog-header > p {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.fa-nexus-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fa-nexus-tile-flatten .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.fa-nexus-tile-flatten .form-group label {
+  font-weight: 600;
+}
+
+.fa-nexus-tile-flatten .form-group .hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-dark-secondary, #7a7a7a);
+}
+
+.fa-nexus-dialog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--color-text-dark-secondary, #7a7a7a);
+}
+
+.fa-nexus-dialog-meta .meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.fa-nexus-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 
 .fa-nexus-texture-layer__hint {
   margin-top: 6px;

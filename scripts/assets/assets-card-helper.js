@@ -518,8 +518,15 @@ export class AssetsTabCardHelper {
         Logger.warn('AssetsTab.texture.paint.stop.failed', { error: String(stopError?.message || stopError) });
       }
       const isCached = (cardElement.getAttribute('data-cached') === 'true');
-      if (isCached) localPath = cardElement.getAttribute('data-url') || '';
-      if (!localPath) {
+      if (isCached) {
+        localPath = cardElement.getAttribute('data-url') || '';
+      }
+      if (!localPath && !isCloud) {
+        // For local assets, use the item's path properties directly
+        localPath = item?.cachedLocalPath || item?.file_path || item?.path || item?.url || cardElement.getAttribute('data-url') || filePathAttr || '';
+      }
+      if (!localPath && isCloud) {
+        // For cloud assets, try to find locally downloaded version
         localPath = download?.getLocalPath?.('assets', { filename, file_path: filePathAttr, path: folderPath }) || '';
       }
       if (!localPath && isCloud && content && download) {
@@ -616,8 +623,15 @@ export class AssetsTabCardHelper {
     }
     try {
       const isCached = (cardElement.getAttribute('data-cached') === 'true');
-      if (isCached) localPath = cardElement.getAttribute('data-url') || '';
-      if (!localPath) {
+      if (isCached) {
+        localPath = cardElement.getAttribute('data-url') || '';
+      }
+      if (!localPath && !isCloud) {
+        // For local assets, use the item's path properties directly
+        localPath = item?.cachedLocalPath || item?.file_path || item?.path || item?.url || cardElement.getAttribute('data-url') || filePathAttr || '';
+      }
+      if (!localPath && isCloud) {
+        // For cloud assets, try to find locally downloaded version
         localPath = download?.getLocalPath?.('assets', { filename, file_path: filePathAttr, path: folderPath }) || '';
       }
       if (!localPath && isCloud && content && download) {

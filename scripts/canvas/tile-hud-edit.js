@@ -1,6 +1,16 @@
 import { NexusLogger as Logger } from '../core/nexus-logger.js';
+import { TileFlattenManager } from './tile-flatten-manager.js';
 
 const BUTTON_ACTION = 'fa-nexus-edit';
+const FLATTEN_ACTION = 'fa-nexus-flatten';
+const DECONSTRUCT_ACTION = 'fa-nexus-deconstruct';
+
+let _tileFlattenManager = null;
+
+function getTileFlattenManager() {
+  if (!_tileFlattenManager) _tileFlattenManager = new TileFlattenManager();
+  return _tileFlattenManager;
+}
 
 function resolveTileDocument(hud) {
   try {
@@ -60,6 +70,66 @@ function ensureButton(root, mode) {
       ? 'Edit Mask in FA Nexus'
       : 'Edit Asset in FA Nexus';
   button.dataset.mode = mode;
+  button.dataset.tooltip = label;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  return button;
+}
+
+function ensureFlattenButton(root, count) {
+  const column = root?.querySelector?.('.col.right') || null;
+  const existing = column?.querySelector?.(`button[data-action="${FLATTEN_ACTION}"]`) || null;
+
+  if (!column || !count || count < 2) {
+    if (existing) existing.remove();
+    return null;
+  }
+
+  let button = existing;
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'control-icon fa-nexus-flatten';
+    button.dataset.action = FLATTEN_ACTION;
+    button.innerHTML = '<i class="fas fa-compress-arrows-alt"></i>';
+    column.appendChild(button);
+  }
+
+  const label = `Flatten ${count} selected tile${count === 1 ? '' : 's'} in FA Nexus`;
+  button.dataset.count = String(count);
+  button.dataset.tooltip = label;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  return button;
+}
+
+function ensureDeconstructButton(root, doc) {
+  const column = root?.querySelector?.('.col.right') || null;
+  const existing = column?.querySelector?.(`button[data-action="${DECONSTRUCT_ACTION}"]`) || null;
+  const isFlattened = TileFlattenManager.isFlattenedTile(doc);
+
+  if (!column || !doc || !isFlattened) {
+    if (existing) existing.remove();
+    return null;
+  }
+
+  let button = existing;
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'control-icon fa-nexus-deconstruct';
+    button.dataset.action = DECONSTRUCT_ACTION;
+    button.innerHTML = '<i class="fas fa-object-ungroup"></i>';
+    column.appendChild(button);
+  }
+
+  let metadata = null;
+  try { metadata = doc.getFlag?.('fa-nexus', 'flattened'); } catch (_) {}
+  const tileCount = Number(metadata?.originalTileCount ?? metadata?.tiles?.length ?? 0) || 0;
+  const label = tileCount
+    ? `Deconstruct into ${tileCount} tile${tileCount === 1 ? '' : 's'} in FA Nexus`
+    : 'Deconstruct flattened tiles in FA Nexus';
+  button.dataset.count = tileCount ? String(tileCount) : '';
   button.dataset.tooltip = label;
   button.setAttribute('aria-label', label);
   button.title = label;
@@ -151,9 +221,87 @@ async function launchEditor(doc, mode) {
 Hooks.on('renderTileHUD', (hud, html) => {
   try {
     const doc = resolveTileDocument(hud);
-    const mode = getTileMode(doc);
     const root = resolveHudElement(hud, html);
     if (!root) return;
+
+    const manager = getTileFlattenManager();
+    let updateFlattenState = () => {};
+    let updateDeconstructState = () => {};
+    const refreshStates = () => {
+      try { updateFlattenState(); } catch (_) {}
+      try { updateDeconstructState(); } catch (_) {}
+    };
+
+    const selectedTiles = TileFlattenManager.getSelectedTiles();
+    const flattenCount = Array.isArray(selectedTiles) ? selectedTiles.length : 0;
+    const flattenButton = ensureFlattenButton(root, flattenCount);
+    if (flattenButton) {
+      if (flattenButton._faNexusFlattenHandler) {
+        flattenButton.removeEventListener('click', flattenButton._faNexusFlattenHandler);
+      }
+      updateFlattenState = () => {
+        const selection = TileFlattenManager.getSelectedTiles();
+        const count = Array.isArray(selection) ? selection.length : 0;
+        const busy = manager?.isBusy ? manager.isBusy() : !!manager?._flattening;
+        const disabled = busy || count < 2;
+        flattenButton.disabled = disabled;
+        flattenButton.classList.toggle('disabled', disabled);
+        flattenButton.dataset.count = String(count);
+        const label = `Flatten ${count} selected tile${count === 1 ? '' : 's'} in FA Nexus`;
+        flattenButton.dataset.tooltip = label;
+        flattenButton.setAttribute('aria-label', label);
+        flattenButton.title = label;
+        if (busy) flattenButton.setAttribute('aria-busy', 'true');
+        else flattenButton.removeAttribute('aria-busy');
+      };
+      const handler = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        refreshStates();
+        manager.showFlattenDialog().catch((error) => {
+          Logger.warn('TileHud.flatten.failed', { error: String(error?.message || error) });
+          ui?.notifications?.error?.(`Failed to flatten tiles: ${error?.message || error}`);
+        }).finally(() => {
+          setTimeout(refreshStates, 10);
+        });
+      };
+      flattenButton._faNexusFlattenHandler = handler;
+      flattenButton.addEventListener('click', handler);
+      // Ensure UI reflects current manager state
+      updateFlattenState();
+    }
+
+    const deconstructButton = ensureDeconstructButton(root, doc);
+    if (deconstructButton) {
+      if (deconstructButton._faNexusDeconstructHandler) {
+        deconstructButton.removeEventListener('click', deconstructButton._faNexusDeconstructHandler);
+      }
+      updateDeconstructState = () => {
+        const busy = manager?.isBusy ? manager.isBusy() : !!manager?._flattening || !!manager?._deconstructing;
+        deconstructButton.disabled = busy;
+        deconstructButton.classList.toggle('disabled', busy);
+        if (busy) deconstructButton.setAttribute('aria-busy', 'true');
+        else deconstructButton.removeAttribute('aria-busy');
+      };
+      const handler = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        refreshStates();
+        manager.confirmAndDeconstructTile(doc).catch((error) => {
+          Logger.warn('TileHud.deconstruct.failed', { error: String(error?.message || error) });
+          ui?.notifications?.error?.(`Failed to deconstruct tile: ${error?.message || error}`);
+        }).finally(() => {
+          setTimeout(refreshStates, 10);
+        });
+      };
+      deconstructButton._faNexusDeconstructHandler = handler;
+      deconstructButton.addEventListener('click', handler);
+      updateDeconstructState();
+    } else {
+      updateDeconstructState = () => {};
+    }
+
+    const mode = getTileMode(doc);
     if (!mode) {
       const existing = root.querySelector(`button[data-action="${BUTTON_ACTION}"]`);
       if (existing) existing.remove();

@@ -7,6 +7,7 @@ const TILE_SELECTION_SETTING = 'tilePixelSelection';
 
 const _tempPointA = new PIXI.Point();
 const _tempPointB = new PIXI.Point();
+const _tempPointHandle = new PIXI.Point();
 
 class TileAlphaHitArea {
   constructor(tile) {
@@ -19,6 +20,7 @@ class TileAlphaHitArea {
     try {
       const world = tile.worldTransform.apply({ x: localX, y: localY }, _tempPointA);
       if (!world) return false;
+      if (TilePixelSelection._pointHitsResizeHandle(tile, world.x, world.y)) return true;
       return TilePixelSelection._pointHasVisibleAlpha(tile, world.x, world.y);
     } catch (err) {
       Logger.debug('TileAlphaHitArea.contains failed', err);
@@ -41,6 +43,7 @@ export class TilePixelSelection {
       this._canvasReady = true;
       this._alphaCache = new WeakMap();
       this._applyActivation({ rebindAll: true });
+      this._updateAllResizeHandles();
     });
 
     Hooks.on('canvasTearDown', () => {
@@ -57,13 +60,16 @@ export class TilePixelSelection {
         if (tile) this._handleTileLifecycle(tile);
       } catch (_) {}
     });
+    Hooks.on('controlTile', (tile) => { this._updateResizeHandleState(tile); });
     Hooks.on('updateSetting', (data) => {
       if (!data || data.namespace !== MODULE_ID || data.key !== TILE_SELECTION_SETTING) return;
       this._settingEnabled = this._getSettingEnabled();
       this._applyActivation({ rebindAll: true });
+      this._updateAllResizeHandles();
     });
 
     this._applyActivation({ rebindAll: true });
+    this._updateAllResizeHandles();
   }
 
   static _bindAllTiles() {
@@ -71,7 +77,10 @@ export class TilePixelSelection {
     try {
       const tiles = canvas.tiles?.placeables;
       if (!Array.isArray(tiles)) return;
-      for (const tile of tiles) this._bindTile(tile);
+      for (const tile of tiles) {
+        this._updateResizeHandleState(tile);
+        this._bindTile(tile);
+      }
     } catch (err) {
       Logger.debug('TilePixelSelection._bindAllTiles failed', err);
     }
@@ -89,6 +98,7 @@ export class TilePixelSelection {
 
   static _handleTileLifecycle(tile) {
     if (!tile || tile.destroyed) return;
+    this._updateResizeHandleState(tile);
     if (this._active) this._bindTile(tile);
     else this._unbindTile(tile);
   }
@@ -187,6 +197,82 @@ export class TilePixelSelection {
     } catch (err) {
       Logger.debug('TilePixelSelection._pointHasVisibleAlpha failed', err);
       return true;
+    }
+  }
+
+  static _pointHitsResizeHandle(tile, worldX, worldY) {
+    try {
+      if (!this._tileSupportsResizeHandle(tile)) return false;
+      const handle = tile?.frame?.handle;
+      if (!handle || handle.destroyed) return false;
+      if (!handle.visible || handle.worldAlpha <= 0 || handle.eventMode === 'none') return false;
+      if (typeof handle.containsPoint === 'function') {
+        return !!handle.containsPoint({ x: worldX, y: worldY });
+      }
+      const hitArea = handle.hitArea;
+      if (!hitArea || typeof hitArea.contains !== 'function') return false;
+      const local = handle.worldTransform?.applyInverse?.({ x: worldX, y: worldY }, _tempPointHandle);
+      if (!local) return false;
+      return !!hitArea.contains(local.x, local.y);
+    } catch (err) {
+      Logger.debug('TilePixelSelection._pointHitsResizeHandle failed', err);
+      return false;
+    }
+  }
+
+  static _tileSupportsResizeHandle(tile) {
+    try {
+      const doc = tile?.document;
+      if (!doc) return true;
+      if (doc.getFlag?.('fa-nexus', 'path')) return false;
+      if (doc.getFlag?.('fa-nexus', 'maskedTiling')) return false;
+    } catch (err) {
+      Logger.debug('TilePixelSelection._tileSupportsResizeHandle failed', err);
+    }
+    return true;
+  }
+
+  static _updateAllResizeHandles() {
+    try {
+      const tiles = canvas.tiles?.placeables;
+      if (!Array.isArray(tiles)) return;
+      for (const tile of tiles) this._updateResizeHandleState(tile);
+    } catch (err) {
+      Logger.debug('TilePixelSelection._updateAllResizeHandles failed', err);
+    }
+  }
+
+  static _updateResizeHandleState(tile) {
+    try {
+      const handle = tile?.frame?.handle;
+      if (!handle || handle.destroyed) return;
+      if (!handle._faNexusHandleDefaults) {
+        handle._faNexusHandleDefaults = {
+          alpha: typeof handle.alpha === 'number' ? handle.alpha : 1,
+          eventMode: handle.eventMode ?? 'static',
+          cursor: handle.cursor ?? 'pointer'
+        };
+      }
+      const supported = this._tileSupportsResizeHandle(tile);
+      if (!supported) {
+        handle.visible = false;
+        handle.alpha = 0;
+        handle.eventMode = 'none';
+        handle.cursor = 'default';
+        handle.scale?.set?.(1, 1);
+        handle._faNexusHandleUnsupported = true;
+        return;
+      }
+
+      const defaults = handle._faNexusHandleDefaults;
+      handle._faNexusHandleUnsupported = false;
+      handle.alpha = defaults.alpha ?? 1;
+      handle.cursor = defaults.cursor ?? 'pointer';
+      const shouldEnable = !!tile?.controlled && !tile?.document?.locked;
+      handle.eventMode = shouldEnable ? (defaults.eventMode ?? 'static') : 'none';
+      handle.visible = shouldEnable;
+    } catch (err) {
+      Logger.debug('TilePixelSelection._updateResizeHandleState failed', err);
     }
   }
 
