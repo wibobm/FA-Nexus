@@ -85,9 +85,18 @@ https://github.com/user-attachments/assets/9d5898ea-319b-4c3a-8363-1f766b4e2b7b
 - **Per-point width control:** Pinch or bulge individual points for finer width adjustments.
 - **Path Shadows:**  Elevation based shadows (same as Assets) with path shadow geometry editing.
 - **Texture swap:** Simply select a different texture from the main window to swap textures during editing.
-- **Save as Tile**: Once you are happywith the masked texture, press S to save as Foundry Tile!
+- **Save as Tile:** Once you are happywith the masked texture, press S to save as Foundry Tile!
 
 https://github.com/user-attachments/assets/5e8b8d4e-74a4-4776-a6e5-0868053bfc29
+
+---
+
+## Flatten & Deconstruct
+- **Merge Selected:** Select multiple tiles and flatten/merge them into a single webp tile for improved performance!
+- **Deconstruct flattened:** Flattened tiles can be deconstructed back to individual tiles if you need to fix something.
+(limited testing, we will improve upon this feature in the future)
+
+https://github.com/user-attachments/assets/a7f289df-8092-4af9-81a1-d238d125fc7c
 
 ---
 
