@@ -4,7 +4,7 @@
 
 
 ![Foundry VTT v13](https://img.shields.io/badge/Foundry%20VTT-v13+-green)
-![Version](https://img.shields.io/badge/version-0.1.2-orange)
+![Version](https://img.shields.io/badge/version-0.1.3-orange)
 ![Status](https://img.shields.io/badge/status-Beta-yellow)
 
 FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Foundry VTT. It brings tokens, assets, premium texture tools, and path editing into a single streamlined window. Launch the app from the FA Nexus button above the player list and dive straight into the full catalog of free Forgotten Adventures content—no manual setup required.
