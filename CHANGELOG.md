@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [0.1.3] - 2025-11-01
 
 ### Added
-- Tile flattening workflow exposed on the tile HUD. Merges selected tiles into a single baked image, saves undo metadata, and adds a dedicated dialog for resolution/quality choices plus deconstruction support. [#1](https://github.com/Forgotten-Adventures/FA-Nexus/issues/1)
+- Tile flattening workflow exposed on the tile HUD. Merges selected tiles into a single baked image, saves undo metadata, and adds a dedicated dialog for resolution/quality choices plus deconstruction support.
+
+https://github.com/user-attachments/assets/37034115-77a0-4d6b-a0c7-d954ed52c246
+
 
 ### Fixed
 - Assets tab card helper now resolves local texture/path file locations consistently. [#1](https://github.com/Forgotten-Adventures/FA-Nexus/issues/1)
