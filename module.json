@@ -1,7 +1,7 @@
 {
   "id": "fa-nexus",
   "title": "FA Nexus",
-  "version": "0.1.3",
+  "version": "0.2.2",
   "compatibility": {
     "minimum": "13",
     "verified": "13"
@@ -35,6 +35,7 @@
     "scripts/assets/assets-content-sources-dialog.js",
     "scripts/assets/assets-preview-manager.js",
     "scripts/textures/texture-paint-manager.js",
+    "scripts/doors/door-shadow-manager.js",
     "scripts/nexus-app.js"
   ],
   "styles": [
