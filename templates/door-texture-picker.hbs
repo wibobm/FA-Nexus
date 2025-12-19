@@ -1,0 +1,24 @@
+<section class="fa-door-picker">
+  <div class="fa-nexus-controls">
+    <div class="fa-nexus-search-input">
+      <input type="text" id="fa-nexus-search" placeholder="Search door textures…" value="{{search}}">
+      <button class="clear-search" type="button" title="Clear"><i class="fas fa-times"></i></button>
+      <i class="fas fa-search"></i>
+    </div>
+    <div class="fa-nexus-controls-right">
+      <div class="thumb-size">
+        <i class="fas fa-grid-2" title="Thumbnail size"></i>
+        <input id="fa-nexus-thumb-size" type="range" min="54" max="108" step="2">
+      </div>
+    </div>
+  </div>
+  <div class="fa-nexus-main">
+    <div id="fa-nexus-grid" class="fa-nexus-grid" aria-label="Door Texture Grid"></div>
+  </div>
+  <footer class="fa-nexus-footer">
+    <div class="stats" data-fa-door-picker-stats>0</div>
+    <div class="actions">
+      <span class="fa-door-picker__hint">Filter preset: <code>{{filterPreset}}</code></span>
+    </div>
+  </footer>
+</section>

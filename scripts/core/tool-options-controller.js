@@ -1,4 +1,13 @@
 import { NexusLogger as Logger } from './nexus-logger.js';
+import {
+  GRID_SNAP_SUBDIV_SETTING_KEY,
+  GRID_SNAP_SUBDIV_MIN,
+  GRID_SNAP_SUBDIV_MAX,
+  GRID_SNAP_SUBDIV_DEFAULT,
+  normalizeGridSnapSubdivision,
+  formatGridSnapSubdivisionLabel,
+  readGridSnapSubdivisionSetting
+} from './grid-snap-utils.js';
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
@@ -36,15 +45,27 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     { inplace: false }
   );
 
-  constructor({ controller, gridSnapEnabled = true, gridSnapAvailable = true, toolOptions = {} } = {}) {
+  constructor({
+    controller,
+    gridSnapEnabled = true,
+    gridSnapAvailable = true,
+    gridSnapSubdivisions = GRID_SNAP_SUBDIV_DEFAULT,
+    toolOptions = {}
+  } = {}) {
     super();
     this._controller = controller;
     this._activeTool = null;
     this._restoringPosition = false;
     this._gridSnapEnabled = !!gridSnapEnabled;
     this._gridSnapAvailable = !!gridSnapAvailable;
+    this._gridSnapSubdivisions = this._normalizeGridSnapSubdivision(gridSnapSubdivisions);
     this._gridSnapToggle = null;
+    this._gridSnapResolutionRoot = null;
+    this._gridSnapResolutionSlider = null;
+    this._gridSnapResolutionDisplay = null;
     this._boundGridSnapChange = (event) => this._handleGridSnapChange(event);
+    this._boundGridSnapResolutionInput = (event) => this._handleGridSnapResolutionInput(event, false);
+    this._boundGridSnapResolutionCommit = (event) => this._handleGridSnapResolutionInput(event, true);
     this._toolOptionState = toolOptions && typeof toolOptions === 'object' ? toolOptions : {};
     this._dropShadowToggle = null;
     this._boundDropShadowChange = (event) => this._handleDropShadowChange(event);
@@ -95,6 +116,15 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._boundDropShadowPresetContext = (event) => this._handleDropShadowPresetContext(event);
     this._boundDropShadowReset = (event) => this._handleDropShadowReset(event);
     this._customToggleBindings = new Map();
+    this._placementRoot = null;
+    this._placementPushTopButton = null;
+    this._placementPushBottomButton = null;
+    this._placementOrderDisplay = null;
+    this._placementHint = null;
+    this._placementStateLabels = [];
+    this._placementSwitchRoots = [];
+    this._boundPlacementPushTop = (event) => this._handlePlacementPush(event, 'top');
+    this._boundPlacementPushBottom = (event) => this._handlePlacementPush(event, 'bottom');
     this._textureToolsRoot = null;
     this._textureModeLabel = null;
     this._textureModeButtons = [];
@@ -126,6 +156,21 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._pathScaleDisplay = null;
     this._boundPathScaleInput = (event) => this._handlePathScale(event, false);
     this._boundPathScaleCommit = (event) => this._handlePathScale(event, true);
+    this._boundPathScaleWheel = (event) => this._handlePathScaleWheel(event);
+    this._fillElevationRoot = null;
+    this._fillElevationInput = null;
+    this._fillElevationDisplay = null;
+    this._boundFillElevationInput = (event) => this._handleFillElevation(event, false);
+    this._boundFillElevationCommit = (event) => this._handleFillElevation(event, true);
+    this._boundFillElevationWheel = (event) => this._handleFillElevationWheel(event);
+    this._fillElevationLogState = {
+      missingRootLogged: false,
+      lastAvailableState: null
+    };
+    this._fillElevationRerenderJob = null;
+    this._placeAsNamingRerenderJob = null;
+    this._placeAsNamingRerenderRevision = null;
+    this._placeAsNamingRerenderCount = 0;
     this._pathOffsetRoot = null;
     this._pathOffsetXSlider = null;
     this._pathOffsetYSlider = null;
@@ -140,6 +185,9 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._pathTensionDisplay = null;
     this._boundPathTensionInput = (event) => this._handlePathTension(event, false);
     this._boundPathTensionCommit = (event) => this._handlePathTension(event, true);
+    this._showWidthTangentsRoot = null;
+    this._showWidthTangentsToggle = null;
+    this._boundShowWidthTangentsChange = (event) => this._handleShowWidthTangentsChange(event);
     this._textureOffsetRoot = null;
     this._textureOffsetXSlider = null;
     this._textureOffsetYSlider = null;
@@ -149,9 +197,20 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._boundTextureOffsetXCommit = (event) => this._handleTextureOffset(event, 'x', true);
     this._boundTextureOffsetYInput = (event) => this._handleTextureOffset(event, 'y', false);
     this._boundTextureOffsetYCommit = (event) => this._handleTextureOffset(event, 'y', true);
+    this._fillTextureOffsetRoot = null;
+    this._fillTextureOffsetXSlider = null;
+    this._fillTextureOffsetYSlider = null;
+    this._fillTextureOffsetXDisplay = null;
+    this._fillTextureOffsetYDisplay = null;
+    this._boundFillTextureOffsetXInput = (event) => this._handleFillTextureOffset(event, 'x', false);
+    this._boundFillTextureOffsetXCommit = (event) => this._handleFillTextureOffset(event, 'x', true);
+    this._boundFillTextureOffsetYInput = (event) => this._handleFillTextureOffset(event, 'y', false);
+    this._boundFillTextureOffsetYCommit = (event) => this._handleFillTextureOffset(event, 'y', true);
     this._placeAsSearchInput = null;
     this._placeAsList = null;
     this._placeAsLinkedToggle = null;
+    this._placeAsAppendNumberToggle = null;
+    this._placeAsPrependAdjectiveToggle = null;
     this._placeAsToggleButton = null;
     this._placeAsHpModeSelect = null;
     this._placeAsHpPercentInput = null;
@@ -165,7 +224,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._boundPlaceAsSearch = (event) => this._handlePlaceAsSearch(event);
     this._boundPlaceAsOptionClick = (event) => this._handlePlaceAsOptionClick(event);
     this._boundPlaceAsLinkedChange = (event) => this._handlePlaceAsLinked(event);
+    this._boundPlaceAsAppendNumberChange = (event) => this._handlePlaceAsAppendNumber(event);
+    this._boundPlaceAsPrependAdjectiveChange = (event) => this._handlePlaceAsPrependAdjective(event);
     this._boundPlaceAsToggle = (event) => this._handlePlaceAsToggle(event);
+    this._boundPlaceAsFilter = (event) => this._handlePlaceAsFilter(event);
+    this._placeAsFilterButton = null;
     this._boundPlaceAsHpMode = (event) => this._handlePlaceAsHpMode(event);
     this._boundPlaceAsHpPercent = (event) => this._handlePlaceAsHpPercent(event);
     this._boundPlaceAsHpStatic = (event) => this._handlePlaceAsHpStatic(event);
@@ -331,6 +394,9 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   _shouldForceRenderForStateChange(previousState = {}, nextState = {}) {
+    const prevRevision = previousState?.layoutRevision ?? null;
+    const nextRevision = nextState?.layoutRevision ?? null;
+    if (prevRevision !== nextRevision) return true;
     const paths = [
       ['texturePaint', 'available'],
       ['texturePaint', 'opacity', 'available'],
@@ -343,12 +409,24 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       ['pathAppearance', 'scale', 'available'],
       ['pathAppearance', 'textureOffset', 'available'],
       ['pathAppearance', 'tension', 'available'],
+      ['pathAppearance', 'showWidthTangents', 'available'],
+      ['fillElevation', 'available'],
+      ['fillTexture', 'available'],
+      ['fillTexture', 'offset', 'available'],
       ['pathShadow', 'available'],
       ['pathFeather', 'available'],
       ['opacityFeather', 'available'],
       ['dropShadowControls', 'available'],
       ['dropShadow', 'available'],
-      ['flip', 'available']
+      ['flip', 'available'],
+      ['placeAs', 'naming', 'available'],
+      ['doorControls', 'available'],
+      ['doorControls', 'frameSettings'],
+      ['windowControls', 'available'],
+      ['windowControls', 'sillSettings'],
+      ['windowControls', 'textureSettings'],
+      ['windowControls', 'frameSettings'],
+      ['shapeStacking', 'available']
     ];
     const valueAtPath = (state, path) => {
       let cursor = state;
@@ -382,7 +460,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._syncTextureOffsetControls();
       this._syncTextureLayerControl();
       this._syncPathAppearanceControls();
+      this._syncFillElevationControl();
+      this._syncFillTextureControls();
       this._syncCustomToggles();
+      this._syncPlacementControls();
       this._syncFlipControls();
       this._syncScaleControls();
       this._syncRotationControls();
@@ -391,6 +472,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._syncOpacityFeatherControls();
       this._syncShortcutsControls();
       this._syncPlaceAsControls();
+      this._syncDoorControls();
+      this._syncWindowControls();
     }
   }
 
@@ -422,6 +505,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
   async _prepareContext() {
     const tool = this._activeTool;
     const canToggleGridSnap = !!(this._controller?.supportsGridSnap?.() && this._gridSnapAvailable);
+    const gridSnapResolution = this._prepareGridSnapResolution();
     const options = this._toolOptionState || {};
     const dropShadow = options.dropShadow || {};
     const dropShadowTooltip = typeof dropShadow.tooltip === 'string' && dropShadow.tooltip.length
@@ -443,32 +527,58 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       collapsed: !!this._shortcutsCollapsed,
       lines: hintLines
     };
-    const customToggleList = Array.isArray(options.customToggles)
-      ? options.customToggles.map((toggle) => ({
-        id: String(toggle?.id || ''),
-        label: String(toggle?.label || ''),
-        tooltip: String(toggle?.tooltip || ''),
-        enabled: !!toggle?.enabled,
-        disabled: !!toggle?.disabled
-      })).filter((toggle) => toggle.id.length)
+    const mapToggle = (toggle) => ({
+      id: String(toggle?.id || ''),
+      group: typeof toggle?.group === 'string' ? toggle.group : '',
+      label: String(toggle?.label || ''),
+      tooltip: String(toggle?.tooltip || ''),
+      onLabel: typeof toggle?.onLabel === 'string' ? toggle.onLabel : '',
+      offLabel: typeof toggle?.offLabel === 'string' ? toggle.offLabel : '',
+      enabled: !!toggle?.enabled,
+      disabled: !!toggle?.disabled
+    });
+    const allToggleList = Array.isArray(options.customToggles)
+      ? options.customToggles.map(mapToggle).filter((toggle) => toggle.id.length)
       : [];
+    const subtoolToggleList = Array.isArray(options.subtoolToggles)
+      ? options.subtoolToggles.map(mapToggle).filter((toggle) => toggle.id.length)
+      : allToggleList.filter((toggle) => toggle.group === 'subtool');
+    const nonSubtoolToggleList = allToggleList.filter((toggle) => toggle.group !== 'subtool');
+    const placementToggleList = nonSubtoolToggleList.filter((toggle) => toggle.group === 'placement');
+    const customToggleList = nonSubtoolToggleList.filter((toggle) => toggle.group !== 'placement');
     const placeAs = options.placeAs && typeof options.placeAs === 'object' ? options.placeAs : null;
     const scale = this._prepareScaleContext(options.scale);
     const rotation = this._prepareRotationContext(options.rotation);
     const flip = this._prepareFlipContext(options.flip);
     const texturePaint = this._prepareTexturePaintContext(options.texturePaint);
     const textureOffset = this._prepareTextureOffsetContext(options.textureOffset);
+    const fillTexture = this._prepareFillTextureContext(options.fillTexture);
     const layerOpacity = this._prepareLayerOpacityContext(options.layerOpacity);
     const pathShadow = this._preparePathShadowContext(options.pathShadow);
     const pathAppearance = this._preparePathAppearanceContext(options.pathAppearance);
     const pathFeather = this._preparePathFeatherContext(options.pathFeather);
     const opacityFeather = this._prepareOpacityFeatherContext(options.opacityFeather);
+    const fillElevation = this._prepareFillElevationContext(options.fillElevation);
+    const shapeStackingRaw = options.shapeStacking && typeof options.shapeStacking === 'object'
+      ? options.shapeStacking
+      : null;
+    const shapeStacking = shapeStackingRaw && shapeStackingRaw.available
+      ? {
+          available: true,
+          hasSelection: !!shapeStackingRaw.hasSelection,
+          orderLabel: typeof shapeStackingRaw.orderLabel === 'string' ? shapeStackingRaw.orderLabel : '',
+          pushTopDisabled: !!shapeStackingRaw.pushTopDisabled,
+          pushBottomDisabled: !!shapeStackingRaw.pushBottomDisabled,
+          hint: typeof shapeStackingRaw.hint === 'string' ? shapeStackingRaw.hint : ''
+        }
+      : { available: false };
     return {
       hasActiveTool: !!tool,
       activeToolId: tool?.id ?? null,
       activeToolLabel: tool?.label ?? '',
       gridSnapEnabled: !!this._gridSnapEnabled,
       gridSnapAvailable: canToggleGridSnap,
+      gridSnapResolution,
       showDropShadowToggle: !!dropShadow.available,
       dropShadowEnabled: !!dropShadow.enabled,
       dropShadowDisabled: !!dropShadow.disabled,
@@ -476,6 +586,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       dropShadowHint: dropShadowHint,
       dropShadowControls,
       shortcuts,
+      hasSubtoolToggles: subtoolToggleList.length > 0,
+      subtoolToggles: subtoolToggleList,
+      hasPlacementToggles: placementToggleList.length > 0,
+      placementToggles: placementToggleList,
       hasCustomToggles: customToggleList.length > 0,
       customToggles: customToggleList,
       flip,
@@ -484,11 +598,73 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       rotation,
       texturePaint,
       textureOffset,
+      fillTexture,
       layerOpacity,
       pathShadow,
+      fillElevation,
       pathAppearance,
       pathFeather,
-      opacityFeather
+      opacityFeather,
+      shapeStacking,
+      doorControls: options.doorControls || null,
+      windowControls: options.windowControls || null
+    };
+  }
+
+  _prepareFillTextureContext(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) {
+      return { available: false };
+    }
+    const coerceAxis = (axisRaw = {}) => {
+      const min = Number.isFinite(axisRaw.min) ? Number(axisRaw.min) : -500;
+      const max = Number.isFinite(axisRaw.max) ? Number(axisRaw.max) : 500;
+      const step = Number.isFinite(axisRaw.step) && Number(axisRaw.step) > 0 ? Number(axisRaw.step) : 1;
+      const value = Number.isFinite(axisRaw.value) ? Number(axisRaw.value) : 0;
+      const display = typeof axisRaw.display === 'string' ? axisRaw.display : `${Math.round(value)} px`;
+      return {
+        min,
+        max,
+        step,
+        value,
+        display,
+        disabled: !!axisRaw.disabled
+      };
+    };
+    const offsetRaw = raw.offset && typeof raw.offset === 'object' ? raw.offset : {};
+    const offsetAvailable = offsetRaw.available !== false;
+    const offset = offsetAvailable
+      ? {
+          available: true,
+          label: typeof offsetRaw.label === 'string' && offsetRaw.label.length ? offsetRaw.label : 'Fill Texture Offset',
+          hint: typeof offsetRaw.hint === 'string' ? offsetRaw.hint : '',
+          disabled: !!offsetRaw.disabled,
+          x: coerceAxis(offsetRaw.x),
+          y: coerceAxis(offsetRaw.y)
+        }
+      : { available: false };
+    return {
+      available: true,
+      offset,
+      // Preserve any upstream extras (scale/rotation already exposed separately)
+      scale: raw.scale,
+      rotation: raw.rotation
+    };
+  }
+
+  _prepareGridSnapResolution() {
+    const controllerAllows = this._controller?.isGridSnapSettingAvailable?.();
+    const available = !!(this._gridSnapAvailable && (controllerAllows !== false));
+    if (!available) return { available: false };
+    const value = this._normalizeGridSnapSubdivision(this._gridSnapSubdivisions);
+    return {
+      available: true,
+      min: GRID_SNAP_SUBDIV_MIN,
+      max: GRID_SNAP_SUBDIV_MAX,
+      step: 1,
+      value,
+      display: this._formatGridSnapResolutionDisplay(value),
+      hint: '0 = full grid, 1 = halves, 2 = thirds, 3 = quarters, 4 = fifths',
+      disabled: false
     };
   }
 
@@ -572,6 +748,28 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       randomTooltip,
       randomHint,
       randomButtonVisible
+    };
+  }
+
+  _prepareFillElevationContext(raw) {
+    if (!raw || typeof raw !== 'object') return { available: false };
+    const available = !!raw.available;
+    if (!available) return { available: false };
+    const coerceNumber = (value, fallback) => {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : fallback;
+    };
+    const value = coerceNumber(raw.value, 0);
+    return {
+      available: true,
+      label: typeof raw.label === 'string' && raw.label.length ? raw.label : 'Fill Elevation',
+      min: coerceNumber(raw.min, -9999),
+      max: coerceNumber(raw.max, 9999),
+      step: coerceNumber(raw.step, 0.01),
+      value,
+      display: typeof raw.display === 'string' && raw.display.length ? raw.display : String(value),
+      disabled: !!raw.disabled,
+      hint: typeof raw.hint === 'string' ? raw.hint : ''
     };
   }
 
@@ -893,7 +1091,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         display: '100%',
         disabled: false
       }),
-      offset: normalizeSlider(raw.offset, { min: 0, max: 0, step: 0.1, value: 0, display: '0' }),
+      offset: normalizeSlider(raw.offset, { min: 0, max: 0, step: 0.01, value: 0, display: '0' }),
       alpha: normalizeSlider(raw.alpha, { min: 0, max: 1, step: 0.01, value: 1, display: '100%' }),
       blur: normalizeSlider(raw.blur, { min: 0, max: 5, step: 0.1, value: 0, display: '0 px' }),
       dilation: normalizeSlider(raw.dilation, { min: 0, max: 5, step: 0.1, value: 0, display: '0 px' })
@@ -993,14 +1191,27 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     const textureOffset = this._prepareTextureOffsetContext(data.textureOffset);
     const scale = this._preparePathScaleContext(data.scale);
     const tension = this._preparePathTensionContext(data.tension);
+    const showWidthTangents = this._prepareShowWidthTangentsContext(data.showWidthTangents);
     const hint = typeof data.hint === 'string' ? data.hint : '';
     return {
-      available: !!(layerOpacity.available || textureOffset.available || scale.available || tension.available),
+      available: !!(layerOpacity.available || textureOffset.available || scale.available || tension.available || showWidthTangents.available),
       hint,
       layerOpacity,
       textureOffset,
       scale,
-      tension
+      tension,
+      showWidthTangents
+    };
+  }
+
+  _prepareShowWidthTangentsContext(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) return { available: false };
+    return {
+      available: true,
+      enabled: !!raw.enabled,
+      label: typeof raw.label === 'string' ? raw.label : 'Show Width Tangents',
+      tooltip: typeof raw.tooltip === 'string' ? raw.tooltip : 'Display width adjustment handles.',
+      disabled: !!raw.disabled
     };
   }
 
@@ -1051,6 +1262,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       if (root) root.dataset.faNexusToolOverlay = 'true';
     } catch (_) {}
     this._bindControls();
+    this._ensurePlaceAsNamingSection();
     this._restoreContentStyle();
     this._restoreScrollState();
     if (initial) {
@@ -1064,11 +1276,47 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._cleanupResizeObserver();
     this._persistWindowPosition();
     this._unbindControls();
+    if (this._placeAsNamingRerenderJob) {
+      clearTimeout(this._placeAsNamingRerenderJob);
+      this._placeAsNamingRerenderJob = null;
+    }
+    this._placeAsNamingRerenderRevision = null;
+    this._placeAsNamingRerenderCount = 0;
     this._pendingScrollState = null;
     this._pendingContentStyle = null;
     this._resetScrollNextRender = false;
     try { this._controller?._handleWindowClosed(this); } catch (_) {}
     super._onClose(options);
+  }
+
+  _ensurePlaceAsNamingSection() {
+    const naming = this._toolOptionState?.placeAs?.naming || {};
+    if (!naming?.available) return;
+    const root = this.element;
+    if (!root) return;
+    const hasToggle = !!(
+      root.querySelector('[data-place-as-append-number]')
+      || root.querySelector('[data-place-as-prepend-adjective]')
+      || root.querySelector('.fa-nexus-place-as__naming')
+    );
+    if (hasToggle) return;
+
+    // The tool state can update while a render is in-flight, leaving the DOM in an older layout.
+    // If the state expects the naming section but the DOM doesn't have it, force a follow-up render.
+    const revision = this._toolOptionState?.layoutRevision ?? null;
+    if (revision !== this._placeAsNamingRerenderRevision) {
+      this._placeAsNamingRerenderRevision = revision;
+      this._placeAsNamingRerenderCount = 0;
+    }
+    if (this._placeAsNamingRerenderCount >= 2) return;
+    if (this._placeAsNamingRerenderJob) return;
+    this._placeAsNamingRerenderCount += 1;
+    this._placeAsNamingRerenderJob = setTimeout(() => {
+      this._placeAsNamingRerenderJob = null;
+      try {
+        if (this.rendered) this.render(false);
+      } catch (_) {}
+    }, 0);
   }
 
   _measureScrollState() {
@@ -1147,6 +1395,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         gridToggle.addEventListener('change', this._boundGridSnapChange);
         this._gridSnapToggle = gridToggle;
       }
+      this._bindGridSnapResolutionControl();
       const dropToggle = root.querySelector('#fa-nexus-drop-shadow-toggle');
       if (dropToggle) {
         const dropState = this._toolOptionState?.dropShadow || {};
@@ -1161,6 +1410,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._bindTextureLayerControl();
       this._bindTextureOffsetControls();
       this._bindPathAppearanceControls();
+      this._bindFillElevationControl();
+      this._bindFillTextureControls();
       this._bindFlipControls();
       this._bindScaleControls();
       this._bindRotationControls();
@@ -1168,11 +1419,19 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._bindPathFeatherControls();
       this._bindOpacityFeatherControls();
       this._bindCustomToggles();
+      this._bindPlacementControls();
+      this._syncDoorControls();
+      this._syncWindowControls();
       this._bindShortcutsControls();
       const placeAsToggle = root.querySelector('[data-place-as-toggle]');
       if (placeAsToggle) {
         placeAsToggle.addEventListener('click', this._boundPlaceAsToggle);
         this._placeAsToggleButton = placeAsToggle;
+      }
+      const placeAsFilter = root.querySelector('[data-place-as-filter]');
+      if (placeAsFilter) {
+        placeAsFilter.addEventListener('click', this._boundPlaceAsFilter);
+        this._placeAsFilterButton = placeAsFilter;
       }
       const placeAsSearch = root.querySelector('#fa-nexus-place-as-search');
       if (placeAsSearch) {
@@ -1188,6 +1447,16 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       if (placeAsLinked) {
         placeAsLinked.addEventListener('change', this._boundPlaceAsLinkedChange);
         this._placeAsLinkedToggle = placeAsLinked;
+      }
+      const placeAsAppendNumber = root.querySelector('[data-place-as-append-number]');
+      if (placeAsAppendNumber) {
+        placeAsAppendNumber.addEventListener('change', this._boundPlaceAsAppendNumberChange);
+        this._placeAsAppendNumberToggle = placeAsAppendNumber;
+      }
+      const placeAsPrependAdjective = root.querySelector('[data-place-as-prepend-adjective]');
+      if (placeAsPrependAdjective) {
+        placeAsPrependAdjective.addEventListener('change', this._boundPlaceAsPrependAdjectiveChange);
+        this._placeAsPrependAdjectiveToggle = placeAsPrependAdjective;
       }
       const hpMode = root.querySelector('[data-place-as-hp-mode]');
       if (hpMode) {
@@ -1220,6 +1489,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       catch (_) {}
       this._gridSnapToggle = null;
     }
+    this._unbindGridSnapResolutionControl();
     if (this._dropShadowToggle) {
       try { this._dropShadowToggle.removeEventListener('change', this._boundDropShadowChange); }
       catch (_) {}
@@ -1231,12 +1501,15 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._unbindTextureLayerControl();
     this._unbindTextureOffsetControls();
     this._unbindPathAppearanceControls();
+    this._unbindFillElevationControl();
+    this._unbindFillTextureControls();
     this._unbindFlipControls();
     this._unbindScaleControls();
     this._unbindRotationControls();
     this._unbindPathShadowControls();
     this._unbindPathFeatherControls();
     this._unbindOpacityFeatherControls();
+    this._unbindPlacementControls();
     this._unbindShortcutsControls();
     if (this._customToggleBindings?.size) {
       for (const [toggle, handler] of this._customToggleBindings.entries()) {
@@ -1248,6 +1521,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       try { this._placeAsToggleButton.removeEventListener('click', this._boundPlaceAsToggle); }
       catch (_) {}
       this._placeAsToggleButton = null;
+    }
+    if (this._placeAsFilterButton) {
+      try { this._placeAsFilterButton.removeEventListener('click', this._boundPlaceAsFilter); }
+      catch (_) {}
+      this._placeAsFilterButton = null;
     }
     if (this._placeAsSearchInput) {
       try { this._placeAsSearchInput.removeEventListener('input', this._boundPlaceAsSearch); }
@@ -1263,6 +1541,16 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       try { this._placeAsLinkedToggle.removeEventListener('change', this._boundPlaceAsLinkedChange); }
       catch (_) {}
       this._placeAsLinkedToggle = null;
+    }
+    if (this._placeAsAppendNumberToggle) {
+      try { this._placeAsAppendNumberToggle.removeEventListener('change', this._boundPlaceAsAppendNumberChange); }
+      catch (_) {}
+      this._placeAsAppendNumberToggle = null;
+    }
+    if (this._placeAsPrependAdjectiveToggle) {
+      try { this._placeAsPrependAdjectiveToggle.removeEventListener('change', this._boundPlaceAsPrependAdjectiveChange); }
+      catch (_) {}
+      this._placeAsPrependAdjectiveToggle = null;
     }
     if (this._placeAsHpModeSelect) {
       try { this._placeAsHpModeSelect.removeEventListener('change', this._boundPlaceAsHpMode); }
@@ -1359,6 +1647,104 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     const controllerAllows = this._controller?.isGridSnapSettingAvailable?.();
     const canToggle = this._gridSnapAvailable && (controllerAllows !== false);
     toggle.disabled = !canToggle;
+    this._syncGridSnapResolutionControl();
+  }
+
+  _normalizeGridSnapSubdivision(value) {
+    return normalizeGridSnapSubdivision(value);
+  }
+
+  _formatGridSnapResolutionDisplay(value) {
+    return formatGridSnapSubdivisionLabel(value);
+  }
+
+  _syncGridSnapResolutionControl() {
+    const root = this._gridSnapResolutionRoot;
+    if (!root) return;
+    const slider = this._gridSnapResolutionSlider;
+    const display = this._gridSnapResolutionDisplay;
+    const controllerAllows = this._controller?.isGridSnapSettingAvailable?.();
+    const available = this._gridSnapAvailable && (controllerAllows !== false);
+    root.classList.toggle('is-disabled', !available);
+    if (slider) {
+      slider.disabled = !available;
+      slider.value = String(this._gridSnapSubdivisions);
+    }
+    if (display) {
+      display.textContent = this._formatGridSnapResolutionDisplay(this._gridSnapSubdivisions);
+    }
+  }
+
+  _bindGridSnapResolutionControl() {
+    const root = this.element?.querySelector('[data-fa-nexus-grid-snap-root]');
+    if (!root) {
+      this._unbindGridSnapResolutionControl();
+      return;
+    }
+    this._gridSnapResolutionRoot = root;
+    const slider = root.querySelector('[data-fa-nexus-grid-snap-slider]');
+    this._gridSnapResolutionSlider = slider || null;
+    this._gridSnapResolutionDisplay = root.querySelector('[data-fa-nexus-grid-snap-display]') || null;
+    if (slider) {
+      slider.value = String(this._gridSnapSubdivisions);
+      slider.addEventListener('input', this._boundGridSnapResolutionInput);
+      slider.addEventListener('change', this._boundGridSnapResolutionCommit);
+    }
+    this._syncGridSnapResolutionControl();
+  }
+
+  _unbindGridSnapResolutionControl() {
+    if (this._gridSnapResolutionSlider) {
+      try {
+        this._gridSnapResolutionSlider.removeEventListener('input', this._boundGridSnapResolutionInput);
+        this._gridSnapResolutionSlider.removeEventListener('change', this._boundGridSnapResolutionCommit);
+      } catch (_) {}
+    }
+    this._gridSnapResolutionSlider = null;
+    this._gridSnapResolutionDisplay = null;
+    this._gridSnapResolutionRoot = null;
+  }
+
+  _handleGridSnapResolutionInput(event, commit) {
+    const target = event?.currentTarget || event?.target;
+    if (!target) return;
+    const value = this._normalizeGridSnapSubdivision(target.value);
+    this._gridSnapSubdivisions = value;
+    if (this._gridSnapResolutionDisplay) {
+      this._gridSnapResolutionDisplay.textContent = this._formatGridSnapResolutionDisplay(value);
+    }
+    if (!commit) return;
+    const controller = this._controller;
+    if (!controller?.requestGridSnapSubdivisionChange) return;
+    try {
+      const result = controller.requestGridSnapSubdivisionChange(value);
+      if (result?.then) {
+        result.catch(() => this._resetGridSnapResolutionControl());
+      } else if (result === false) {
+        this._resetGridSnapResolutionControl();
+      }
+    } catch (_) {
+      this._resetGridSnapResolutionControl();
+    }
+  }
+
+  _resetGridSnapResolutionControl() {
+    const controllerValue = this._controller?.getGridSnapSubdivisions?.();
+    if (controllerValue === undefined || controllerValue === null) return;
+    this._gridSnapSubdivisions = this._normalizeGridSnapSubdivision(controllerValue);
+    if (this._gridSnapResolutionSlider) {
+      this._gridSnapResolutionSlider.value = String(this._gridSnapSubdivisions);
+    }
+    if (this._gridSnapResolutionDisplay) {
+      this._gridSnapResolutionDisplay.textContent = this._formatGridSnapResolutionDisplay(this._gridSnapSubdivisions);
+    }
+  }
+
+  setGridSnapSubdivisions(value) {
+    const normalized = this._normalizeGridSnapSubdivision(value);
+    if (this._gridSnapSubdivisions === normalized) return;
+    this._gridSnapSubdivisions = normalized;
+    this._syncGridSnapResolutionControl();
   }
 
   _syncDropShadowControl() {
@@ -2130,6 +2516,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._bindPathScaleControl();
     this._bindPathOffsetControls();
     this._bindPathTensionControls();
+    this._bindShowWidthTangentsControls();
     this._syncPathAppearanceControls();
   }
 
@@ -2138,6 +2525,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._unbindPathScaleControl();
     this._unbindPathOffsetControls();
     this._unbindPathTensionControls();
+    this._unbindShowWidthTangentsControls();
   }
 
   _syncPathAppearanceControls() {
@@ -2145,6 +2533,184 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._syncPathScaleControl();
     this._syncPathOffsetControls();
     this._syncPathTensionControls();
+    this._syncShowWidthTangentsControls();
+  }
+
+  _bindFillTextureControls() {
+    const state = this._toolOptionState?.fillTexture?.offset || { available: false };
+    if (!state?.available) {
+      this._unbindFillTextureControls();
+      return;
+    }
+    const root = this.element?.querySelector('[data-fa-nexus-fill-offset-root]') || null;
+    if (!root) {
+      this._unbindFillTextureControls();
+      return;
+    }
+    this._fillTextureOffsetRoot = root;
+    const xSlider = root.querySelector('[data-fa-nexus-fill-offset-x]');
+    if (xSlider) {
+      xSlider.addEventListener('input', this._boundFillTextureOffsetXInput);
+      xSlider.addEventListener('change', this._boundFillTextureOffsetXCommit);
+      this._fillTextureOffsetXSlider = xSlider;
+    }
+    const ySlider = root.querySelector('[data-fa-nexus-fill-offset-y]');
+    if (ySlider) {
+      ySlider.addEventListener('input', this._boundFillTextureOffsetYInput);
+      ySlider.addEventListener('change', this._boundFillTextureOffsetYCommit);
+      this._fillTextureOffsetYSlider = ySlider;
+    }
+    this._fillTextureOffsetXDisplay = root.querySelector('[data-fa-nexus-fill-offset-x-display]') || null;
+    this._fillTextureOffsetYDisplay = root.querySelector('[data-fa-nexus-fill-offset-y-display]') || null;
+    this._syncFillTextureControls();
+  }
+
+  _unbindFillTextureControls() {
+    if (this._fillTextureOffsetXSlider) {
+      try {
+        this._fillTextureOffsetXSlider.removeEventListener('input', this._boundFillTextureOffsetXInput);
+        this._fillTextureOffsetXSlider.removeEventListener('change', this._boundFillTextureOffsetXCommit);
+      } catch (_) {}
+    }
+    if (this._fillTextureOffsetYSlider) {
+      try {
+        this._fillTextureOffsetYSlider.removeEventListener('input', this._boundFillTextureOffsetYInput);
+        this._fillTextureOffsetYSlider.removeEventListener('change', this._boundFillTextureOffsetYCommit);
+      } catch (_) {}
+    }
+    this._fillTextureOffsetRoot = null;
+    this._fillTextureOffsetXSlider = null;
+    this._fillTextureOffsetYSlider = null;
+    this._fillTextureOffsetXDisplay = null;
+    this._fillTextureOffsetYDisplay = null;
+  }
+
+  _syncFillTextureControls() {
+    if (!this._fillTextureOffsetRoot) return;
+    const state = this._toolOptionState?.fillTexture?.offset || { available: false };
+    if (!state.available) {
+      this._fillTextureOffsetRoot.hidden = true;
+      return;
+    }
+    this._fillTextureOffsetRoot.hidden = false;
+    if (this._fillTextureOffsetXSlider) {
+      if (state.x?.min !== undefined) this._fillTextureOffsetXSlider.min = String(state.x.min);
+      if (state.x?.max !== undefined) this._fillTextureOffsetXSlider.max = String(state.x.max);
+      if (state.x?.step !== undefined) this._fillTextureOffsetXSlider.step = String(state.x.step);
+      if (state.x?.value !== undefined) {
+        const nextX = String(state.x.value);
+        if (this._fillTextureOffsetXSlider.value !== nextX) this._fillTextureOffsetXSlider.value = nextX;
+      }
+      this._fillTextureOffsetXSlider.disabled = !!state.x?.disabled || !!state.disabled;
+    }
+    if (this._fillTextureOffsetYSlider) {
+      if (state.y?.min !== undefined) this._fillTextureOffsetYSlider.min = String(state.y.min);
+      if (state.y?.max !== undefined) this._fillTextureOffsetYSlider.max = String(state.y.max);
+      if (state.y?.step !== undefined) this._fillTextureOffsetYSlider.step = String(state.y.step);
+      if (state.y?.value !== undefined) {
+        const nextY = String(state.y.value);
+        if (this._fillTextureOffsetYSlider.value !== nextY) this._fillTextureOffsetYSlider.value = nextY;
+      }
+      this._fillTextureOffsetYSlider.disabled = !!state.y?.disabled || !!state.disabled;
+    }
+    if (this._fillTextureOffsetXDisplay) {
+      const text = state.x?.display || '';
+      if (this._fillTextureOffsetXDisplay.textContent !== text) this._fillTextureOffsetXDisplay.textContent = text;
+    }
+    if (this._fillTextureOffsetYDisplay) {
+      const text = state.y?.display || '';
+      if (this._fillTextureOffsetYDisplay.textContent !== text) this._fillTextureOffsetYDisplay.textContent = text;
+    }
+  }
+
+  _bindFillElevationControl() {
+    const state = this._toolOptionState?.fillElevation || {};
+    if (!state?.available) {
+      this._unbindFillElevationControl();
+      return;
+    }
+    const root = this.element?.querySelector('[data-fa-nexus-fill-elevation-root]') || null;
+    if (!root) {
+      if (!this._fillElevationLogState.missingRootLogged) {
+        Logger.warn?.('ToolOptions.fillElevation.rootMissing', {
+          available: !!state.available,
+          hasTemplateInput: !!this.element?.querySelector('[data-fa-nexus-fill-elevation-input]'),
+          layoutRevision: this._toolOptionState?.layoutRevision ?? null
+        });
+        this._fillElevationLogState.missingRootLogged = true;
+      }
+      if (!this._fillElevationRerenderJob && this.rendered) {
+        this._fillElevationRerenderJob = setTimeout(() => {
+          this._fillElevationRerenderJob = null;
+          try {
+            Logger.info?.('ToolOptions.fillElevation.forceRerender', {
+              layoutRevision: this._toolOptionState?.layoutRevision ?? null
+            });
+            this.render(false);
+          } catch (_) {}
+        }, 0);
+      }
+      this._unbindFillElevationControl();
+      return;
+    }
+    if (this._fillElevationRerenderJob) {
+      clearTimeout(this._fillElevationRerenderJob);
+      this._fillElevationRerenderJob = null;
+    }
+    this._fillElevationLogState.missingRootLogged = false;
+    this._fillElevationRoot = root;
+    const input = root.querySelector('[data-fa-nexus-fill-elevation-input]') || null;
+    if (input) {
+      input.addEventListener('input', this._boundFillElevationInput);
+      input.addEventListener('change', this._boundFillElevationCommit);
+      input.addEventListener('wheel', this._boundFillElevationWheel, { passive: false });
+    }
+    this._fillElevationInput = input;
+    this._fillElevationDisplay = root.querySelector('[data-fa-nexus-fill-elevation-display]') || null;
+  }
+
+  _unbindFillElevationControl() {
+    if (this._fillElevationInput) {
+      try { this._fillElevationInput.removeEventListener('input', this._boundFillElevationInput); } catch (_) {}
+      try { this._fillElevationInput.removeEventListener('change', this._boundFillElevationCommit); } catch (_) {}
+      try { this._fillElevationInput.removeEventListener('wheel', this._boundFillElevationWheel); } catch (_) {}
+    }
+    this._fillElevationRoot = null;
+    this._fillElevationInput = null;
+    this._fillElevationDisplay = null;
+  }
+
+  _syncFillElevationControl() {
+    if (!this._fillElevationRoot) return;
+    const state = this._toolOptionState?.fillElevation || { available: false };
+    const available = !!state.available;
+    if (this._fillElevationLogState.lastAvailableState !== available) {
+      Logger.info?.('ToolOptions.fillElevation.stateChanged', {
+        available,
+        disabled: !!state.disabled,
+        layoutRevision: this._toolOptionState?.layoutRevision ?? null
+      });
+      this._fillElevationLogState.lastAvailableState = available;
+    }
+    if (!available) {
+      this._fillElevationRoot.hidden = true;
+      return;
+    }
+    this._fillElevationRoot.hidden = false;
+    if (this._fillElevationInput) {
+      if (state.min !== undefined) this._fillElevationInput.min = String(state.min);
+      if (state.max !== undefined) this._fillElevationInput.max = String(state.max);
+      if (state.step !== undefined) this._fillElevationInput.step = String(state.step);
+      if (state.value !== undefined) {
+        const next = String(state.value);
+        if (this._fillElevationInput.value !== next) this._fillElevationInput.value = next;
+      }
+      this._fillElevationInput.disabled = !!state.disabled;
+    }
+    if (this._fillElevationDisplay) {
+      const text = state.display || '';
+      if (this._fillElevationDisplay.textContent !== text) this._fillElevationDisplay.textContent = text;
+    }
   }
 
   _bindPathOpacityControl() {
@@ -2223,6 +2789,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (slider) {
       slider.addEventListener('input', this._boundPathScaleInput);
       slider.addEventListener('change', this._boundPathScaleCommit);
+      slider.addEventListener('wheel', this._boundPathScaleWheel, { passive: false });
     }
     this._pathScaleSlider = slider;
     this._pathScaleDisplay = root.querySelector('[data-fa-nexus-path-scale-display]') || null;
@@ -2232,6 +2799,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (this._pathScaleSlider) {
       try { this._pathScaleSlider.removeEventListener('input', this._boundPathScaleInput); } catch (_) {}
       try { this._pathScaleSlider.removeEventListener('change', this._boundPathScaleCommit); } catch (_) {}
+      try { this._pathScaleSlider.removeEventListener('wheel', this._boundPathScaleWheel); } catch (_) {}
     }
     this._pathScaleRoot = null;
     this._pathScaleSlider = null;
@@ -2275,6 +2843,65 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     } catch (_) {
       this._syncPathScaleControl();
     }
+  }
+
+  _handlePathScaleWheel(event) {
+    if (!event) return;
+    const slider = event.currentTarget || this._pathScaleSlider;
+    if (!slider || slider.disabled) return;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+    const state = this._toolOptionState?.pathAppearance?.scale || {};
+    const min = Number(slider.min ?? state.min ?? 0);
+    const max = Number(slider.max ?? state.max ?? 0);
+    const rawStep = Number(slider.step ?? state.step ?? 1);
+    const baseStep = Number.isFinite(rawStep) && rawStep > 0 ? rawStep : 1;
+    const fine = event.ctrlKey || event.metaKey;
+    const coarse = event.shiftKey;
+    const step = Math.max(0.01, (fine ? baseStep / 10 : baseStep) * (coarse ? 5 : 1));
+    const current = Number(slider.value);
+    const safeCurrent = Number.isFinite(current) ? current : Number(state.value ?? min) || min;
+    const direction = event.deltaY < 0 ? 1 : -1;
+    const clamp = (val, lo, hi) => Math.min(hi, Math.max(lo, val));
+    const nextValue = clamp(Math.round((safeCurrent + (direction * step)) * 100) / 100, Number.isFinite(min) ? min : safeCurrent, Number.isFinite(max) && max > 0 ? max : safeCurrent);
+    slider.value = String(nextValue);
+    this._handlePathScale({ currentTarget: slider }, true);
+  }
+
+  _handleFillElevation(event, commit) {
+    const input = event?.currentTarget || event?.target;
+    if (!input) return;
+    const value = input.value;
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('setFillElevation', value, !!commit);
+      if (result?.then) result.catch(() => {}).finally(() => this._syncFillElevationControl());
+      else this._syncFillElevationControl();
+    } catch (_) {
+      this._syncFillElevationControl();
+    }
+  }
+
+  _handleFillElevationWheel(event) {
+    if (!event) return;
+    if (!event.altKey) return;
+    if (!this._fillElevationInput || this._fillElevationInput.disabled) return;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+    const state = this._toolOptionState?.fillElevation || {};
+    const baseStep = Number(state.step) || 0.01;
+    const fine = event.ctrlKey || event.metaKey;
+    const coarseMultiplier = event.shiftKey ? 5 : 1;
+    const step = Math.max(0.001, (fine ? baseStep / 10 : baseStep) * coarseMultiplier);
+    const current = Number(this._fillElevationInput.value);
+    const safeCurrent = Number.isFinite(current) ? current : 0;
+    const direction = event.deltaY < 0 ? 1 : -1;
+    const nextValue = Math.round((safeCurrent + (direction * step)) * 100) / 100;
+    this._fillElevationInput.value = String(nextValue);
+    this._handleFillElevation({ currentTarget: this._fillElevationInput }, true);
   }
 
   _bindPathOffsetControls() {
@@ -2436,6 +3063,57 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
   }
 
+  _bindShowWidthTangentsControls() {
+    const root = this.element?.querySelector('[data-fa-nexus-show-width-tangents-root]') || null;
+    if (!root) {
+      this._unbindShowWidthTangentsControls();
+      return;
+    }
+    this._showWidthTangentsRoot = root;
+    const toggle = root.querySelector('[data-fa-nexus-show-width-tangents]') || null;
+    if (toggle) {
+      toggle.addEventListener('change', this._boundShowWidthTangentsChange);
+    }
+    this._showWidthTangentsToggle = toggle;
+  }
+
+  _unbindShowWidthTangentsControls() {
+    if (this._showWidthTangentsToggle) {
+      try { this._showWidthTangentsToggle.removeEventListener('change', this._boundShowWidthTangentsChange); } catch (_) {}
+    }
+    this._showWidthTangentsRoot = null;
+    this._showWidthTangentsToggle = null;
+  }
+
+  _syncShowWidthTangentsControls() {
+    if (!this._showWidthTangentsRoot) return;
+    const state = this._toolOptionState?.pathAppearance?.showWidthTangents || { available: false };
+    if (!state.available) {
+      this._showWidthTangentsRoot.hidden = true;
+      return;
+    }
+    this._showWidthTangentsRoot.hidden = false;
+    if (this._showWidthTangentsToggle) {
+      this._showWidthTangentsToggle.checked = !!state.enabled;
+      this._showWidthTangentsToggle.disabled = !!state.disabled;
+    }
+  }
+
+  _handleShowWidthTangentsChange(event) {
+    const toggle = event?.currentTarget || event?.target;
+    if (!toggle) return;
+    const enabled = toggle.checked;
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('setShowWidthTangents', enabled);
+      if (result?.then) result.catch(() => {}).finally(() => this._syncShowWidthTangentsControls());
+      else this._syncShowWidthTangentsControls();
+    } catch (_) {
+      this._syncShowWidthTangentsControls();
+    }
+  }
+
   _handleTextureOpacity(event, commit) {
     const slider = event?.currentTarget || event?.target;
     if (!slider) return;
@@ -2469,6 +3147,24 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
     } catch (_) {
       this._syncTextureOffsetControls();
+    }
+  }
+
+  _handleFillTextureOffset(event, axis, commit) {
+    const slider = event?.currentTarget || event?.target;
+    if (!slider) return;
+    const value = slider.value;
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('setFillTextureOffset', axis, value, !!commit);
+      if (result?.then) {
+        result.catch(() => {}).finally(() => this._syncFillTextureControls());
+      } else {
+        this._syncFillTextureControls();
+      }
+    } catch (_) {
+      this._syncFillTextureControls();
     }
   }
 
@@ -3605,6 +4301,495 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
   }
 
+  _handlePlacementPush(event, direction = 'top') {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const handlerId = direction === 'bottom' ? 'pushSelectedWallToBottom' : 'pushSelectedWallToTop';
+    try { this._controller?.invokeToolHandler?.(handlerId); }
+    catch (_) {}
+  }
+
+  _bindPlacementControls() {
+    const root = this.element?.querySelector('[data-fa-nexus-placement-root]');
+    if (!root) {
+      this._unbindPlacementControls();
+      return;
+    }
+    this._placementRoot = root;
+    this._placementSwitchRoots = Array.from(root.querySelectorAll('[data-fa-nexus-switch]') || []);
+    const pushTop = root.querySelector('[data-fa-nexus-stack-top]');
+    if (pushTop) {
+      pushTop.addEventListener('click', this._boundPlacementPushTop);
+      this._placementPushTopButton = pushTop;
+    }
+    const pushBottom = root.querySelector('[data-fa-nexus-stack-bottom]');
+    if (pushBottom) {
+      pushBottom.addEventListener('click', this._boundPlacementPushBottom);
+      this._placementPushBottomButton = pushBottom;
+    }
+    this._placementOrderDisplay = root.querySelector('[data-fa-nexus-placement-order]') || null;
+    this._placementHint = root.querySelector('[data-fa-nexus-placement-hint]') || null;
+    this._placementStateLabels = Array.from(root.querySelectorAll('[data-fa-nexus-switch-state]') || []);
+    this._syncPlacementControls();
+  }
+
+  _unbindPlacementControls() {
+    if (this._placementPushTopButton) {
+      try { this._placementPushTopButton.removeEventListener('click', this._boundPlacementPushTop); }
+      catch (_) {}
+      this._placementPushTopButton = null;
+    }
+    if (this._placementPushBottomButton) {
+      try { this._placementPushBottomButton.removeEventListener('click', this._boundPlacementPushBottom); }
+      catch (_) {}
+      this._placementPushBottomButton = null;
+    }
+    this._placementRoot = null;
+    this._placementOrderDisplay = null;
+    this._placementHint = null;
+    this._placementStateLabels = [];
+    this._placementSwitchRoots = [];
+  }
+
+  _syncPlacementControls() {
+    if (!this._placementRoot) return;
+    const stateList = Array.isArray(this._toolOptionState?.customToggles)
+      ? this._toolOptionState.customToggles
+      : [];
+    const stateMap = new Map();
+    for (const toggle of stateList) {
+      if (!toggle || typeof toggle !== 'object') continue;
+      const id = String(toggle.id || '');
+      if (!id.length) continue;
+      stateMap.set(id, toggle);
+    }
+    if (Array.isArray(this._placementSwitchRoots)) {
+      for (const root of this._placementSwitchRoots) {
+        const id = root?.dataset?.faNexusSwitch || root?.getAttribute?.('data-fa-nexus-switch') || '';
+        if (!id) continue;
+        const state = stateMap.get(id) || {};
+        const input = root.querySelector('input[type="checkbox"]');
+        if (input) {
+          input.checked = !!state.enabled;
+          input.disabled = !!state.disabled;
+        }
+        root.classList.toggle('is-on', !!state.enabled);
+        root.classList.toggle('is-disabled', !!state.disabled);
+      }
+    }
+    if (Array.isArray(this._placementStateLabels)) {
+      for (const label of this._placementStateLabels) {
+        const rawId = label?.dataset?.faNexusSwitchState || label?.getAttribute?.('data-fa-nexus-switch-state') || '';
+        if (!rawId) continue;
+        const baseId = rawId.replace(/-on$|-off$/, '');
+        const state = stateMap.get(baseId) || {};
+        const isOn = !!state.enabled;
+        const onLabel = typeof state.onLabel === 'string' && state.onLabel.length ? state.onLabel : 'On';
+        const offLabel = typeof state.offLabel === 'string' && state.offLabel.length ? state.offLabel : 'Off';
+        const wantOn = rawId.endsWith('-on');
+        const text = wantOn ? onLabel : offLabel;
+        if (label.textContent !== text) label.textContent = text;
+        label.classList.toggle('is-active', (wantOn && isOn) || (!wantOn && !isOn));
+      }
+    }
+    const stacking = this._toolOptionState?.shapeStacking || { available: false };
+    const available = !!stacking.available;
+    if (this._placementPushTopButton) {
+      this._placementPushTopButton.disabled = !available || !!stacking.pushTopDisabled;
+    }
+    if (this._placementPushBottomButton) {
+      this._placementPushBottomButton.disabled = !available || !!stacking.pushBottomDisabled;
+    }
+    if (this._placementOrderDisplay) {
+      const text = available ? (stacking.orderLabel || '') : '';
+      this._placementOrderDisplay.textContent = text;
+      this._placementOrderDisplay.classList.toggle('is-hidden', !text);
+    }
+    if (this._placementHint) {
+      const hint = available ? (stacking.hint || '') : '';
+      this._placementHint.textContent = hint;
+      this._placementHint.classList.toggle('is-hidden', !hint);
+    }
+  }
+
+  _syncDoorControls() {
+    if (!this.element) return;
+    const state = this._toolOptionState?.doorControls || null;
+    const root = this.element.querySelector('[data-fa-nexus-door-root]');
+    if (!root) return;
+    if (!state) {
+      root.style.display = 'none';
+      return;
+    }
+    root.style.display = '';
+    if (!root._faDoorBound) {
+      const pick = root.querySelector('[data-fa-nexus-door-pick]');
+      if (pick) pick.addEventListener('click', () => this._controller?.invokeToolHandler?.('pickDoorTexture'));
+      const clear = root.querySelector('[data-fa-nexus-door-clear]');
+      if (clear) clear.addEventListener('click', () => this._controller?.invokeToolHandler?.('clearDoorTexture'));
+      const applyDefault = root.querySelector('[data-fa-nexus-door-apply-default]');
+      if (applyDefault) applyDefault.addEventListener('click', () => this._controller?.invokeToolHandler?.('applyDoorDefaults'));
+      const clearSelection = root.querySelector('[data-fa-nexus-door-clear-selection]');
+      if (clearSelection) clearSelection.addEventListener('click', () => this._controller?.invokeToolHandler?.('clearPortalSelection'));
+      const framePick = root.querySelector('[data-fa-nexus-door-frame-pick]');
+      if (framePick) framePick.addEventListener('click', () => this._controller?.invokeToolHandler?.('pickDoorFrameTexture'));
+      const frameClear = root.querySelector('[data-fa-nexus-door-frame-clear]');
+      if (frameClear) frameClear.addEventListener('click', () => this._controller?.invokeToolHandler?.('clearDoorFrameTexture'));
+      const flip = root.querySelector('[data-fa-nexus-door-flip]');
+      if (flip) flip.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setDoorFlip', !!ev.target.checked));
+      const dbl = root.querySelector('[data-fa-nexus-door-double]');
+      if (dbl) dbl.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setDoorDouble', !!ev.target.checked));
+      const flipDir = root.querySelector('[data-fa-nexus-door-direction-flip]');
+      if (flipDir) flipDir.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setDoorDirectionFlip', !!ev.target.checked));
+      const dirSelect = root.querySelector('[data-fa-nexus-door-direction]');
+      if (dirSelect) {
+        dirSelect.addEventListener('change', (ev) => {
+          const dirVal = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorDirection', dirVal === -1 ? -1 : 1);
+        });
+      }
+      const animSelect = root.querySelector('[data-fa-nexus-door-animation]');
+      if (animSelect) {
+        animSelect.addEventListener('change', (ev) => {
+          const val = ev.target.value;
+          this._controller?.invokeToolHandler?.('setDoorAnimation', val);
+        });
+      }
+      const frameScaleSlider = root.querySelector('[data-fa-nexus-door-frame-scale]');
+      if (frameScaleSlider) {
+        frameScaleSlider.addEventListener('input', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameScale', val, false);
+        });
+        frameScaleSlider.addEventListener('change', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameScale', val, true);
+        });
+      }
+      const frameOffsetXSlider = root.querySelector('[data-fa-nexus-door-frame-offset-x]');
+      if (frameOffsetXSlider) {
+        frameOffsetXSlider.addEventListener('input', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameOffsetX', val, false);
+        });
+        frameOffsetXSlider.addEventListener('change', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameOffsetX', val, true);
+        });
+      }
+      const frameOffsetYSlider = root.querySelector('[data-fa-nexus-door-frame-offset-y]');
+      if (frameOffsetYSlider) {
+        frameOffsetYSlider.addEventListener('input', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameOffsetY', val, false);
+        });
+        frameOffsetYSlider.addEventListener('change', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameOffsetY', val, true);
+        });
+      }
+      const frameRotationSlider = root.querySelector('[data-fa-nexus-door-frame-rotation]');
+      if (frameRotationSlider) {
+        frameRotationSlider.addEventListener('input', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameRotation', val, false);
+        });
+        frameRotationSlider.addEventListener('change', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameRotation', val, true);
+        });
+      }
+      root._faDoorBound = true;
+    }
+    const selection = root.querySelector('[data-fa-nexus-door-selection]');
+    if (selection) selection.textContent = state.selectionLabel || '';
+    const applyDefault = root.querySelector('[data-fa-nexus-door-apply-default]');
+    if (applyDefault) applyDefault.disabled = !!state.disabled || !state.hasSelection;
+    const clearSelection = root.querySelector('[data-fa-nexus-door-clear-selection]');
+    if (clearSelection) clearSelection.disabled = !!state.disabled || !state.hasSelection;
+    const pick = root.querySelector('[data-fa-nexus-door-pick]');
+    if (pick) {
+      pick.disabled = !!state.disabled;
+      const labelSpan = pick.querySelector('span');
+      if (labelSpan) labelSpan.textContent = state.textureLabel || 'Pick Door Texture';
+    }
+    const clear = root.querySelector('[data-fa-nexus-door-clear]');
+    if (clear) clear.disabled = !!state.disabled;
+    const framePick = root.querySelector('[data-fa-nexus-door-frame-pick]');
+    if (framePick) {
+      framePick.disabled = !!state.disabled;
+      const labelSpan = framePick.querySelector('span');
+      if (labelSpan) labelSpan.textContent = state.frameLabel || 'Pick Door Frame';
+    }
+    const frameClear = root.querySelector('[data-fa-nexus-door-frame-clear]');
+    if (frameClear) frameClear.disabled = !!state.disabled;
+    const flip = root.querySelector('[data-fa-nexus-door-flip]');
+    if (flip) {
+      flip.checked = !!state.flip;
+      flip.disabled = !!state.disabled;
+    }
+    const dbl = root.querySelector('[data-fa-nexus-door-double]');
+    if (dbl) {
+      dbl.checked = !!state.double;
+      dbl.disabled = !!state.disabled;
+    }
+    const flipDir = root.querySelector('[data-fa-nexus-door-direction-flip]');
+    if (flipDir) {
+      flipDir.checked = !!state.directionFlip;
+      flipDir.disabled = !!state.disabled;
+    }
+    const dirSelect = root.querySelector('[data-fa-nexus-door-direction]');
+    if (dirSelect) {
+      dirSelect.value = String(state.direction === -1 ? -1 : 1);
+      dirSelect.disabled = !!state.disabled;
+    }
+    const animSelect = root.querySelector('[data-fa-nexus-door-animation]');
+    if (animSelect && Array.isArray(state.animations)) {
+      const desired = state.selectedAnimation || '';
+      animSelect.value = desired && animSelect.querySelector(`option[value="${desired}"]`) ? desired : animSelect.value;
+      animSelect.disabled = !!state.disabled;
+    }
+    // Sync frame settings sliders
+    const frameSettings = state.frameSettings || null;
+    const frameSettingsRoot = root.querySelector('[data-fa-nexus-door-frame-settings]');
+    if (frameSettingsRoot) {
+      frameSettingsRoot.style.display = frameSettings ? '' : 'none';
+    }
+    if (frameSettings) {
+      const scaleSlider = root.querySelector('[data-fa-nexus-door-frame-scale]');
+      const scaleDisplay = root.querySelector('[data-fa-nexus-door-frame-scale-display]');
+      if (scaleSlider) scaleSlider.value = frameSettings.scale ?? 1;
+      if (scaleDisplay) scaleDisplay.textContent = frameSettings.scaleDisplay || '100%';
+      const offsetXSlider = root.querySelector('[data-fa-nexus-door-frame-offset-x]');
+      const offsetXDisplay = root.querySelector('[data-fa-nexus-door-frame-offset-x-display]');
+      if (offsetXSlider) offsetXSlider.value = frameSettings.offsetX ?? 0;
+      if (offsetXDisplay) offsetXDisplay.textContent = frameSettings.offsetXDisplay || '0';
+      const offsetYSlider = root.querySelector('[data-fa-nexus-door-frame-offset-y]');
+      const offsetYDisplay = root.querySelector('[data-fa-nexus-door-frame-offset-y-display]');
+      if (offsetYSlider) offsetYSlider.value = frameSettings.offsetY ?? 0;
+      if (offsetYDisplay) offsetYDisplay.textContent = frameSettings.offsetYDisplay || '0';
+      const rotationSlider = root.querySelector('[data-fa-nexus-door-frame-rotation]');
+      const rotationDisplay = root.querySelector('[data-fa-nexus-door-frame-rotation-display]');
+      if (rotationSlider) rotationSlider.value = frameSettings.rotation ?? 0;
+      if (rotationDisplay) rotationDisplay.textContent = frameSettings.rotationDisplay || '0°';
+    }
+  }
+
+  _syncWindowControls() {
+    if (!this.element) return;
+    const state = this._toolOptionState?.windowControls || null;
+    const root = this.element.querySelector('[data-fa-nexus-window-root]');
+    if (!root) return;
+    if (!state) {
+      root.style.display = 'none';
+      return;
+    }
+    root.style.display = '';
+    if (!root._faWindowBound) {
+      const applyDefault = root.querySelector('[data-fa-nexus-window-apply-default]');
+      if (applyDefault) applyDefault.addEventListener('click', () => this._controller?.invokeToolHandler?.('applyWindowDefaults'));
+      const clearSelection = root.querySelector('[data-fa-nexus-window-clear-selection]');
+      if (clearSelection) clearSelection.addEventListener('click', () => this._controller?.invokeToolHandler?.('clearPortalSelection'));
+      // Animated toggle
+      const animatedToggle = root.querySelector('[data-fa-nexus-window-animated]');
+      if (animatedToggle) animatedToggle.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowAnimated', !!ev.target.checked));
+      const animSelect = root.querySelector('[data-fa-nexus-window-animation]');
+      if (animSelect) animSelect.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowAnimation', ev.target.value));
+      const dirSelect = root.querySelector('[data-fa-nexus-window-direction]');
+      if (dirSelect) dirSelect.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowDirection', Number(ev.target.value)));
+      const flipToggle = root.querySelector('[data-fa-nexus-window-flip]');
+      if (flipToggle) flipToggle.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFlip', !!ev.target.checked));
+      const doubleToggle = root.querySelector('[data-fa-nexus-window-double]');
+      if (doubleToggle) doubleToggle.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowDouble', !!ev.target.checked));
+      const directionFlipToggle = root.querySelector('[data-fa-nexus-window-direction-flip]');
+      if (directionFlipToggle) directionFlipToggle.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowDirectionFlip', !!ev.target.checked));
+      // Sill controls
+      const sillPick = root.querySelector('[data-fa-nexus-window-sill-pick]');
+      if (sillPick) sillPick.addEventListener('click', () => this._controller?.invokeToolHandler?.('pickWindowSillTexture'));
+      const sillClear = root.querySelector('[data-fa-nexus-window-sill-clear]');
+      if (sillClear) sillClear.addEventListener('click', () => this._controller?.invokeToolHandler?.('clearWindowSillTexture'));
+      const sillScaleSlider = root.querySelector('[data-fa-nexus-window-sill-scale]');
+      if (sillScaleSlider) {
+        sillScaleSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), false));
+        sillScaleSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), true));
+      }
+      const sillOffsetXSlider = root.querySelector('[data-fa-nexus-window-sill-offset-x]');
+      if (sillOffsetXSlider) {
+        sillOffsetXSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), false));
+        sillOffsetXSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), true));
+      }
+      const sillOffsetYSlider = root.querySelector('[data-fa-nexus-window-sill-offset-y]');
+      if (sillOffsetYSlider) {
+        sillOffsetYSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), false));
+        sillOffsetYSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), true));
+      }
+      // Window texture controls
+      const texturePick = root.querySelector('[data-fa-nexus-window-texture-pick]');
+      if (texturePick) texturePick.addEventListener('click', () => this._controller?.invokeToolHandler?.('pickWindowTexture'));
+      const textureClear = root.querySelector('[data-fa-nexus-window-texture-clear]');
+      if (textureClear) textureClear.addEventListener('click', () => this._controller?.invokeToolHandler?.('clearWindowTexture'));
+      const textureScaleSlider = root.querySelector('[data-fa-nexus-window-texture-scale]');
+      if (textureScaleSlider) {
+        textureScaleSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), false));
+        textureScaleSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), true));
+      }
+      const textureOffsetXSlider = root.querySelector('[data-fa-nexus-window-texture-offset-x]');
+      if (textureOffsetXSlider) {
+        textureOffsetXSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), false));
+        textureOffsetXSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), true));
+      }
+      const textureOffsetYSlider = root.querySelector('[data-fa-nexus-window-texture-offset-y]');
+      if (textureOffsetYSlider) {
+        textureOffsetYSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), false));
+        textureOffsetYSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), true));
+      }
+      // Frame controls
+      const framePick = root.querySelector('[data-fa-nexus-window-frame-pick]');
+      if (framePick) framePick.addEventListener('click', () => this._controller?.invokeToolHandler?.('pickWindowFrameTexture'));
+      const frameClear = root.querySelector('[data-fa-nexus-window-frame-clear]');
+      if (frameClear) frameClear.addEventListener('click', () => this._controller?.invokeToolHandler?.('clearWindowFrameTexture'));
+      const frameScaleSlider = root.querySelector('[data-fa-nexus-window-frame-scale]');
+      if (frameScaleSlider) {
+        frameScaleSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), false));
+        frameScaleSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), true));
+      }
+      const frameOffsetXSlider = root.querySelector('[data-fa-nexus-window-frame-offset-x]');
+      if (frameOffsetXSlider) {
+        frameOffsetXSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), false));
+        frameOffsetXSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), true));
+      }
+      const frameOffsetYSlider = root.querySelector('[data-fa-nexus-window-frame-offset-y]');
+      if (frameOffsetYSlider) {
+        frameOffsetYSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), false));
+        frameOffsetYSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), true));
+      }
+      const frameRotationSlider = root.querySelector('[data-fa-nexus-window-frame-rotation]');
+      if (frameRotationSlider) {
+        frameRotationSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), false));
+        frameRotationSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), true));
+      }
+      root._faWindowBound = true;
+    }
+    // Sync UI state
+    const selection = root.querySelector('[data-fa-nexus-window-selection]');
+    if (selection) selection.textContent = state.selectionLabel || '';
+    const applyDefault = root.querySelector('[data-fa-nexus-window-apply-default]');
+    if (applyDefault) applyDefault.disabled = !!state.disabled || !state.hasSelection;
+    const clearSelection = root.querySelector('[data-fa-nexus-window-clear-selection]');
+    if (clearSelection) clearSelection.disabled = !!state.disabled || !state.hasSelection;
+    const animatedToggle = root.querySelector('[data-fa-nexus-window-animated]');
+    if (animatedToggle) {
+      animatedToggle.checked = !!state.animated;
+      animatedToggle.disabled = !!state.disabled;
+    }
+    const animSelect = root.querySelector('[data-fa-nexus-window-animation]');
+    if (animSelect && Array.isArray(state.animations)) {
+      const desired = state.selectedAnimation || '';
+      animSelect.value = desired && animSelect.querySelector(`option[value="${desired}"]`) ? desired : animSelect.value;
+      animSelect.disabled = !!state.disabled;
+    }
+    const dirSelect = root.querySelector('[data-fa-nexus-window-direction]');
+    if (dirSelect && Array.isArray(state.directions)) {
+      const desired = state.direction === -1 ? -1 : 1;
+      dirSelect.value = String(desired);
+      dirSelect.disabled = !!state.disabled;
+    }
+    const flipToggle = root.querySelector('[data-fa-nexus-window-flip]');
+    if (flipToggle) {
+      flipToggle.checked = !!state.flip;
+      flipToggle.disabled = !!state.disabled;
+    }
+    const doubleToggle = root.querySelector('[data-fa-nexus-window-double]');
+    if (doubleToggle) {
+      doubleToggle.checked = !!state.double;
+      doubleToggle.disabled = !!state.disabled;
+    }
+    // Sill UI
+    const sillPick = root.querySelector('[data-fa-nexus-window-sill-pick]');
+    if (sillPick) {
+      sillPick.disabled = !!state.disabled;
+      const labelSpan = sillPick.querySelector('span');
+      if (labelSpan) labelSpan.textContent = state.sillLabel || 'Pick Sill';
+    }
+    const sillClear = root.querySelector('[data-fa-nexus-window-sill-clear]');
+    if (sillClear) sillClear.disabled = !!state.disabled;
+    const sillSettings = state.sillSettings || null;
+    const sillSettingsRoot = root.querySelector('[data-fa-nexus-window-sill-settings]');
+    if (sillSettingsRoot) sillSettingsRoot.style.display = sillSettings ? '' : 'none';
+    if (sillSettings) {
+      const scaleSlider = root.querySelector('[data-fa-nexus-window-sill-scale]');
+      const scaleDisplay = root.querySelector('[data-fa-nexus-window-sill-scale-display]');
+      if (scaleSlider) scaleSlider.value = sillSettings.scale ?? 1;
+      if (scaleDisplay) scaleDisplay.textContent = sillSettings.scaleDisplay || '100%';
+      const offsetXSlider = root.querySelector('[data-fa-nexus-window-sill-offset-x]');
+      const offsetXDisplay = root.querySelector('[data-fa-nexus-window-sill-offset-x-display]');
+      if (offsetXSlider) offsetXSlider.value = sillSettings.offsetX ?? 0;
+      if (offsetXDisplay) offsetXDisplay.textContent = sillSettings.offsetXDisplay || '0';
+      const offsetYSlider = root.querySelector('[data-fa-nexus-window-sill-offset-y]');
+      const offsetYDisplay = root.querySelector('[data-fa-nexus-window-sill-offset-y-display]');
+      if (offsetYSlider) offsetYSlider.value = sillSettings.offsetY ?? 0;
+      if (offsetYDisplay) offsetYDisplay.textContent = sillSettings.offsetYDisplay || '0';
+    }
+    // Window texture UI
+    const texturePick = root.querySelector('[data-fa-nexus-window-texture-pick]');
+    if (texturePick) {
+      texturePick.disabled = !!state.disabled;
+      const labelSpan = texturePick.querySelector('span');
+      if (labelSpan) labelSpan.textContent = state.textureLabel || 'Pick Window';
+    }
+    const textureClear = root.querySelector('[data-fa-nexus-window-texture-clear]');
+    if (textureClear) textureClear.disabled = !!state.disabled;
+    const textureSettings = state.textureSettings || null;
+    const textureSettingsRoot = root.querySelector('[data-fa-nexus-window-texture-settings]');
+    if (textureSettingsRoot) textureSettingsRoot.style.display = textureSettings ? '' : 'none';
+    if (textureSettings) {
+      const scaleSlider = root.querySelector('[data-fa-nexus-window-texture-scale]');
+      const scaleDisplay = root.querySelector('[data-fa-nexus-window-texture-scale-display]');
+      if (scaleSlider) scaleSlider.value = textureSettings.scale ?? 1;
+      if (scaleDisplay) scaleDisplay.textContent = textureSettings.scaleDisplay || '100%';
+      const offsetXSlider = root.querySelector('[data-fa-nexus-window-texture-offset-x]');
+      const offsetXDisplay = root.querySelector('[data-fa-nexus-window-texture-offset-x-display]');
+      if (offsetXSlider) offsetXSlider.value = textureSettings.offsetX ?? 0;
+      if (offsetXDisplay) offsetXDisplay.textContent = textureSettings.offsetXDisplay || '0';
+      const offsetYSlider = root.querySelector('[data-fa-nexus-window-texture-offset-y]');
+      const offsetYDisplay = root.querySelector('[data-fa-nexus-window-texture-offset-y-display]');
+      if (offsetYSlider) offsetYSlider.value = textureSettings.offsetY ?? 0;
+      if (offsetYDisplay) offsetYDisplay.textContent = textureSettings.offsetYDisplay || '0';
+    }
+    // Frame UI
+    const framePick = root.querySelector('[data-fa-nexus-window-frame-pick]');
+    if (framePick) {
+      framePick.disabled = !!state.disabled;
+      const labelSpan = framePick.querySelector('span');
+      if (labelSpan) labelSpan.textContent = state.frameLabel || 'Pick Frame';
+    }
+    const frameClear = root.querySelector('[data-fa-nexus-window-frame-clear]');
+    if (frameClear) frameClear.disabled = !!state.disabled;
+    const frameSettings = state.frameSettings || null;
+    const frameSettingsRoot = root.querySelector('[data-fa-nexus-window-frame-settings]');
+    if (frameSettingsRoot) frameSettingsRoot.style.display = frameSettings ? '' : 'none';
+    if (frameSettings) {
+      const scaleSlider = root.querySelector('[data-fa-nexus-window-frame-scale]');
+      const scaleDisplay = root.querySelector('[data-fa-nexus-window-frame-scale-display]');
+      if (scaleSlider) scaleSlider.value = frameSettings.scale ?? 1;
+      if (scaleDisplay) scaleDisplay.textContent = frameSettings.scaleDisplay || '100%';
+      const offsetXSlider = root.querySelector('[data-fa-nexus-window-frame-offset-x]');
+      const offsetXDisplay = root.querySelector('[data-fa-nexus-window-frame-offset-x-display]');
+      if (offsetXSlider) offsetXSlider.value = frameSettings.offsetX ?? 0;
+      if (offsetXDisplay) offsetXDisplay.textContent = frameSettings.offsetXDisplay || '0';
+      const offsetYSlider = root.querySelector('[data-fa-nexus-window-frame-offset-y]');
+      const offsetYDisplay = root.querySelector('[data-fa-nexus-window-frame-offset-y-display]');
+      if (offsetYSlider) offsetYSlider.value = frameSettings.offsetY ?? 0;
+      if (offsetYDisplay) offsetYDisplay.textContent = frameSettings.offsetYDisplay || '0';
+      const rotationSlider = root.querySelector('[data-fa-nexus-window-frame-rotation]');
+      const rotationDisplay = root.querySelector('[data-fa-nexus-window-frame-rotation-display]');
+      if (rotationSlider) rotationSlider.value = frameSettings.rotation ?? 0;
+      if (rotationDisplay) rotationDisplay.textContent = frameSettings.rotationDisplay || '0°';
+    }
+  }
+
   _bindShortcutsControls() {
     this._shortcutsRoot = null;
     this._shortcutsToggle = null;
@@ -3783,6 +4968,19 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       const label = this._placeAsLinkedToggle.closest('label');
       if (label && state.linkedTooltip) label.title = state.linkedTooltip;
     }
+    const namingState = state.naming || {};
+    if (this._placeAsAppendNumberToggle) {
+      this._placeAsAppendNumberToggle.checked = !!namingState.appendNumber;
+      this._placeAsAppendNumberToggle.disabled = !namingState.available;
+      const label = this._placeAsAppendNumberToggle.closest('label');
+      if (label && namingState.appendNumberTooltip) label.title = namingState.appendNumberTooltip;
+    }
+    if (this._placeAsPrependAdjectiveToggle) {
+      this._placeAsPrependAdjectiveToggle.checked = !!namingState.prependAdjective;
+      this._placeAsPrependAdjectiveToggle.disabled = !namingState.available;
+      const label = this._placeAsPrependAdjectiveToggle.closest('label');
+      if (label && namingState.prependAdjectiveTooltip) label.title = namingState.prependAdjectiveTooltip;
+    }
     if (this._placeAsList) {
       const selectedId = state.selectedId || '';
       const buttons = this._placeAsList.querySelectorAll('[data-place-as-option]');
@@ -3897,6 +5095,26 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
   }
 
+  _handlePlaceAsAppendNumber(event) {
+    const checked = !!event?.currentTarget?.checked;
+    const result = this._controller?.invokeToolHandler?.('setPlaceAsAppendNumber', checked);
+    if (result?.then) {
+      result.finally(() => this._syncPlaceAsControls());
+    } else {
+      this._syncPlaceAsControls();
+    }
+  }
+
+  _handlePlaceAsPrependAdjective(event) {
+    const checked = !!event?.currentTarget?.checked;
+    const result = this._controller?.invokeToolHandler?.('setPlaceAsPrependAdjective', checked);
+    if (result?.then) {
+      result.finally(() => this._syncPlaceAsControls());
+    } else {
+      this._syncPlaceAsControls();
+    }
+  }
+
   _handlePlaceAsToggle(event) {
     if (event) {
       event.preventDefault?.();
@@ -3908,6 +5126,14 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     } else {
       this._syncPlaceAsControls();
     }
+  }
+
+  _handlePlaceAsFilter(event) {
+    if (event) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+    }
+    this._controller?.invokeToolHandler?.('openCompendiumFilterDialog');
   }
 
   _handlePlaceAsHpMode(event) {
@@ -4054,6 +5280,8 @@ class ToolOptionsController {
     this._activeTools = new Map();
     this._needsGridSnapResync = false;
     this._gridSnapEnabled = this._readGridSnapSetting();
+    this._needsGridSnapSubdivResync = false;
+    this._gridSnapSubdivisions = this._readGridSnapSubdivisionSetting();
     this._settingsHook = null;
     this._settingsAvailable = this._canAccessSettings();
     this._ensureSettingsListener();
@@ -4129,6 +5357,7 @@ class ToolOptionsController {
       controller: this,
       gridSnapEnabled: this._gridSnapEnabled,
       gridSnapAvailable: available,
+      gridSnapSubdivisions: this._gridSnapSubdivisions,
       toolOptions: this._getToolState(null)
     });
     return this._window;
@@ -4179,6 +5408,10 @@ class ToolOptionsController {
     }
     this._notifyStateListeners();
     return true;
+  }
+
+  getGridSnapSubdivisions() {
+    return this._gridSnapSubdivisions;
   }
 
   requestDropShadowToggle(enabled) {
@@ -4279,6 +5512,10 @@ class ToolOptionsController {
       const stored = this._readGridSnapSetting();
       this._updateGridSnapState(stored, { syncWindow: true });
     }
+    if (available && (availabilityChanged || this._needsGridSnapSubdivResync)) {
+      const storedSubdiv = this._readGridSnapSubdivisionSetting();
+      this._updateGridSnapSubdivisionsState(storedSubdiv, { syncWindow: true });
+    }
     if (this._window) this._window.setGridSnapAvailable(available);
     return available;
   }
@@ -4306,6 +5543,26 @@ class ToolOptionsController {
     }
   }
 
+  async requestGridSnapSubdivisionChange(value) {
+    const next = this._normalizeGridSnapSubdivisionValue(value);
+    const previous = this._gridSnapSubdivisions;
+    if (next === previous) return true;
+    const canPersist = this.supportsGridSnap();
+    this._updateGridSnapSubdivisionsState(next, { syncWindow: true });
+    if (!canPersist) return true;
+    try {
+      await game.settings.set(MODULE_ID, GRID_SNAP_SUBDIV_SETTING_KEY, next);
+      return true;
+    } catch (error) {
+      Logger.warn('ToolOptionsController.gridSnapSubdiv.saveFailed', error);
+      this._updateGridSnapSubdivisionsState(previous, { syncWindow: true });
+      try {
+        ui?.notifications?.warn?.('Failed to update snap density. Please try again.');
+      } catch (_) {}
+      return false;
+    }
+  }
+
   _ensureSettingsListener() {
     if (this._settingsHook || !globalThis?.Hooks || typeof globalThis.Hooks.on !== 'function') return;
     const handler = (setting) => this._handleSettingUpdated(setting);
@@ -4322,6 +5579,10 @@ class ToolOptionsController {
     if (!setting || setting.namespace !== MODULE_ID) return;
     if (setting.key === GRID_SNAP_SETTING_KEY) {
       this._updateGridSnapState(!!setting.value, { syncWindow: true });
+      return;
+    }
+    if (setting.key === GRID_SNAP_SUBDIV_SETTING_KEY) {
+      this._updateGridSnapSubdivisionsState(setting.value, { syncWindow: true });
       return;
     }
     if (setting.key === SHORTCUTS_SETTING_KEY) {
@@ -4343,6 +5604,24 @@ class ToolOptionsController {
     } catch (_) {}
   }
 
+  _normalizeGridSnapSubdivisionValue(value) {
+    return normalizeGridSnapSubdivision(value);
+  }
+
+  _updateGridSnapSubdivisionsState(value, { syncWindow = false } = {}) {
+    const next = this._normalizeGridSnapSubdivisionValue(value);
+    if (this._gridSnapSubdivisions === next) {
+      if (syncWindow && this._window) this._window.setGridSnapSubdivisions(next);
+      return;
+    }
+    this._gridSnapSubdivisions = next;
+    if (syncWindow && this._window) this._window.setGridSnapSubdivisions(next);
+    try {
+      const hooks = globalThis?.Hooks;
+      hooks?.callAll?.('fa-nexus:gridSnapSubdivisionsChanged', { value: next });
+    } catch (_) {}
+  }
+
   _readGridSnapSetting() {
     if (!this._canAccessSettings()) {
       this._needsGridSnapResync = true;
@@ -4356,6 +5635,22 @@ class ToolOptionsController {
       Logger.warn('ToolOptionsController.gridSnap.readFailed', error);
       this._needsGridSnapResync = true;
       return true;
+    }
+  }
+
+  _readGridSnapSubdivisionSetting() {
+    if (!this._canAccessSettings()) {
+      this._needsGridSnapSubdivResync = true;
+      return GRID_SNAP_SUBDIV_DEFAULT;
+    }
+    try {
+      const value = readGridSnapSubdivisionSetting();
+      this._needsGridSnapSubdivResync = false;
+      return value;
+    } catch (error) {
+      Logger.warn('ToolOptionsController.gridSnapSubdiv.readFailed', error);
+      this._needsGridSnapSubdivResync = true;
+      return GRID_SNAP_SUBDIV_DEFAULT;
     }
   }
 

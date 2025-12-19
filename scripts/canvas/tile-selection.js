@@ -21,6 +21,7 @@ class TileAlphaHitArea {
       const world = tile.worldTransform.apply({ x: localX, y: localY }, _tempPointA);
       if (!world) return false;
       if (TilePixelSelection._pointHitsResizeHandle(tile, world.x, world.y)) return true;
+      if (!TilePixelSelection._pointWithinTileBounds(tile, world.x, world.y)) return false;
       return TilePixelSelection._pointHasVisibleAlpha(tile, world.x, world.y);
     } catch (err) {
       Logger.debug('TileAlphaHitArea.contains failed', err);
@@ -169,6 +170,7 @@ export class TilePixelSelection {
   static _pointHasVisibleAlpha(tile, worldX, worldY) {
     try {
       if (!this._tileHasVisibleAlpha(tile)) return false;
+      if (this._isVideoTile(tile)) return true; // Video tiles fall back to bounding box
       const mesh = tile?.mesh;
       if (!mesh || mesh.destroyed) return true;
 
@@ -189,6 +191,37 @@ export class TilePixelSelection {
         return pathAlpha >= DEFAULT_ALPHA_THRESHOLD;
       }
 
+      const buildingContainer = mesh.faNexusBuildingContainer || tile.faNexusBuildingContainer;
+      if (buildingContainer) {
+        const buildingMeshes = Array.isArray(buildingContainer.faNexusBuildingMeshes) && buildingContainer.faNexusBuildingMeshes.length
+          ? buildingContainer.faNexusBuildingMeshes
+          : (buildingContainer.children || []);
+        let inspectedMesh = false;
+        for (const buildingMesh of buildingMeshes) {
+          if (!buildingMesh || buildingMesh.destroyed || typeof buildingMesh.render !== 'function') continue;
+          inspectedMesh = true;
+          if (!this._meshContainsPoint(buildingMesh, worldX, worldY)) continue;
+          const buildingAlpha = this._sampleMeshTextureAlpha(buildingMesh, worldX, worldY);
+          if (buildingAlpha === null) return true;
+          if (buildingAlpha >= DEFAULT_ALPHA_THRESHOLD) return true;
+        }
+        if (inspectedMesh) return false;
+      }
+
+      const frameContainer = mesh.faNexusDoorFrameContainer || tile.faNexusDoorFrameContainer;
+      if (frameContainer) {
+        const sprites = frameContainer.children || [];
+        let inspected = false;
+        for (const sprite of sprites) {
+          if (!sprite || sprite.destroyed || !sprite.texture?.valid) continue;
+          inspected = true;
+          const alpha = this._sampleSpriteAlpha(sprite, worldX, worldY, { useLumaWhenOpaque: true });
+          if (alpha === null) return true;
+          if (alpha >= DEFAULT_ALPHA_THRESHOLD) return true;
+        }
+        if (inspected) return false;
+      }
+
       if (typeof mesh.containsPoint === 'function') {
         return !!mesh.containsPoint({ x: worldX, y: worldY }, DEFAULT_ALPHA_THRESHOLD);
       }
@@ -196,6 +229,33 @@ export class TilePixelSelection {
       return true;
     } catch (err) {
       Logger.debug('TilePixelSelection._pointHasVisibleAlpha failed', err);
+      return true;
+    }
+  }
+
+  static _pointWithinTileBounds(tile, worldX, worldY) {
+    try {
+      // Guard hit-testing to the tile's own rectangle so meshless/color tiles don't swallow the whole canvas.
+      // Use world-space bounds first (accounts for canvas zoom/pan), then fall back to scene-space math.
+      const worldBounds = tile?.getBounds?.(true);
+      if (worldBounds?.contains?.(worldX, worldY)) return true;
+
+      const doc = tile?.document;
+      if (!doc) return false;
+      let { x = 0, y = 0, width = 0, height = 0, rotation = 0, texture = {} } = doc;
+      const scaleX = Math.abs(Number(texture?.scaleX ?? 1)) || 1;
+      const scaleY = Math.abs(Number(texture?.scaleY ?? 1)) || 1;
+      width *= scaleX;
+      height *= scaleY;
+      const stage = canvas?.stage ?? canvas?.app?.stage;
+      const scenePoint = stage?.worldTransform?.applyInverse?.({ x: worldX, y: worldY }, _tempPointB) ?? { x: worldX, y: worldY };
+      let rect = rotation
+        ? PIXI.Rectangle.fromRotation(x, y, width, height, Math.toRadians(rotation))
+        : new PIXI.Rectangle(x, y, width, height);
+      if (typeof rect.normalize === 'function') rect = rect.normalize();
+      return rect.contains(scenePoint.x, scenePoint.y);
+    } catch (err) {
+      Logger.debug('TilePixelSelection._pointWithinTileBounds failed', err);
       return true;
     }
   }
@@ -285,6 +345,20 @@ export class TilePixelSelection {
     const meshAlpha = Number(tile.mesh?.worldAlpha ?? tile.mesh?.alpha);
     if (Number.isFinite(meshAlpha) && meshAlpha <= 0) return false;
     return true;
+  }
+
+  static _isVideoTile(tile) {
+    try {
+      // Check texture source path for video extensions
+      const src = tile?.document?.texture?.src;
+      if (src && /\.(webm|mp4|ogg|m4v)$/i.test(src)) return true;
+      // Check if baseTexture resource is a video element
+      const baseTexture = tile?.texture?.baseTexture ?? tile?.mesh?.texture?.baseTexture;
+      const resource = baseTexture?.resource;
+      if (resource?.source instanceof HTMLVideoElement) return true;
+      if (resource?.constructor?.name === 'VideoResource') return true;
+    } catch (_) {}
+    return false;
   }
 
   static _resolveMeshTexture(mesh) {
@@ -499,11 +573,18 @@ export class TilePixelSelection {
       const scaleY = alphaData.height / height;
       const sx = x * scaleX;
       const sy = y * scaleY;
-      if (sx < alphaData.minX || sx >= alphaData.maxX || sy < alphaData.minY || sy >= alphaData.maxY) return 0;
-      const ix = (alphaData.maxX - alphaData.minX) || 1;
-      const ox = Math.floor(sx) - alphaData.minX;
-      const oy = Math.floor(sy) - alphaData.minY;
-      const index = (oy * ix) + ox;
+      const px = Math.floor(sx);
+      const py = Math.floor(sy);
+      const minX = alphaData.minX ?? 0;
+      const minY = alphaData.minY ?? 0;
+      const maxX = alphaData.maxX ?? alphaData.width;
+      const maxY = alphaData.maxY ?? alphaData.height;
+      if (px < minX || px >= maxX || py < minY || py >= maxY) return 0;
+      const alphaWidth = Math.max(1, alphaData.width || 1);
+      const alphaHeight = Math.max(1, alphaData.height || 1);
+      if (px < 0 || px >= alphaWidth || py < 0 || py >= alphaHeight) return 0;
+      // Alpha buffers keep the full texture stride; index with actual width to avoid skewed samples.
+      const index = (py * alphaWidth) + px;
       const alphaArray = alphaData.alpha;
       if (!alphaArray) return null;
       const lumaArray = alphaData.luma;

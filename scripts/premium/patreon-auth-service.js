@@ -2,6 +2,7 @@ import { NexusLogger as Logger } from '../core/nexus-logger.js';
 import { premiumEntitlementsService } from './premium-entitlements-service.js';
 import { premiumFeatureBroker } from './premium-feature-broker.js';
 import { ensurePremiumFeaturesRegistered } from './premium-feature-registry.js';
+import { renderPatreonAuthHeader } from './patreon-auth-header.js';
 
 /**
  * Patreon OAuth service for FA Nexus
@@ -224,11 +225,18 @@ export class PatreonAuthService {
   /** Re-render a given Application while preserving its position */
   async updateAuthUI(app) {
     try {
-      // Preserve current window position across re-render
-      const p = app?.position ? { left: app.position.left, top: app.position.top, width: app.position.width, height: app.position.height } : null;
-      if (p) { try { await game.settings.set('fa-nexus', 'windowPos', p); } catch (_) {} }
-      await app.render();
-      if (p) { try { app.setPosition(p); } catch (_) {} }
+      if (!app) return;
+      if (!app.rendered) {
+        await app.render(true);
+        return;
+      }
+      try {
+        renderPatreonAuthHeader({
+          app,
+          getAuthService: () => app._getAuthService?.() ?? this
+        });
+        app._setPatreonHeaderVisibility?.(!app.minimized);
+      } catch (_) {}
     } catch (e) {
       Logger.error('PatreonAuth.refreshUI:failed', e);
     }
@@ -333,7 +341,7 @@ export async function warmPremiumFeatureBundles({ reason = 'auth', features } = 
     return false;
   }
 
-  const list = Array.isArray(features) && features.length ? features : ['texture.paint', 'path.edit'];
+  const list = Array.isArray(features) && features.length ? features : ['texture.paint', 'path.edit', 'building.edit'];
 
   for (const featureId of list) {
     if (!premiumFeatureBroker.can(featureId)) continue;

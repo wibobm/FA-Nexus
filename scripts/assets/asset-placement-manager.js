@@ -2,9 +2,12 @@ import { NexusLogger as Logger } from '../core/nexus-logger.js';
 import { createCanvasGestureSession } from '../canvas/canvas-gesture-session.js';
 import { getCanvasInteractionController, announceChange } from '../canvas/canvas-interaction-controller.js';
 import { getAssetShadowManager } from './asset-shadow-manager.js';
+import { getTileRenderElevation } from '../canvas/elevation-band-utils.js';
 import { toolOptionsController } from '../core/tool-options-controller.js';
 import { PlacementOverlay, createPlacementSpinner } from '../core/placement/placement-overlay.js';
 import { PlacementPrefetchQueue } from '../core/placement/placement-prefetch-queue.js';
+import { getGridSnapStep } from '../core/grid-snap-utils.js';
+import { getZoomAtCursorView } from '../canvas/canvas-pointer-utils.js';
 
 const quantizeElevation = (value) => {
   const numeric = Number(value);
@@ -507,13 +510,11 @@ export class AssetPlacementManager {
     }
 
     try {
-      const gridSize = canvas.scene.grid.size;
-      // Use half-grid increments for finer snapping (allows corners, edges, and centers)
-      const halfGrid = gridSize / 2;
-
-      // Snap to nearest half-grid increment
-      const snapX = Math.round(worldCoords.x / halfGrid) * halfGrid;
-      const snapY = Math.round(worldCoords.y / halfGrid) * halfGrid;
+      const gridSize = Number(canvas.scene.grid.size) || 0;
+      const snapStep = getGridSnapStep(gridSize);
+      if (!snapStep || !Number.isFinite(snapStep)) return worldCoords;
+      const snapX = Math.round(worldCoords.x / snapStep) * snapStep;
+      const snapY = Math.round(worldCoords.y / snapStep) * snapStep;
 
       return { x: snapX, y: snapY };
     } catch (error) {
@@ -1640,6 +1641,21 @@ export class AssetPlacementManager {
     return offsets;
   }
 
+  _computeRotatedSpriteBounds(width, height, rotationRadians) {
+    const w = Math.max(0, Math.abs(Number(width) || 0));
+    const h = Math.max(0, Math.abs(Number(height) || 0));
+    if (!w && !h) return { width: 0, height: 0 };
+    const theta = Number(rotationRadians) || 0;
+    const sin = Math.abs(Math.sin(theta));
+    const cos = Math.abs(Math.cos(theta));
+    const rotatedWidth = (w * cos) + (h * sin);
+    const rotatedHeight = (w * sin) + (h * cos);
+    return {
+      width: Math.max(0, rotatedWidth),
+      height: Math.max(0, rotatedHeight)
+    };
+  }
+
   _updatePreviewShadow({ force = false } = {}) {
     try {
       const container = this._previewContainer;
@@ -1669,8 +1685,8 @@ export class AssetPlacementManager {
       const renderer = canvas?.app?.renderer;
       if (!renderer) return;
 
-      const worldWidth = Number(sprite.width || 0);
-      const worldHeight = Number(sprite.height || 0);
+      const worldWidth = Math.abs(Number(sprite.width || 0));
+      const worldHeight = Math.abs(Number(sprite.height || 0));
       if (!Number.isFinite(worldWidth) || !Number.isFinite(worldHeight) || worldWidth <= 0 || worldHeight <= 0) return;
       const spriteScaleX = Number(sprite.scale?.x ?? 1) || 1;
       const spriteScaleY = Number(sprite.scale?.y ?? 1) || 1;
@@ -1678,6 +1694,7 @@ export class AssetPlacementManager {
       const flipY = spriteScaleY < 0 ? -1 : 1;
 
       const rotation = Number(sprite.rotation || 0);
+      const rotated = this._computeRotatedSpriteBounds(worldWidth, worldHeight, rotation);
       const alpha = Math.min(1, Math.max(0, Number(this._dropShadowAlpha || 0)));
       const dilation = Math.max(0, Number(this._dropShadowDilation || 0));
       const blur = Math.max(0, Number(this._dropShadowBlur || 0));
@@ -1687,8 +1704,8 @@ export class AssetPlacementManager {
       const blurMargin = blur * 12;
       const marginX = Math.abs(offset.x) + dilation + blurMargin;
       const marginY = Math.abs(offset.y) + dilation + blurMargin;
-      const paddedWidth = Math.max(8, Math.ceil(worldWidth + marginX * 2));
-      const paddedHeight = Math.max(8, Math.ceil(worldHeight + marginY * 2));
+      const paddedWidth = Math.max(8, Math.ceil(rotated.width + marginX * 2));
+      const paddedHeight = Math.max(8, Math.ceil(rotated.height + marginY * 2));
       const centerX = paddedWidth / 2;
       const centerY = paddedHeight / 2;
 
@@ -1891,6 +1908,7 @@ export class AssetPlacementManager {
       const flipX = spriteScaleX < 0 ? -1 : 1;
       const flipY = spriteScaleY < 0 ? -1 : 1;
       const rotation = Number(sprite.rotation || 0);
+      const rotated = this._computeRotatedSpriteBounds(worldWidth, worldHeight, rotation);
       const alpha = Math.min(1, Math.max(0, Number(this._dropShadowAlpha || 0)));
       const dilation = Math.max(0, Number(this._dropShadowDilation || 0));
       const blur = Math.max(0, Number(this._dropShadowBlur || 0));
@@ -1898,9 +1916,9 @@ export class AssetPlacementManager {
       const blurMargin = blur * 12;
       const marginWorldX = Math.abs(offset.x) + dilation + blurMargin;
       const marginWorldY = Math.abs(offset.y) + dilation + blurMargin;
-      const fitWidth = worldWidth + marginWorldX * 2;
-      const fitHeight = worldHeight + marginWorldY * 2;
-      const baseScale = availableSize / Math.max(worldWidth, worldHeight);
+      const fitWidth = rotated.width + marginWorldX * 2;
+      const fitHeight = rotated.height + marginWorldY * 2;
+      const baseScale = availableSize / Math.max(rotated.width, rotated.height);
       const fitScale = availableSize / Math.max(fitWidth, fitHeight);
       const minScale = baseScale * 0.68;
       const scale = Math.max(minScale, Math.min(baseScale, fitScale));
@@ -2070,16 +2088,40 @@ export class AssetPlacementManager {
      // Create sprite
      const textureUrl = this._encodeAssetPath(this.currentAsset.url);
      let texture;
-     const isVideo = /\.(webm|mp4|ogg)$/i.test(this.currentAsset.path || '');
+     const isVideo = /\.(webm|mp4)$/i.test(this.currentAsset.path || '');
      if (isVideo) {
        // For videos, create a video element and use it as texture
        const video = document.createElement('video');
-       video.src = textureUrl;
        video.muted = true;
        video.loop = true;
        video.playsInline = true;
        video.autoplay = true;
-       video.load();
+
+       // For cross-origin URLs, fetch as blob to avoid CORS issues with PIXI textures
+       const isCrossOrigin = /^https?:/i.test(textureUrl);
+       if (isCrossOrigin) {
+         // Attempt blob fetch for cross-origin videos
+         fetch(textureUrl)
+           .then((res) => {
+             if (!res.ok) throw new Error(`HTTP ${res.status}`);
+             return res.blob();
+           })
+           .then((blob) => {
+             const objectUrl = URL.createObjectURL(blob);
+             video.src = objectUrl;
+             video.load();
+           })
+           .catch((err) => {
+             Logger.warn('Placement.video.fetch.cors', { url: textureUrl, error: err?.message || err });
+             // Cannot use cross-origin video with PIXI without CORS headers - notify user
+             if (ui?.notifications?.error) {
+               ui.notifications.error('Video placement failed: S3 bucket requires CORS configuration for video assets.');
+             }
+           });
+       } else {
+         video.src = textureUrl;
+         video.load();
+       }
        texture = PIXI.Texture.from(video);
      } else {
        texture = PIXI.Texture.from(textureUrl);
@@ -2100,8 +2142,10 @@ export class AssetPlacementManager {
      container.sortLayer = tilesSortLayer;
      container.sort = this._previewSort;
      container.faNexusSort = this._previewSort;
-     container.faNexusElevation = this._previewElevation;
-     container.elevation = this._previewElevation;
+     const renderElevation = getTileRenderElevation(this._previewElevation);
+     container.faNexusElevationDoc = this._previewElevation;
+     container.faNexusElevation = renderElevation;
+     container.elevation = renderElevation;
      container.zIndex = 0;
 
      // Add to canvas
@@ -2702,7 +2746,11 @@ export class AssetPlacementManager {
     const fullUrl = await content.getFullURL('assets', item, authed ? auth.state : undefined);
     const local = await dl.ensureLocal('assets', item, fullUrl);
     if (local) {
-      asset.cachedLocalPath = local;
+      // Only set cachedLocalPath if actually downloaded (not using direct CDN URL)
+      const isDirectUrl = /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(local);
+      if (!isDirectUrl) {
+        asset.cachedLocalPath = local;
+      }
       asset.path = local;
       asset.url = local;
       try { this._updateGridCardDownloaded(asset.file_path || asset.path, local); }
@@ -2896,32 +2944,28 @@ export class AssetPlacementManager {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
-        const stage = canvas?.stage; if (!stage) return;
         const canvasEl = pointer?.canvas || this._interactionController.getCanvasElement?.();
         if (!canvasEl) return;
-        const rect = canvasEl.getBoundingClientRect();
-        const cx = screen.x - rect.left;
-        const cy = screen.y - rect.top;
+        const stage = canvas?.stage; if (!stage) return;
         const currentScale = Number(stage.scale?.x || 1);
         const step = 1.25;
         const dir = event.deltaY < 0 ? 1 : -1;
         const targetScale = currentScale * Math.pow(step, dir);
-        const cfgMin = Number(globalThis?.CONFIG?.Canvas?.minZoom ?? 0.25);
-        const cfgMax = Number(globalThis?.CONFIG?.Canvas?.maxZoom ?? 4);
-        const minZ = Number.isFinite(cfgMin) ? cfgMin : 0.25;
-        const maxZ = Number.isFinite(cfgMax) ? cfgMax : 4;
-        const newScale = Math.min(maxZ, Math.max(minZ, targetScale));
-        if (Math.abs(newScale - currentScale) < 1e-6) return;
-        const worldUnderCursor = stage.worldTransform.applyInverse(new PIXI.Point(cx, cy));
-        const centerX = rect.width / 2;
-        const centerY = rect.height / 2;
-        const desiredCenterX = worldUnderCursor.x + (centerX - cx) / newScale;
-        const desiredCenterY = worldUnderCursor.y + (centerY - cy) / newScale;
+        const view = getZoomAtCursorView({
+          canvasEl,
+          screenX: screen.x,
+          screenY: screen.y,
+          targetScale
+        });
+        if (!view) return;
         if (typeof canvas?.animatePan === 'function') {
-          canvas.animatePan({ x: desiredCenterX, y: desiredCenterY, scale: newScale, duration: 50 });
+          canvas.animatePan({ ...view, duration: 50 });
         } else {
-          stage.scale.set(newScale, newScale);
-          stage.position.set(centerX - newScale * desiredCenterX, centerY - newScale * desiredCenterY);
+          stage.scale.set(view.scale, view.scale);
+          const rect = canvasEl.getBoundingClientRect();
+          const centerX = rect.width / 2;
+          const centerY = rect.height / 2;
+          stage.position.set(centerX - view.scale * view.x, centerY - view.scale * view.y);
         }
       } catch (_) { /* no-op */ }
     };
@@ -3119,7 +3163,11 @@ export class AssetPlacementManager {
           const fullUrl = content?.getFullURL ? await content.getFullURL('assets', item, authed ? auth.state : undefined) : null;
           const local = dl?.ensureLocal && fullUrl ? await dl.ensureLocal('assets', item, fullUrl) : null;
           if (local) {
-            this.currentAsset.cachedLocalPath = local;
+            // Only set cachedLocalPath if actually downloaded (not using direct CDN URL)
+            const isDirectUrl = /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(local);
+            if (!isDirectUrl) {
+              this.currentAsset.cachedLocalPath = local;
+            }
             this.currentAsset.path = local;
             this.currentAsset.url = local;
             Logger.info('Placement.lazyDownload.done', { filename, local });
@@ -3550,8 +3598,10 @@ export class AssetPlacementManager {
         this._previewSort = nextSort;
         this._previewContainer.sort = nextSort;
         this._previewContainer.faNexusSort = nextSort;
-        this._previewContainer.faNexusElevation = this._previewElevation;
-        this._previewContainer.elevation = this._previewElevation;
+        const renderElevation = getTileRenderElevation(this._previewElevation);
+        this._previewContainer.faNexusElevationDoc = this._previewElevation;
+        this._previewContainer.faNexusElevation = renderElevation;
+        this._previewContainer.elevation = renderElevation;
         const parent = this._previewContainer.parent;
         if (parent && 'sortDirty' in parent) parent.sortDirty = true;
         parent?.sortChildren?.();
@@ -3778,14 +3828,18 @@ export class AssetPlacementManager {
       const sel = `.fa-nexus-card[data-file-path="${CSS.escape(String(filePath))}"]`;
       const card = grid.querySelector(sel) || grid.querySelector(`.fa-nexus-card[data-filename="${CSS.escape(String((filePath||'').split('/').pop()||''))}"]`);
       if (!card) return;
-      try { card.setAttribute('data-cached', 'true'); } catch (_) {}
       try { if (localPath) card.setAttribute('data-url', localPath); } catch (_) {}
-      const statusIcon = card.querySelector('.fa-nexus-status-icon');
-      if (statusIcon) {
-        statusIcon.classList.remove('cloud-plus', 'cloud', 'premium');
-        statusIcon.classList.add('cloud','cached');
-        statusIcon.title = 'Downloaded';
-        statusIcon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+      // Only mark as cached if actually downloaded (not using direct CDN URL)
+      const isDirectUrl = localPath && /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(localPath);
+      if (!isDirectUrl) {
+        try { card.setAttribute('data-cached', 'true'); } catch (_) {}
+        const statusIcon = card.querySelector('.fa-nexus-status-icon');
+        if (statusIcon) {
+          statusIcon.classList.remove('cloud-plus', 'cloud', 'premium');
+          statusIcon.classList.add('cloud','cached');
+          statusIcon.title = 'Downloaded';
+          statusIcon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+        }
       }
     } catch (_) {}
   }

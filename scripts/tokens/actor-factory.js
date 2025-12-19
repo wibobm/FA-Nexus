@@ -619,6 +619,15 @@ export class ActorFactory {
     if (hpOverride && actorLink === false) {
       ActorFactory._applyHpOverrideToTokenData(baseTokenData, hpOverride);
     }
+
+    if (actorLink === false) {
+      if (tokenOptions?.appendNumber !== undefined && tokenOptions.appendNumber !== null) {
+        baseTokenData.appendNumber = !!tokenOptions.appendNumber;
+      }
+      if (tokenOptions?.prependAdjective !== undefined && tokenOptions.prependAdjective !== null) {
+        baseTokenData.prependAdjective = !!tokenOptions.prependAdjective;
+      }
+    }
     
     // Create token document
     const tokenDoc = await TokenDocument.create(baseTokenData, { parent: canvas.scene });
@@ -698,9 +707,11 @@ export class ActorFactory {
    * @param {Actor} actor - The actor to update
    * @param {Object} dropData - The token drop data
    * @param {Object} options - Update options
+   * @param {boolean} [options.preserveSize] - When true, do not update actor size or prototype token dimensions
    * @returns {Promise<void>}
    */
   static async updateActorPrototypeToken(actor, dropData, options = {}) {
+    const preserveSize = !!options.preserveSize;
     const tokenSize = dropData.tokenSize || { gridWidth: 1, gridHeight: 1, scale: 1 };
     const systemId = SystemDetection.getCurrentSystemId();
     const baseScale = Number(tokenSize.scale ?? 1) || 1;
@@ -723,9 +734,6 @@ export class ActorFactory {
         scaleX: textureScaleX,
         scaleY: textureScaleY
       },
-      width: tokenSize.gridWidth,
-      height: tokenSize.gridHeight,
-      scale: Math.abs(baseScale),
       lockRotation: false,
       randomImg: useWildcard,
       // Disable Dynamic Rings subject texture to avoid overriding image path
@@ -734,64 +742,93 @@ export class ActorFactory {
         subject: { texture: null }
       }
     };
-    
-    // System-specific handling
-    const sizeCategory = SystemDetection.getCreatureSizeFromDimensions(tokenSize.gridWidth, tokenSize.gridHeight);
-    
-    if (systemId === 'pf2e') {
-      // Pathfinder 2nd Edition specific handling
-      prototypeTokenUpdate.flags = prototypeTokenUpdate.flags || {};
-      prototypeTokenUpdate.flags['fa-nexus'] = {
-        customScale: true,
-        originalScale: Math.abs(baseScale)
-      };
-      prototypeTokenUpdate.flags.pf2e = prototypeTokenUpdate.flags.pf2e || {};
-      prototypeTokenUpdate.flags.pf2e.linkToActorSize = false;
-      
-      // Update actor's size trait to match token dimensions
-      await actor.update({
-        'system.traits.size': { value: sizeCategory }
-      });
-      
-    } else if (systemId === 'pf1') {
-      // Pathfinder 1st Edition specific handling
-      prototypeTokenUpdate.flags = prototypeTokenUpdate.flags || {};
-      prototypeTokenUpdate.flags['fa-nexus'] = {
-        customScale: true,
-        originalScale: Math.abs(baseScale)
-      };
-      prototypeTokenUpdate.flags.pf1 = prototypeTokenUpdate.flags.pf1 || {};
-      prototypeTokenUpdate.flags.pf1.linkToActorSize = false;
-      
-      // Update actor's size trait (PF1 uses string directly)
-      await actor.update({
-        'system.traits.size': sizeCategory
-      });
-      
-    } else if (systemId === 'dnd5e') {
-      // D&D 5e specific handling
-      await actor.update({
-        'system.traits.size': sizeCategory
-      });
-      
-    } else if (systemId === 'dsa5') {
-      // DSA5 specific handling
-      prototypeTokenUpdate.flags = prototypeTokenUpdate.flags || {};
-      prototypeTokenUpdate.flags['fa-nexus'] = {
-        customScale: true,
-        originalScale: Math.abs(baseScale)
-      };
-      prototypeTokenUpdate.flags.dsa5 = prototypeTokenUpdate.flags.dsa5 || {};
-      prototypeTokenUpdate.flags.dsa5.linkToActorSize = false;
-      
-      await actor.update({
-        'system.status.size': { value: sizeCategory }
-      });
+
+    if (!preserveSize) {
+      prototypeTokenUpdate.width = tokenSize.gridWidth;
+      prototypeTokenUpdate.height = tokenSize.gridHeight;
+      prototypeTokenUpdate.scale = Math.abs(baseScale);
+    }
+
+    if (options?.appendNumber !== undefined && options.appendNumber !== null) {
+      prototypeTokenUpdate.appendNumber = !!options.appendNumber;
+    }
+    if (options?.prependAdjective !== undefined && options.prependAdjective !== null) {
+      prototypeTokenUpdate.prependAdjective = !!options.prependAdjective;
     }
     
+    // System-specific handling (optional)
+    if (!preserveSize) {
+      const sizeCategory = SystemDetection.getCreatureSizeFromDimensions(tokenSize.gridWidth, tokenSize.gridHeight);
+
+      if (systemId === 'pf2e') {
+        // Pathfinder 2nd Edition specific handling
+        prototypeTokenUpdate.flags = prototypeTokenUpdate.flags || {};
+        prototypeTokenUpdate.flags['fa-nexus'] = {
+          customScale: true,
+          originalScale: Math.abs(baseScale)
+        };
+        prototypeTokenUpdate.flags.pf2e = prototypeTokenUpdate.flags.pf2e || {};
+        prototypeTokenUpdate.flags.pf2e.linkToActorSize = false;
+
+        // Update actor's size trait to match token dimensions
+        await actor.update({
+          'system.traits.size': { value: sizeCategory }
+        });
+      } else if (systemId === 'pf1') {
+        // Pathfinder 1st Edition specific handling
+        prototypeTokenUpdate.flags = prototypeTokenUpdate.flags || {};
+        prototypeTokenUpdate.flags['fa-nexus'] = {
+          customScale: true,
+          originalScale: Math.abs(baseScale)
+        };
+        prototypeTokenUpdate.flags.pf1 = prototypeTokenUpdate.flags.pf1 || {};
+        prototypeTokenUpdate.flags.pf1.linkToActorSize = false;
+
+        // Update actor's size trait (PF1 uses string directly)
+        await actor.update({
+          'system.traits.size': sizeCategory
+        });
+      } else if (systemId === 'dnd5e') {
+        // D&D 5e specific handling
+        await actor.update({
+          'system.traits.size': sizeCategory
+        });
+      } else if (systemId === 'dsa5') {
+        // DSA5 specific handling
+        prototypeTokenUpdate.flags = prototypeTokenUpdate.flags || {};
+        prototypeTokenUpdate.flags['fa-nexus'] = {
+          customScale: true,
+          originalScale: Math.abs(baseScale)
+        };
+        prototypeTokenUpdate.flags.dsa5 = prototypeTokenUpdate.flags.dsa5 || {};
+        prototypeTokenUpdate.flags.dsa5.linkToActorSize = false;
+
+        await actor.update({
+          'system.status.size': { value: sizeCategory }
+        });
+      }
+    }
+    
+    // Merge into existing prototype token so we don't wipe unrelated settings (vision, name rules, etc.)
+    let mergedPrototype = prototypeTokenUpdate;
+    try {
+      const utils = foundry?.utils;
+      const existing = actor?.prototypeToken?.toObject?.()
+        ?? utils?.deepClone?.(actor?.prototypeToken ?? {})
+        ?? {};
+      if (utils?.mergeObject) {
+        mergedPrototype = utils.mergeObject(existing, prototypeTokenUpdate, { inplace: false, overwrite: true, recursive: true });
+      } else {
+        mergedPrototype = { ...(existing || {}), ...(prototypeTokenUpdate || {}) };
+      }
+    } catch (_) {
+      mergedPrototype = prototypeTokenUpdate;
+    }
+    try { delete mergedPrototype._id; } catch (_) {}
+
     // Prepare actor update data
     const actorUpdateData = {
-      prototypeToken: prototypeTokenUpdate
+      prototypeToken: mergedPrototype
     };
     
     // Update actor portrait if requested
@@ -952,19 +989,23 @@ export class ActorFactory {
       const root = app?.element;
       if (!root) return;
       const cards = root.querySelectorAll(`.fa-nexus-grid .fa-nexus-card[data-filename="${CSS.escape(filename)}"], .fa-nexus-card[data-filename="${CSS.escape(filename)}"]`);
+      // Only mark as cached if actually downloaded (not using direct CDN URL)
+      const isDirectUrl = localPath && /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(localPath);
       cards.forEach(card => {
         try {
           // Update attributes so subsequent drags use local path
           card.setAttribute('data-url', localPath);
-          card.setAttribute('data-cached', 'true');
-          card.classList.remove('locked-token');
-          // Update icon
-          const icon = card.querySelector('.fa-nexus-status-icon');
-          if (icon) {
-            icon.classList.remove('cloud-plus', 'cloud');
-            icon.classList.add('cloud', 'cached');
-            icon.title = 'Downloaded';
-            icon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+          if (!isDirectUrl) {
+            card.setAttribute('data-cached', 'true');
+            card.classList.remove('locked-token');
+            // Update icon
+            const icon = card.querySelector('.fa-nexus-status-icon');
+            if (icon) {
+              icon.classList.remove('cloud-plus', 'cloud');
+              icon.classList.add('cloud', 'cached');
+              icon.title = 'Downloaded';
+              icon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+            }
           }
         } catch (_) {}
       });

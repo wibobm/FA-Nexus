@@ -20,6 +20,10 @@
         <input type="checkbox" id="update-actor-image" {{#if updateActorImageDefault}}checked{{/if}} /> 
         Also update actor portrait image
       </label>
+      <label class="fa-nexus-checkbox-label" title="Leave the actor's size and prototype token dimensions unchanged.">
+        <input type="checkbox" id="preserve-actor-size" {{#if preserveSizeDefault}}checked{{/if}} />
+        Keep creature size (don't resize token)
+      </label>
       <label class="fa-nexus-checkbox-label{{#unless canUseWildcard}} fa-nexus-disabled{{/unless}}">
         <input type="checkbox" id="use-wildcard-token" {{#unless canUseWildcard}}disabled{{/unless}} /> 
         Use wildcard token (random color variant)

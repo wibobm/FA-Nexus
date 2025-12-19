@@ -13,7 +13,7 @@ export class AssetsTabCardHelper {
 
   _isVideoFilename(value) {
     if (!value) return false;
-    return /\.(webm|mp4|m4v|mov|ogg)$/i.test(String(value));
+    return /\.(webm|mp4|m4v|mov)$/i.test(String(value));
   }
 
   _createThumbVideoElement() {
@@ -483,6 +483,82 @@ export class AssetsTabCardHelper {
     try { if (cardElement?._probeJob) { cardElement._probeJob.cancelled = true; delete cardElement._probeJob; } } catch (_) {}
   }
 
+  async ensureLocalAssetForCard(cardElement, item, { triggerEvent = null, label = 'Downloading asset...' } = {}) {
+    const tab = this.tab;
+    if (!tab) return '';
+    const resolvedItem = item || cardElement?._assetItem || null;
+    const getAttr = (key) => cardElement?.getAttribute?.(key) || '';
+    const filename = getAttr('data-filename') || resolvedItem?.filename || '';
+    const filePathAttr = getAttr('data-file-path') || tab._resolveFilePath?.(resolvedItem) || '';
+    const folderPath = getAttr('data-path') || tab._resolveFolderPath?.(resolvedItem) || '';
+    const tier = getAttr('data-tier') || resolvedItem?.tier || '';
+    const sourceAttr = (getAttr('data-source') || resolvedItem?.source || '').toLowerCase();
+    const isCloud = sourceAttr === 'cloud';
+    const pointerCoords = this._extractPointerScreenCoords(triggerEvent);
+    const download = tab.downloadManager;
+    const content = tab.contentService;
+    let localPath = '';
+    let overlayHandle = null;
+
+    try {
+      const isCached = getAttr('data-cached') === 'true';
+      if (isCached) localPath = getAttr('data-url') || '';
+      if (!localPath && resolvedItem?.cachedLocalPath) localPath = resolvedItem.cachedLocalPath;
+      if (!localPath && !isCloud) {
+        localPath = resolvedItem?.file_path || resolvedItem?.path || resolvedItem?.url || filePathAttr || '';
+      }
+      if (!localPath && isCloud && download?.getLocalPath) {
+        localPath = download.getLocalPath('assets', { filename, file_path: filePathAttr, path: folderPath }) || '';
+      }
+      if (!localPath && isCloud && content?.getFullURL && download?.ensureLocal) {
+        if (cardElement) {
+          overlayHandle = this._spawnCardDownloadOverlay(cardElement, { pointer: pointerCoords, label });
+        }
+        const auth = this._readPatreonAuthData();
+        const state = auth && auth.authenticated && auth.state ? auth.state : undefined;
+        const downloadItem = { file_path: filePathAttr, filename, tier: tier || 'free' };
+        const fullUrl = await content.getFullURL('assets', downloadItem, state);
+        localPath = await download.ensureLocal('assets', downloadItem, fullUrl);
+        if (localPath) this._markCardAsCached(cardElement, resolvedItem, localPath);
+      }
+    } catch (error) {
+      Logger.warn('AssetsTab.ensureLocal.failed', { label, error: String(error?.message || error) });
+      if ((error && error.message === 'AUTH') || /auth/i.test(String(error?.message || ''))) {
+        ui.notifications?.error?.('Authentication required for premium assets. Please connect Patreon.');
+      } else {
+        ui.notifications?.error?.(`Failed to prepare asset: ${error?.message || error}`);
+      }
+      return '';
+    } finally {
+      try { overlayHandle?.destroy?.(); } catch (_) {}
+    }
+
+    return localPath;
+  }
+
+  _markCardAsCached(cardElement, item, localPath) {
+    if (!localPath) return;
+    // Check if this is a direct CDN URL (not actually cached locally)
+    const isDirectUrl = /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(localPath);
+    if (cardElement) {
+      try { cardElement.setAttribute('data-url', localPath); } catch (_) {}
+      // Only mark as cached if actually downloaded locally
+      if (!isDirectUrl) {
+        try { cardElement.setAttribute('data-cached', 'true'); } catch (_) {}
+        const icon = cardElement.querySelector?.('.fa-nexus-status-icon');
+        if (icon) {
+          icon.classList.remove('cloud-plus', 'cloud', 'premium');
+          icon.classList.add('cloud', 'cached');
+          icon.title = 'Downloaded';
+          icon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+        }
+      }
+    }
+    if (item && !isDirectUrl) {
+      item.cachedLocalPath = localPath;
+    }
+  }
+
 
   async handleTextureCardClick(cardElement, item, triggerEvent = null) {
     const tab = this.tab;
@@ -497,16 +573,9 @@ export class AssetsTabCardHelper {
     }
 
     const filename = cardElement.getAttribute('data-filename') || item?.filename || '';
-    const filePathAttr = cardElement.getAttribute('data-file-path') || tab._resolveFilePath(item);
-    const folderPath = cardElement.getAttribute('data-path') || tab._resolveFolderPath(item);
-    const isCloud = (cardElement.getAttribute('data-source') === 'cloud');
-    const tier = cardElement.getAttribute('data-tier') || item?.tier || '';
-    const download = tab.downloadManager;
-    const content = tab.contentService;
     const requestId = (this._textureRequestId = (this._textureRequestId || 0) + 1);
 
     let localPath = '';
-    let overlayHandle = null;
     const pointerCoords = this._extractPointerScreenCoords(triggerEvent);
     try {
       const wasActive = !!texturePaint?.isActive;
@@ -517,39 +586,6 @@ export class AssetsTabCardHelper {
       } catch (stopError) {
         Logger.warn('AssetsTab.texture.paint.stop.failed', { error: String(stopError?.message || stopError) });
       }
-      const isCached = (cardElement.getAttribute('data-cached') === 'true');
-      if (isCached) {
-        localPath = cardElement.getAttribute('data-url') || '';
-      }
-      if (!localPath && !isCloud) {
-        // For local assets, use the item's path properties directly
-        localPath = item?.cachedLocalPath || item?.file_path || item?.path || item?.url || cardElement.getAttribute('data-url') || filePathAttr || '';
-      }
-      if (!localPath && isCloud) {
-        // For cloud assets, try to find locally downloaded version
-        localPath = download?.getLocalPath?.('assets', { filename, file_path: filePathAttr, path: folderPath }) || '';
-      }
-      if (!localPath && isCloud && content && download) {
-        overlayHandle = this._spawnCardDownloadOverlay(cardElement, { pointer: pointerCoords });
-        const auth = game.settings.get('fa-nexus', 'patreon_auth_data');
-        const authed = !!(auth && auth.authenticated && auth.state);
-        const downloadItem = { file_path: filePathAttr, filename, tier: tier || 'free' };
-        const fullUrl = await content.getFullURL('assets', downloadItem, authed ? auth.state : undefined);
-        localPath = await download.ensureLocal('assets', downloadItem, fullUrl);
-        if (localPath) {
-          try { cardElement.setAttribute('data-cached', 'true'); cardElement.setAttribute('data-url', localPath); } catch (_) {}
-          try {
-            const icon = cardElement.querySelector('.fa-nexus-status-icon');
-            if (icon) {
-              icon.classList.remove('cloud-plus', 'cloud', 'premium');
-              icon.classList.add('cloud', 'cached');
-              icon.title = 'Downloaded';
-              icon.innerHTML = '<i class="fas fa-cloud-check"></i>';
-            }
-          } catch (_) {}
-          if (item) item.cachedLocalPath = localPath;
-        }
-      }
     } catch (e) {
       Logger.warn('AssetsTab.texture.paint.download.failed', { error: String(e?.message || e) });
       if ((e && e.message === 'AUTH') || /auth/i.test(String(e?.message))) {
@@ -558,10 +594,12 @@ export class AssetsTabCardHelper {
         ui.notifications?.error?.(`Failed to prepare texture: ${e?.message || e}`);
       }
       return;
-    } finally {
-      try { overlayHandle?.destroy?.(); }
-      catch (_) {}
     }
+
+    localPath = await this.ensureLocalAssetForCard(cardElement, item, {
+      triggerEvent,
+      label: 'Preparing texture...'
+    });
 
     if (requestId !== this._textureRequestId) {
       return;
@@ -602,16 +640,9 @@ export class AssetsTabCardHelper {
     }
 
     const filename = cardElement.getAttribute('data-filename') || item?.filename || '';
-    const filePathAttr = cardElement.getAttribute('data-file-path') || tab._resolveFilePath(item);
-    const folderPath = cardElement.getAttribute('data-path') || tab._resolveFolderPath(item);
-    const isCloud = (cardElement.getAttribute('data-source') === 'cloud');
-    const tier = cardElement.getAttribute('data-tier') || item?.tier || '';
-    const download = tab.downloadManager;
-    const content = tab.contentService;
     const requestId = (this._pathRequestId = (this._pathRequestId || 0) + 1);
 
     let localPath = '';
-    let overlayHandle = null;
     const pointerCoords = this._extractPointerScreenCoords(triggerEvent);
     const wasActive = !!pathManager?.isActive;
     try {
@@ -622,39 +653,10 @@ export class AssetsTabCardHelper {
       Logger.warn('AssetsTab.path.manager.stop.failed', { error: String(stopError?.message || stopError) });
     }
     try {
-      const isCached = (cardElement.getAttribute('data-cached') === 'true');
-      if (isCached) {
-        localPath = cardElement.getAttribute('data-url') || '';
-      }
-      if (!localPath && !isCloud) {
-        // For local assets, use the item's path properties directly
-        localPath = item?.cachedLocalPath || item?.file_path || item?.path || item?.url || cardElement.getAttribute('data-url') || filePathAttr || '';
-      }
-      if (!localPath && isCloud) {
-        // For cloud assets, try to find locally downloaded version
-        localPath = download?.getLocalPath?.('assets', { filename, file_path: filePathAttr, path: folderPath }) || '';
-      }
-      if (!localPath && isCloud && content && download) {
-        overlayHandle = this._spawnCardDownloadOverlay(cardElement, { pointer: pointerCoords });
-        const auth = game.settings.get('fa-nexus', 'patreon_auth_data');
-        const authed = !!(auth && auth.authenticated && auth.state);
-        const downloadItem = { file_path: filePathAttr, filename, tier: tier || 'free' };
-        const fullUrl = await content.getFullURL('assets', downloadItem, authed ? auth.state : undefined);
-        localPath = await download.ensureLocal('assets', downloadItem, fullUrl);
-        if (localPath) {
-          try { cardElement.setAttribute('data-cached', 'true'); cardElement.setAttribute('data-url', localPath); } catch (_) {}
-          try {
-            const icon = cardElement.querySelector('.fa-nexus-status-icon');
-            if (icon) {
-              icon.classList.remove('cloud-plus', 'cloud', 'premium');
-              icon.classList.add('cloud', 'cached');
-              icon.title = 'Downloaded';
-              icon.innerHTML = '<i class="fas fa-cloud-check"></i>';
-            }
-          } catch (_) {}
-          if (item) item.cachedLocalPath = localPath;
-        }
-      }
+      localPath = await this.ensureLocalAssetForCard(cardElement, item, {
+        triggerEvent,
+        label: 'Preparing path texture...'
+      });
     } catch (e) {
       Logger.warn('AssetsTab.path.manager.download.failed', { error: String(e?.message || e) });
       if ((e && e.message === 'AUTH') || /auth/i.test(String(e?.message))) {
@@ -663,9 +665,6 @@ export class AssetsTabCardHelper {
         ui.notifications?.error?.(`Failed to prepare path texture: ${e?.message || e}`);
       }
       return;
-    } finally {
-      try { overlayHandle?.destroy?.(); }
-      catch (_) {}
     }
 
     if (requestId !== this._pathRequestId) {

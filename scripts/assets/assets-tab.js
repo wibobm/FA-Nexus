@@ -84,18 +84,68 @@ export class AssetsTab extends GridBrowseTab {
     return this._controller?.assetsService || this._assets || null;
   }
 
+  get thumbSliderMin() { return 54; }
+  get thumbSliderMax() { return 108; }
+  get thumbSliderStep() { return 2; }
+  get thumbSliderDefault() { return 72; }
+
+  _getThumbSettingKey() {
+    return this.isTexturesMode ? 'thumbWidthTextures' : this.isPathsMode ? 'thumbWidthPaths' : 'thumbWidthAssets';
+  }
+
+  _sanitizeThumbSize(value) {
+    const min = this.thumbSliderMin;
+    const max = this.thumbSliderMax;
+    const fallback = this.thumbSliderDefault;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+    return Math.max(min, Math.min(max, numeric));
+  }
+
+  _getStoredThumbSize() {
+    const fallback = this.thumbSliderDefault;
+    let scoped = 0;
+    let global = 0;
+    try {
+      const key = this._getThumbSettingKey();
+      scoped = Number(game.settings.get('fa-nexus', key) || 0) || 0;
+    } catch (_) {}
+    if (!scoped) {
+      try {
+        global = Number(game.settings.get('fa-nexus', 'thumbWidth') || 0) || 0;
+      } catch (_) {}
+    }
+    const stored = scoped || global || fallback;
+    return this._sanitizeThumbSize(stored);
+  }
+
+  _usesWidePathThumbs() {
+    return this.isPathsMode;
+  }
+
+  _getThumbAspectRatio() {
+    return this._usesWidePathThumbs() ? 3 : 1;
+  }
+
+  /**
+   * Convert a slider value into actual card dimensions, keeping path thumbnails wide.
+   * @param {number} sliderValue
+   * @returns {{width:number,height:number}}
+   */
+  _computeThumbDimensions(sliderValue) {
+    const base = Math.max(1, Math.round(sliderValue));
+    const ratio = Math.max(0.1, Number(this._getThumbAspectRatio()) || 1);
+    if (ratio === 1) return { width: base, height: base };
+    if (ratio > 1) return { width: Math.round(base * ratio), height: base };
+    return { width: base, height: Math.round(base / ratio) };
+  }
+
   getPlaceholderCardSize() {
     const base = super.getPlaceholderCardSize();
     const app = this.app;
     const defaultGap = this.getGridOptions?.()?.card?.gap ?? base.gap;
-    let width = base.width;
-    try {
-      const settingKey = this.isTexturesMode ? 'thumbWidthTextures' : this.isPathsMode ? 'thumbWidthPaths' : 'thumbWidthAssets';
-      const saved = Number(game.settings.get('fa-nexus', settingKey) || game.settings.get('fa-nexus', 'thumbWidth') || 0);
-      if (Number.isFinite(saved) && saved > 0) width = saved;
-    } catch (_) {}
-    width = Math.max(54, Math.min(108, width));
-    const height = width; // square thumbnails for assets/textures/paths
+    const stored = this._getStoredThumbSize();
+    const dims = this._computeThumbDimensions(stored);
     const gap = Math.max(2, Math.round(defaultGap || 4));
     if (app?._grid?.card) {
       return {
@@ -104,7 +154,11 @@ export class AssetsTab extends GridBrowseTab {
         gap
       };
     }
-    return { width: Math.round(width), height: Math.round(height), gap };
+    return {
+      width: Math.round(dims.width),
+      height: Math.round(dims.height),
+      gap
+    };
   }
 
   /**
@@ -113,10 +167,12 @@ export class AssetsTab extends GridBrowseTab {
    */
   getGridOptions() {
     const self = this;
+    const stored = this._getStoredThumbSize();
+    const dims = this._computeThumbDimensions(stored);
     return {
       rowHeight: 40,
       overscan: 5,
-      card: { width: 140, height: 140, gap: 4 },
+      card: { width: dims.width || 140, height: dims.height || 140, gap: 4 },
       createRow: (item) => self._createAssetCard(item),
       onMountItem: (el, item) => self._mountAssetCard(el, item),
       onUnmountItem: (el) => self._unmountAssetCard(el)
@@ -945,40 +1001,44 @@ export class AssetsTab extends GridBrowseTab {
     // Replace node to drop previous listeners (from other tab)
     try { const parent = sizeInput.parentNode; const clone = sizeInput.cloneNode(true); parent.replaceChild(clone, sizeInput); sizeInput = clone; } catch (_) {}
 
-    // Determine which setting key to use based on tab mode
-    const settingKey = this.isTexturesMode ? 'thumbWidthTextures' : this.isPathsMode ? 'thumbWidthPaths' : 'thumbWidthAssets';
+    const settingKey = this._getThumbSettingKey();
+    const min = this.thumbSliderMin;
+    const max = this.thumbSliderMax;
+    const step = this.thumbSliderStep || 2;
+    const sanitize = (value) => this._sanitizeThumbSize(value);
 
-    // Assets slider range: 54–108
-    sizeInput.min = '54'; sizeInput.max = '108'; sizeInput.step = String(Number(sizeInput.step || 2) || 2);
-    const sanitize = (value) => Math.max(54, Math.min(108, Number(value) || 72));
-    const savedWidth = Number(game.settings.get('fa-nexus', settingKey) || game.settings.get('fa-nexus', 'thumbWidth') || 0) || (app._grid.card?.width || 108);
-    sizeInput.value = String(sanitize(savedWidth));
+    sizeInput.min = String(min);
+    sizeInput.max = String(max);
+    sizeInput.step = String(step);
 
-    let pendingWidth = sanitize(sizeInput.value);
+    const saved = this._getStoredThumbSize();
+    sizeInput.value = String(sanitize(saved));
+
+    let pendingValue = sanitize(sizeInput.value);
     let rafId = null;
 
     const applyDims = (w) => {
       const clamped = sanitize(w);
-      const t = Math.max(0, Math.min(1, (clamped - 54) / (108 - 54)));
-      const h = clamped; // square cards for assets
-      try { app._grid.setCardSize(clamped, h); } catch (_) {}
+      const dims = this._computeThumbDimensions(clamped);
+      const t = Math.max(0, Math.min(1, (clamped - min) / (max - min)));
+      try { app._grid.setCardSize(dims.width, dims.height); } catch (_) {}
       if (gridContainer) {
         gridContainer.style.setProperty('--fa-nexus-card-pad', `${2 + (6 - 2) * t}px`);
         gridContainer.style.setProperty('--fa-nexus-title-size', `${0.68 + (0.78 - 0.68) * t}rem`);
         gridContainer.style.setProperty('--fa-nexus-details-size', `${0.58 + (0.68 - 0.58) * t}rem`);
         gridContainer.style.setProperty('--fa-nexus-footer-pt', `${0 + (4 - 0) * t}px`);
       }
-      try { this.app?.updateGridPlaceholderSize?.({ tab: this.id, width: clamped, height: h, gap: this.getGridOptions?.()?.card?.gap ?? 4 }); } catch (_) {}
+      try { this.app?.updateGridPlaceholderSize?.({ tab: this.id, width: dims.width, height: dims.height, gap: this.getGridOptions?.()?.card?.gap ?? 4 }); } catch (_) {}
       try { this._updateFooterStats(); } catch (_) {}
     };
 
     const flushPending = () => {
       rafId = null;
-      applyDims(pendingWidth);
+      applyDims(pendingValue);
     };
 
     const scheduleApply = (w) => {
-      pendingWidth = sanitize(w);
+      pendingValue = sanitize(w);
       if (rafId) return;
       if (typeof requestAnimationFrame === 'function') {
         rafId = requestAnimationFrame(flushPending);
@@ -990,8 +1050,7 @@ export class AssetsTab extends GridBrowseTab {
     scheduleApply(sizeInput.value);
 
     const onInput = () => {
-      const w = sanitize(sizeInput.value);
-      scheduleApply(w);
+      scheduleApply(sizeInput.value);
     };
 
     const onChange = async () => {

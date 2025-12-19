@@ -87,14 +87,27 @@ export class TileFlattenManager {
     try {
       ui?.notifications?.info?.('Flattening tiles... This may take a moment.');
 
+      const { targets, skipped } = this._filterFlattenTargets(tiles);
+      if (skipped.length) {
+        Logger.debug?.('TileFlatten.flattenTiles.skipped', {
+          skipped: skipped.map((t) => t?.id).filter(Boolean)
+        });
+        ui?.notifications?.info?.(`Skipped ${skipped.length} building fill/window tile${skipped.length === 1 ? '' : 's'}; flattening walls and frames only.`);
+      }
+
+      if (targets.length < 2) {
+        ui?.notifications?.warn?.('Please select at least 2 flattenable tiles (walls/frames).');
+        return;
+      }
+
       // Compute bounding box of all tiles
-      const bounds = this._computeBounds(tiles);
+      const bounds = this._computeBounds(targets);
       if (!bounds) {
         throw new Error('Could not compute bounds for selected tiles');
       }
 
       // Render tiles to canvas
-      const canvasData = await this._renderTilesToCanvas(tiles, bounds, ppi);
+      const canvasData = await this._renderTilesToCanvas(targets, bounds, ppi);
       if (!canvasData || !canvasData.canvas) {
         throw new Error('Failed to render tiles to canvas');
       }
@@ -107,7 +120,7 @@ export class TileFlattenManager {
 
       // Store metadata for deconstruction
       const metadata = this._buildMetadata({
-        tiles,
+        tiles: targets,
         logicalBounds: bounds,
         renderBounds: canvasData.renderBounds,
         padding: canvasData.padding,
@@ -123,7 +136,7 @@ export class TileFlattenManager {
       await this._createFlattenedTile(canvasData.renderBounds, filePath, metadata);
 
       // Delete original tiles
-      await this._deleteOriginalTiles(tiles);
+      await this._deleteOriginalTiles(targets);
 
       ui?.notifications?.info?.('Tiles flattened successfully!');
       Logger.info('TileFlatten.flattenTiles.success', { tileCount: tiles.length, filePath });
@@ -193,6 +206,36 @@ export class TileFlattenManager {
       width: maxX - minX,
       height: maxY - minY
     };
+  }
+
+  /**
+   * Filter out building elements that should not be flattened
+   * (fill tiles, window sills/windows). Door/window frames and walls are kept.
+   */
+  _filterFlattenTargets(tiles = []) {
+    const targets = [];
+    const skipped = [];
+    const list = Array.isArray(tiles) ? tiles : [];
+    const hasFlag = (doc, key) => {
+      try {
+        if (typeof doc?.getFlag === 'function') return !!doc.getFlag('fa-nexus', key);
+      } catch (_) { /* ignore */ }
+      try { return !!doc?.flags?.['fa-nexus']?.[key]; } catch (_) { return false; }
+    };
+
+    for (const doc of list) {
+      if (!doc) continue;
+      const isFill = hasFlag(doc, 'buildingFill');
+      const isWindowSill = hasFlag(doc, 'buildingWindowSill');
+      const isWindow = hasFlag(doc, 'buildingWindowWindow');
+      if (isFill || isWindowSill || isWindow) {
+        skipped.push(doc);
+        continue;
+      }
+      targets.push(doc);
+    }
+
+    return { targets, skipped };
   }
 
   /**
@@ -311,6 +354,7 @@ export class TileFlattenManager {
       }
 
       let stageAdjusted = false;
+      let restoreShadowBlur = null;
       try {
         // Adjust renderer screen to match our render texture size
         if (renderer.screen) {
@@ -353,6 +397,9 @@ export class TileFlattenManager {
             });
           }
         } catch (_) {}
+
+        // Recompute shadow blur to match capture scale, restore afterwards
+        restoreShadowBlur = this._syncShadowBlurForCapture(visibilityState.shadowManager);
         
         // Make background transparent
         if (rendererBackground) {
@@ -471,6 +518,9 @@ export class TileFlattenManager {
         }
         if (typeof restorePrimaryRender === 'function') {
           try { restorePrimaryRender(); } catch (_) {}
+        }
+        if (typeof restoreShadowBlur === 'function') {
+          try { restoreShadowBlur(); } catch (_) {}
         }
       }
 
@@ -968,6 +1018,23 @@ export class TileFlattenManager {
     } catch (_) {}
   }
 
+  /**
+   * Align shadow blur radius with the current canvas scale for capture, and
+   * provide a restore function to re-sync after reverting the stage transform.
+   */
+  _syncShadowBlurForCapture(manager) {
+    try {
+      const mgr = manager || AssetShadowManager?.peek?.();
+      if (!mgr || typeof mgr._onCanvasPan !== 'function') return null;
+      mgr._onCanvasPan(); // apply blur for current stage scale
+      return () => {
+        try { mgr._onCanvasPan(); } catch (_) {}
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
   async _nextFrame() {
     await new Promise((resolve) => {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
@@ -1343,18 +1410,33 @@ export class TileFlattenManager {
     const file = new File([blob], filename, { type: 'image/webp' });
 
     await forgeIntegration.initialize();
-    const filePickerContext = forgeIntegration.getFilePickerContext();
-    const source = filePickerContext?.source || 'data';
-    const bucketOptions = filePickerContext?.options || {};
-    const baseDir = `${this._getAssetsDir()}/flattened`;
+    const assetsSetting = this._getAssetsDir();
+    const dirContext = forgeIntegration.resolveFilePickerContext(assetsSetting);
+    const source = dirContext?.source || 'data';
+    const bucketOptions = dirContext?.options || {};
+    const baseTarget = dirContext?.target || '';
+    const baseDir = [baseTarget, 'flattened'].filter(Boolean).join('/');
     const FP = foundry.applications.apps.FilePicker.implementation;
 
     // Ensure nested directory structure exists
     await this._ensureNestedDir(baseDir, { source, options: bucketOptions });
 
-    await FP.upload(source, baseDir, file, { ...bucketOptions }, { notify: true, filename });
+    const uploadResult = await FP.upload(source, baseDir, file, { ...bucketOptions }, { notify: true, filename });
 
-    let path = `${baseDir}/${filename}`;
+    let path = '';
+    try {
+      if (typeof uploadResult?.url === 'string') path = uploadResult.url;
+      else if (typeof uploadResult?.path === 'string') path = uploadResult.path;
+      else if (typeof uploadResult === 'string') path = uploadResult;
+    } catch (_) {}
+    if (!path) path = `${baseDir}/${filename}`;
+
+    if (source === 's3' && !/^https?:\/\//i.test(path) && /^https?:\/\//i.test(String(assetsSetting || ''))) {
+      const baseUrl = String(assetsSetting || '').trim().endsWith('/') ? String(assetsSetting || '').trim() : `${String(assetsSetting || '').trim()}/`;
+      const rel = baseTarget && baseDir.startsWith(`${baseTarget}/`) ? baseDir.slice(baseTarget.length + 1) : (baseDir === baseTarget ? '' : baseDir);
+      const relPath = [rel, filename].filter(Boolean).join('/');
+      path = `${baseUrl}${relPath.replace(/^\/+/, '')}`;
+    }
     if (source === 'forgevtt') {
       path = forgeIntegration.optimizeCacheURL(path);
     }
@@ -1476,6 +1558,13 @@ export class TileFlattenManager {
     const ids = tiles.map(t => t.id).filter(Boolean);
     if (ids.length === 0) return;
 
-    await canvas.scene.deleteEmbeddedDocuments('Tile', ids);
+    const prev = globalThis?.FA_NEXUS_SUPPRESS_BUILDING_TILE_DELETE;
+    try {
+      globalThis.FA_NEXUS_SUPPRESS_BUILDING_TILE_DELETE = true;
+      await canvas.scene.deleteEmbeddedDocuments('Tile', ids);
+    } finally {
+      if (prev === undefined) delete globalThis.FA_NEXUS_SUPPRESS_BUILDING_TILE_DELETE;
+      else globalThis.FA_NEXUS_SUPPRESS_BUILDING_TILE_DELETE = prev;
+    }
   }
 }

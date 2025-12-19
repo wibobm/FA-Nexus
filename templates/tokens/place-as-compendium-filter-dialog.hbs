@@ -1,0 +1,53 @@
+<div class="fa-nexus-compendium-filter-dialog">
+  <div class="fa-nexus-compendium-filter-header">
+    <p class="fa-nexus-compendium-filter-description">Select which actor compendiums to include when searching for actors to place tokens as.</p>
+    <div class="fa-nexus-compendium-filter-summary">
+      <span class="fa-nexus-compendium-filter-count">{{includedCount}} included / {{totalCount}} total</span>
+      {{#if hasExcluded}}
+        <span class="fa-nexus-compendium-filter-excluded">({{excludedCount}} excluded)</span>
+      {{/if}}
+    </div>
+  </div>
+
+  <div class="fa-nexus-compendium-filter-controls">
+    <input type="search"
+           class="fa-nexus-compendium-filter-search"
+           placeholder="Search compendiums or folders..."
+           value="{{searchQuery}}"
+           data-filter-search>
+    <div class="fa-nexus-compendium-filter-actions">
+      <button type="button" class="fa-nexus-compendium-filter-btn" data-include-all title="Include all compendiums">
+        <i class="fas fa-check-double"></i> Include All
+      </button>
+      <button type="button" class="fa-nexus-compendium-filter-btn" data-exclude-all title="Exclude all compendiums">
+        <i class="fas fa-times"></i> Exclude All
+      </button>
+    </div>
+  </div>
+
+  <div class="fa-nexus-compendium-filter-list">
+    {{#if hasGroups}}
+      {{#each groups}}
+        <div class="fa-nexus-compendium-filter-group">
+          <div class="fa-nexus-compendium-filter-group-header">
+            <i class="fas {{#if isUngrouped}}fa-box-open{{else}}fa-folder{{/if}}"></i>
+            <span>{{folder}}</span>
+            <span class="fa-nexus-compendium-filter-group-count">({{packs.length}})</span>
+          </div>
+          <div class="fa-nexus-compendium-filter-group-items">
+            {{#each packs}}
+              <label class="fa-nexus-compendium-filter-item {{#if excluded}}is-excluded{{/if}}">
+                <input type="checkbox"
+                       data-pack-toggle="{{id}}"
+                       {{#unless excluded}}checked{{/unless}}>
+                <span class="fa-nexus-compendium-filter-item-label">{{label}}</span>
+              </label>
+            {{/each}}
+          </div>
+        </div>
+      {{/each}}
+    {{else}}
+      <div class="fa-nexus-compendium-filter-empty">{{emptyMessage}}</div>
+    {{/if}}
+  </div>
+</div>

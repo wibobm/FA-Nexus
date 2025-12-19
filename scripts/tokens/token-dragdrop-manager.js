@@ -164,17 +164,21 @@ export class TokenDragDropManager {
           try { card.setAttribute('data-url', local); } catch (_) {}
           card._resolvedLocalPath = local;
           card._ensureLocalReady = true;
-          try { card.setAttribute('data-cached', 'true'); } catch (_) {}
-          // Update status icon to indicate cached/local
-          try {
-            const statusIcon = card.querySelector('.fa-nexus-status-icon');
-            if (statusIcon) {
-              statusIcon.classList.remove('cloud-plus', 'cloud');
-              statusIcon.classList.add('cloud','cached');
-              statusIcon.title = 'Downloaded';
-              statusIcon.innerHTML = '<i class="fas fa-cloud-check"></i>';
-            }
-          } catch (_) {}
+          // Only mark as cached if actually downloaded (not using direct CDN URL)
+          const isDirectUrl = local && /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(local);
+          if (!isDirectUrl) {
+            try { card.setAttribute('data-cached', 'true'); } catch (_) {}
+            // Update status icon to indicate cached/local
+            try {
+              const statusIcon = card.querySelector('.fa-nexus-status-icon');
+              if (statusIcon) {
+                statusIcon.classList.remove('cloud-plus', 'cloud');
+                statusIcon.classList.add('cloud','cached');
+                statusIcon.title = 'Downloaded';
+                statusIcon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+              }
+            } catch (_) {}
+          }
           // No need to enable native draggable; unified queued drag handles all sources
           Logger.info('TokenDrag.prep.localReady', { filename });
           return local;
@@ -838,7 +842,8 @@ export class TokenDragDropManager {
         // Auto-accept with default settings
         await ActorFactory.updateActorPrototypeToken(actor, dropData, {
           updateActorImage: true,
-          useWildcard: false
+          useWildcard: false,
+          preserveSize: false
         });
         ui.notifications.info(`Updated prototype token for "${actor.name}" (Shift+Drop)`);
       } else {
@@ -849,7 +854,8 @@ export class TokenDragDropManager {
         if (confirmed) {
           await ActorFactory.updateActorPrototypeToken(actor, dropData, {
             updateActorImage: dropData._updateActorImage || false,
-            useWildcard: dropData._useWildcard || false
+            useWildcard: dropData._useWildcard || false,
+            preserveSize: dropData._preserveSize || false
           });
           ui.notifications.info(`Updated prototype token for "${actor.name}"`);
         }
@@ -940,6 +946,7 @@ export class TokenDragDropManager {
         tokenSize: tokenSize,
         hasScale: tokenSize.scale !== 1,
         updateActorImageDefault: true,
+        preserveSizeDefault: false,
         canUseWildcard: canUseWildcard
       };
     }
@@ -961,8 +968,10 @@ export class TokenDragDropManager {
         
         if (action === 'confirm') {
           const updateActorImage = this.element.querySelector('#update-actor-image')?.checked || false;
+          const preserveSize = this.element.querySelector('#preserve-actor-size')?.checked || false;
           const useWildcard = this.element.querySelector('#use-wildcard-token')?.checked || false;
           this.dropData._updateActorImage = updateActorImage;
+          this.dropData._preserveSize = preserveSize;
           this.dropData._useWildcard = useWildcard;
           this._resolve(true);
           this.close();

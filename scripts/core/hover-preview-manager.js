@@ -496,7 +496,7 @@ export class HoverPreviewManager {
       .filter(Boolean)
       .join('|')
       .toLowerCase();
-    return /\.(webm|mp4|m4v|mov|ogg)$/i.test(combined);
+    return /\.(webm|mp4|m4v|mov)$/i.test(combined);
   }
 
   _collectMediaMetrics(el) {
@@ -677,7 +677,6 @@ export class HoverPreviewManager {
       video.style.opacity = '0';
       try { video.setAttribute('aria-label', alt || 'Preview video'); } catch (_) {}
       try { video.setAttribute('playsinline', ''); video.setAttribute('muted', ''); } catch (_) {}
-      try { video.crossOrigin = 'anonymous'; } catch (_) {}
       try {
         if (video.src) {
           video.removeAttribute('src');
@@ -802,7 +801,6 @@ export class HoverPreviewManager {
         cleanupLoader();
         reject(e);
       };
-      try { loader.crossOrigin = 'anonymous'; } catch (_) {}
       loader.src = url;
     });
     return metrics;

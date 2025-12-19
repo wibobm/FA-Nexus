@@ -80,17 +80,28 @@ export class BookmarkToolbar {
     const bookmark = this._bookmarkManager.getBookmark(tabId, bookmarkId);
     if (!bookmark) return false;
 
+    const activeTab = this._tabManager.getActiveTab?.();
+    const isBuildingTab = tabId === 'buildings';
+    const ensureBuildingPathScope = () => {
+      if (!isBuildingTab) return;
+      const scopeSetter = activeTab?.setFolderSelectionScope ?? activeTab?.setBookmarkScope;
+      if (typeof scopeSetter === 'function') scopeSetter.call(activeTab, 'paths');
+    };
+
     // Apply folder selection first (if any), then search
     // This avoids duplicate filtering since folder selection change triggers search reapplication
     if (bookmark.folderSelection) {
+      ensureBuildingPathScope();
       this._tabManager.getActiveTab()?.onFolderSelectionChange?.(bookmark.folderSelection);
     } else {
+      ensureBuildingPathScope();
       this.app.clearFolderSelections(tabId);
     }
 
     // Apply search query (this will be combined with any folder filtering)
     if (bookmark.searchQuery !== undefined) {
-      this._searchController.applySearchToTab(tabId, bookmark.searchQuery);
+      const options = isBuildingTab ? { refreshTextures: false } : undefined;
+      this._searchController.applySearchToTab(tabId, bookmark.searchQuery, options);
     }
 
     return true;

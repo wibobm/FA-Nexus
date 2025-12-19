@@ -415,6 +415,40 @@ export class BaseContentSourcesDialog extends HandlebarsApplicationMixin(Applica
     return normalizeContentSourcePath(path);
   }
 
+  _normalizePickedFolderPath(path, filePicker) {
+    let result = String(path ?? '').trim();
+    if (!result) return '';
+    const source = String(filePicker?.activeSource || '').toLowerCase();
+    if (!source) return result;
+
+    // Some sources (notably S3 and certain Forge providers) do not include a source/bucket marker in the selected
+    // folder path. Store an explicit prefix so later scans can resolve the correct FilePicker context.
+    const hasPrefix = /^[^:]+:/.test(result);
+    const clean = result.startsWith('/') ? result.slice(1) : result;
+
+    if (!hasPrefix && (source === 'forge-bazaar' || source === 'bazaar')) {
+      return `${source === 'bazaar' ? 'forge-bazaar' : source}:${clean}`;
+    }
+
+    if (!hasPrefix && source === 's3') {
+      const bucket = String(filePicker?.source?.bucket || filePicker?.sources?.s3?.bucket || filePicker?.options?.bucket || '').trim();
+      if (bucket) return clean ? `s3:${bucket}/${clean}` : `s3:${bucket}`;
+      return clean ? `s3:${clean}` : 's3:';
+    }
+
+    return result;
+  }
+
+  _labelForFolderPath(path) {
+    const str = String(path ?? '').trim();
+    if (!str) return '';
+    const scheme = str.match(/^([^:]+:)(.*)$/);
+    if (!scheme) return str.split('/').pop() || str;
+    const tail = String(scheme[2] || '').replace(/^\/+/, '');
+    const last = tail.split('/').filter(Boolean).pop();
+    return last || tail || str;
+  }
+
   _folderKey(path) {
     return contentSourceKey(path);
   }
@@ -908,14 +942,8 @@ export class BaseContentSourcesDialog extends HandlebarsApplicationMixin(Applica
     const fp = new FilePickerClass({
       type: 'folder', title: 'Select Folder',
       callback: (path) => {
-        try {
-          const src = fp?.activeSource;
-          if (src && (src === 'forge-bazaar' || src === 'bazaar') && !/^[^:]+:/.test(path)) {
-            const norm = path.startsWith('/') ? path.slice(1) : path;
-            path = `${src === 'bazaar' ? 'forge-bazaar' : src}:${norm}`;
-          }
-        } catch(_) {}
-        const label = path.split('/').pop() || path;
+        path = this._normalizePickedFolderPath(path, fp);
+        const label = this._labelForFolderPath(path);
         if (this._isDuplicatePath(path)) {
           if (ui?.notifications?.warn) ui.notifications.warn('That folder has already been added.');
           return;
@@ -983,14 +1011,8 @@ export class BaseContentSourcesDialog extends HandlebarsApplicationMixin(Applica
     const fp = new FilePickerClass({
       type: 'folder', title: 'Select Folder',
       callback: async (path) => {
-        try {
-          const src = fp?.activeSource;
-          if (src && (src === 'forge-bazaar' || src === 'bazaar') && !/^[^:]+:/.test(path)) {
-            const norm = path.startsWith('/') ? path.slice(1) : path;
-            path = `${src === 'bazaar' ? 'forge-bazaar' : src}:${norm}`;
-          }
-        } catch(_) {}
-        const label = path.split('/').pop() || path;
+        path = this._normalizePickedFolderPath(path, fp);
+        const label = this._labelForFolderPath(path);
         if (this._isDuplicatePath(path, index)) {
           if (ui?.notifications?.warn) ui.notifications.warn('That folder has already been added.');
           return;

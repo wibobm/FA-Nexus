@@ -31,6 +31,7 @@ function getTileMode(doc) {
   try {
     if (doc.getFlag('fa-nexus', 'path')) return 'paths';
     if (doc.getFlag('fa-nexus', 'maskedTiling')) return 'textures';
+    if (doc.getFlag('fa-nexus', 'building')) return 'buildings';
     const src = String(doc.texture?.src || '').trim();
     if (src) return 'assets';
   } catch (error) {
@@ -66,6 +67,8 @@ function ensureButton(root, mode) {
   }
   const label = mode === 'paths'
     ? 'Edit Path in FA Nexus'
+    : mode === 'buildings'
+      ? 'Edit Building in FA Nexus'
     : mode === 'textures'
       ? 'Edit Mask in FA Nexus'
       : 'Edit Asset in FA Nexus';
@@ -196,6 +199,18 @@ async function openTab(app, tabId) {
   return tab;
 }
 
+function resolveBuildingModeFromTile(doc) {
+  try {
+    const flag = doc?.getFlag?.('fa-nexus', 'building')
+      || doc?.flags?.['fa-nexus']?.building
+      || doc?._source?.flags?.['fa-nexus']?.building
+      || null;
+    const wallMode = flag?.wall?.mode;
+    if (wallMode === 'inner' || wallMode === 'outer') return wallMode;
+  } catch (_) {}
+  return null;
+}
+
 async function launchEditor(doc, mode) {
   if (!doc) throw new Error('Tile document not available');
   const pointerPayload = buildPointerPayload(doc) || {};
@@ -206,8 +221,20 @@ async function launchEditor(doc, mode) {
   app?.bringToFront?.();
   try { canvas?.tiles?.activate?.(); } catch (_) {}
   const tab = await openTab(app, mode);
+  if (mode === 'buildings') {
+    const buildingMode = resolveBuildingModeFromTile(doc);
+    const desiredSubtab = buildingMode === 'inner' ? 'single-wall' : (buildingMode === 'outer' ? 'building' : null);
+    if (desiredSubtab && typeof tab?._setActiveSubtab === 'function') {
+      try { tab._setActiveSubtab(desiredSubtab, { silent: true }); } catch (_) {}
+    }
+  }
+  if (mode === 'buildings' && typeof tab?.forceNoFillSelection === 'function') {
+    try { await tab.forceNoFillSelection({ notifyManager: false }); }
+    catch (error) { Logger.warn('TileHud.forceNoFill.failed', { error: String(error?.message || error) }); }
+  }
   let manager = null;
   if (mode === 'paths') manager = tab?.pathManager;
+  else if (mode === 'buildings') manager = tab?.buildingManager;
   else if (mode === 'textures') manager = tab?.texturePaintManager;
   else manager = tab?.placementManager;
   if (!manager) throw new Error('FA Nexus editor manager unavailable');

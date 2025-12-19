@@ -32,6 +32,7 @@ export class SearchController {
     if (!Object.prototype.hasOwnProperty.call(this._tabSearch, 'assets')) this._tabSearch.assets = '';
     if (!Object.prototype.hasOwnProperty.call(this._tabSearch, 'textures')) this._tabSearch.textures = '';
     if (!Object.prototype.hasOwnProperty.call(this._tabSearch, 'paths')) this._tabSearch.paths = '';
+    if (!Object.prototype.hasOwnProperty.call(this._tabSearch, 'buildings')) this._tabSearch.buildings = '';
   }
 
   /**
@@ -81,7 +82,8 @@ export class SearchController {
         this._tabSearch[tabAtInput] = query;
         // Only apply if the same tab is still active; otherwise the new tab will handle its own apply
         if (this.app._activeTab === tabAtInput) {
-          try { this.app._activeTabObj?.applySearch?.(query); } catch (_) {}
+          const applyOptions = tabAtInput === 'buildings' ? { refreshTextures: false } : undefined;
+          try { this.app._activeTabObj?.applySearch?.(query, applyOptions); } catch (_) {}
         }
       }, 250);
     });
@@ -97,7 +99,8 @@ export class SearchController {
         this._tabSearch[tabAtClick] = '';
         // Only apply clear on current tab; switching tabs will restore their own query
         if (this.app._activeTab === tabAtClick) {
-          try { this.app._activeTabObj?.applySearch?.(''); } catch (_) {}
+          const applyOptions = tabAtClick === 'buildings' ? { refreshTextures: false } : undefined;
+          try { this.app._activeTabObj?.applySearch?.('', applyOptions); } catch (_) {}
         }
         try { searchInput.focus(); } catch (_) {}
       });
@@ -117,7 +120,7 @@ export class SearchController {
    * @param {string} tabId - Tab identifier
    * @param {string} query - Search query
    */
-  applySearchToTab(tabId, query) {
+  applySearchToTab(tabId, query, options = {}) {
     if (!tabId) return;
     this._ensureTabSearchStore();
     this._tabSearch[tabId] = query;
@@ -133,7 +136,7 @@ export class SearchController {
 
     // Apply to tab if it's active
     if (this.app._activeTab === tabId) {
-      try { this.app._activeTabObj?.applySearch?.(query); } catch (_) {}
+      try { this.app._activeTabObj?.applySearch?.(query, options); } catch (_) {}
     }
   }
 
@@ -141,8 +144,8 @@ export class SearchController {
    * Clear search for a specific tab
    * @param {string} tabId - Tab identifier
    */
-  clearSearch(tabId) {
-    this.applySearchToTab(tabId, '');
+  clearSearch(tabId, options = {}) {
+    this.applySearchToTab(tabId, '', options);
   }
 
   /**

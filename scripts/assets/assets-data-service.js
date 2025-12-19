@@ -41,7 +41,7 @@ export class AssetsDataService {
     const primarySource = resolvedSource || (forgeIntegration.isRunningOnForge() ? 'forgevtt' : 'data');
     const baseOptions = Object.assign({}, resolvedOptions || {});
     const fallbackSources = Array.isArray(fallbacks) ? fallbacks.slice() : [];
-    const allowedExtensions = new Set(['.png', '.webp', '.jpg', '.jpeg', '.webm', '.mp4', '.ogg']);
+    const allowedExtensions = new Set(['.png', '.webp', '.jpg', '.jpeg', '.webm', '.mp4']);
     const batchSize = Math.max(25, Math.min(500, Number(options.batchSize) || 200));
     const sleepMs = Math.max(0, Math.min(50, Number(options.sleepMs) || 8));
     const signal = options.signal || null;
@@ -160,7 +160,7 @@ export class AssetsDataService {
     const url = this._dimensionSource(asset);
     if (!url) return null;
     const lower = String(url).toLowerCase();
-    const isVideo = /(\.webm|\.mp4|\.ogg)$/i.test(lower);
+    const isVideo = /(\.webm|\.mp4)$/i.test(lower);
     const loader = isVideo ? document.createElement('video') : new Image();
     return new Promise((resolve) => {
       let settled = false;

@@ -3,6 +3,7 @@ import { TokensTab } from '../tokens/tokens-tab.js';
 import { AssetsTab } from '../assets/assets-tab.js';
 import { TexturesTab } from '../textures/textures-tab.js';
 import { PathsTab } from '../paths/paths-tab.js';
+import { BuildingsTab } from '../buildings/buildings-tab.js';
 
 /**
  * TabManager
@@ -27,7 +28,8 @@ export class TabManager {
         tokens: new TokensTab(this.app),
         assets: new AssetsTab(this.app),
         textures: new TexturesTab(this.app),
-        paths: new PathsTab(this.app)
+        paths: new PathsTab(this.app),
+        buildings: new BuildingsTab(this.app)
       };
     }
   }

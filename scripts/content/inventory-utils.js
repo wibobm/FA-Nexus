@@ -240,7 +240,6 @@ export function localToAssetInventoryRecord(localItem) {
     if (f.endsWith('.jpg') || f.endsWith('.jpeg')) return 'image/jpeg';
     if (f.endsWith('.webm')) return 'video/webm';
     if (f.endsWith('.mp4')) return 'video/mp4';
-    if (f.endsWith('.ogg')) return 'video/ogg';
     return 'application/octet-stream';
   })();
   return {

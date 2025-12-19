@@ -352,9 +352,12 @@ class FaNexusApp extends HandlebarsApplicationMixin(ApplicationV2) {
 
 /**
  * Open or focus FA Nexus application
- * @returns {FaNexusApp}
+ * @returns {FaNexusApp|null}
  */
 function renderFaNexus() {
+  // Only GMs can access the module
+  if (!game?.user?.isGM) return null;
+
   try {
     const existing = foundry.applications.instances.get('fa-nexus-app');
     if (existing) {

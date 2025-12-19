@@ -31,5 +31,18 @@ export function ensurePremiumFeaturesRegistered() {
     })
   });
 
+  premiumFeatureBroker.registerFeature('building.edit', {
+    entitlementKey: 'building.edit',
+    bundleId: 'building-editor',
+    factory: (mod) => ({
+      create(app) {
+        if (typeof mod?.createBuildingManager === 'function') return mod.createBuildingManager(app);
+        const Klass = mod?.BuildingManager || mod?.default;
+        if (typeof Klass !== 'function') throw new Error('Premium building bundle missing BuildingManager export');
+        return new Klass(app);
+      }
+    })
+  });
+
   registered = true;
 }

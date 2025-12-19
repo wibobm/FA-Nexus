@@ -45,6 +45,35 @@ function sanitizeBucket(bucket) {
   return sanitized;
 }
 
+function parseS3HttpUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_) {
+    return null;
+  }
+  if (!/^https?:$/.test(parsed.protocol)) return null;
+  const hostname = parsed.hostname;
+  const pathname = String(parsed.pathname || '').replace(/^\/+/, '');
+
+  // Virtual-hosted-style: <bucket>.s3.<region>.amazonaws.com/<key>
+  let match = hostname.match(/^(.+?)\.s3(?:[.-]([a-z0-9-]+))?\.amazonaws\.com$/i);
+  if (match) {
+    return { bucket: match[1], key: pathname };
+  }
+
+  // Path-style: s3.<region>.amazonaws.com/<bucket>/<key>
+  match = hostname.match(/^s3(?:[.-]([a-z0-9-]+))?\.amazonaws\.com$/i);
+  if (match) {
+    const [bucket, ...rest] = pathname.split('/').filter(Boolean);
+    if (!bucket) return null;
+    return { bucket, key: rest.join('/') };
+  }
+
+  return null;
+}
+
 export class ForgeIntegrationService {
   constructor() {
     this.forgeAccountId = null;
@@ -213,6 +242,20 @@ export class ForgeIntegrationService {
     let target = String(folder).trim();
     let options = {};
     const norm = target.toLowerCase();
+    const s3Url = (() => {
+      try {
+        const FilePickerBase = foundry?.applications?.apps?.FilePicker ?? globalThis.FilePicker;
+        const FilePickerClass = FilePickerBase?.implementation ?? FilePickerBase;
+        const match = typeof FilePickerClass?.matchS3URL === 'function' ? FilePickerClass.matchS3URL(target) : null;
+        if (match) {
+          const groups = match.groups || null;
+          const bucket = groups?.bucket || groups?.Bucket || null;
+          const key = groups?.key || groups?.Key || groups?.path || groups?.Path || groups?.target || groups?.Target || null;
+          if (bucket && key !== null) return { bucket: String(bucket), key: String(key) };
+        }
+      } catch (_) {}
+      return parseS3HttpUrl(target);
+    })();
     const bazaarUrl = norm.match(/^https?:\/\/assets\.forge-vtt\.com\/bazaar\/assets\/(.+)$/i);
     const forgeUrl = norm.match(/^https?:\/\/assets\.forge-vtt\.com\/([^/]+)\/(.+)$/i);
     const prefixMatch = target.match(/^([^:]+):(.*)$/);
@@ -222,7 +265,21 @@ export class ForgeIntegrationService {
       if (source === 'forgevtt' && !fallbacks.includes('data')) fallbacks.push('data');
     };
 
-    if (prefixMatch) {
+    if (bazaarUrl) {
+      source = 'forge-bazaar';
+      target = `assets/${bazaarUrl[1]}`;
+      options = {};
+      if (!fallbacks.includes('bazaar')) fallbacks.push('bazaar');
+    } else if (forgeUrl) {
+      source = 'forgevtt';
+      target = forgeUrl[2];
+      setForgeOptions();
+    } else if (s3Url) {
+      source = 's3';
+      target = String(s3Url.key || '').replace(/^\/+/, '').replace(/\/+$/, '');
+      options = {};
+      if (s3Url.bucket) options.bucket = String(s3Url.bucket);
+    } else if (prefixMatch) {
       const prefix = prefixMatch[1].toLowerCase();
       target = prefixMatch[2];
       if (prefix === 'forge-bazaar' || prefix === 'bazaar') {
@@ -235,20 +292,26 @@ export class ForgeIntegrationService {
       } else if (prefix === 'data' || prefix === 'public' || prefix === 's3') {
         source = prefix;
         options = {};
+        if (prefix === 's3') {
+          // For folder selection, Foundry's FilePicker returns only the key prefix (no bucket). Store and interpret
+          // S3 folders as: s3:<bucket>/<target> so scans and browsers can provide bucket options.
+          try {
+            const raw = String(target || '').replace(/^\/+/, '');
+            const [bucket, ...restParts] = raw.split('/').filter((p) => p !== '');
+            const rest = restParts.join('/');
+            const knownBuckets = game?.data?.files?.s3?.buckets;
+            const bucketIsKnown = Array.isArray(knownBuckets) && knownBuckets.length ? knownBuckets.includes(bucket) : true;
+            if (bucket && bucketIsKnown) {
+              options.bucket = bucket;
+              target = rest;
+            }
+          } catch (_) {}
+        }
       } else {
         Logger.debug(`${LOGGER_TAG}.resolveFilePickerContext unknown prefix`, { prefix, folder });
         source = defaultSource;
         options = defaultOptions;
       }
-    } else if (bazaarUrl) {
-      source = 'forge-bazaar';
-      target = `assets/${bazaarUrl[1]}`;
-      options = {};
-      if (!fallbacks.includes('bazaar')) fallbacks.push('bazaar');
-    } else if (forgeUrl) {
-      source = 'forgevtt';
-      target = forgeUrl[2];
-      setForgeOptions();
     } else {
       source = defaultSource;
       options = defaultOptions;
@@ -262,7 +325,7 @@ export class ForgeIntegrationService {
     }
 
     const normalizedTarget = this.normalizeFilePickerTarget(source, target);
-    Logger.debug(`${LOGGER_TAG}.resolveFilePickerContext`, {
+    logDebugOnce(`${LOGGER_TAG}.resolveFilePickerContext:${folder}`, {
       folder,
       source,
       target: normalizedTarget,
