@@ -37,7 +37,7 @@ FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Found
 - **Bookmark anything:** Save your favorite combinations of search terms and folder filters for Tokens, Assets, Textures, or Paths. Bookmarks show in a toolbar, overflow gracefully, and can be dragged to reorder.
 - **Search memory:** Each tab remembers its last query and folder state, so hopping between views doesn’t wipe your work.
 
-<video src="https://r2-public.forgotten-adventures.net/marketing/2025/Nexus/search-folders-bookmarks_v2.mp4" />
+https://github.com/user-attachments/assets/aff82b2e-ca87-43ef-ba2e-80dc75011351
 
 ---
 
