@@ -71,6 +71,8 @@ https://github.com/user-attachments/assets/b39f4b08-660e-4cac-af7e-9c4360ad513e
 - **Texture per surface:** Assign different textures to exterior walls, interior walls, and floor independently.
 - **Automatic shadows:** Structures inherit the same elevation-based shadow system as regular assets for consistent depth.
 
+[Building tool swcs v2.1 - Made with Clipchamp.webm](https://github.com/user-attachments/assets/1032ccf8-575f-4b30-967d-b0f8367bf47f)
+
 ---
 
 ## Premium Texture Painting *(Adventurer tier $7+)*
