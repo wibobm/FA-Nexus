@@ -38,7 +38,8 @@ FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Found
 - **Bookmark anything:** Save your favorite combinations of search terms and folder filters for Tokens, Assets, Textures, or Paths. Bookmarks show in a toolbar, overflow gracefully, and can be dragged to reorder.
 - **Search memory:** Each tab remembers its last query and folder state, so hopping between views doesn’t wipe your work.
 
-https://github.com/user-attachments/assets/aff82b2e-ca87-43ef-ba2e-80dc75011351
+[search-folders-bookmarks_v2.webm](https://github.com/user-attachments/assets/e56417b2-509b-42b4-b285-b6955211790f)
+
 
 ---
 
@@ -51,7 +52,7 @@ https://github.com/user-attachments/assets/aff82b2e-ca87-43ef-ba2e-80dc75011351
 - **Grid savvy:** Snap to grid, rotate, mirror, or randomize facing before every drop.
 - **Super Wildcards:** Combination of the systems above allow you to essentially havea "super" wildcard placement. e.g. Multiselect All our NPCs, Activate "Random Color on Placement", choose "Commoner" statblock as "Place Token As" , activate random rotation and flip & start placing!  You'll get a random NPC with random color and random rotation with each click!
 
-https://github.com/user-attachments/assets/e56e7491-11c2-4c55-9150-387ea38731c2
+[token_placement_v2.webm](https://github.com/user-attachments/assets/28af5e4e-2d7e-445d-a04c-715613291bee)
 
 ---
 
@@ -61,11 +62,12 @@ https://github.com/user-attachments/assets/e56e7491-11c2-4c55-9150-387ea38731c2
 - **Shadow presets per elevation:** Customize drop shadow alpha, blur, dilation, angle, and distance for each elevation level. Save up to five presets and reapply them with a click.
 - **Multi-select randomizer:** Select several assets and let Nexus randomize which one lands next. Combine with random rotation and scale!
 
-https://github.com/user-attachments/assets/b39f4b08-660e-4cac-af7e-9c4360ad513e
+
+[Asset_placement_shadows_editing_v2.webm](https://github.com/user-attachments/assets/4c3b1b28-7206-49d8-9004-42e67bfa2b50)
 
 ---
 
-## Building Tool
+## Building Tool *(Adventurer tier $7+)*
 - **Rapid structure creation:** Construct building footprints with help of rectangle, elipse and polygon shapes (with arcs support) and inner walls that auto-generate foundry walls.
 - **Portals:** Place textured doors, windows and gaps on any wall segment, the tool automatically cuts openings, creates appropriate foundry walls and textures. Doors and windows can even be animated!
 - **Texture per surface:** Assign different textures to exterior walls, interior walls, and floor independently.
@@ -75,7 +77,7 @@ https://github.com/user-attachments/assets/b39f4b08-660e-4cac-af7e-9c4360ad513e
 
 ---
 
-## Premium Texture Painting *(Adventurer tier $7+)*
+## Texture Painting *(Adventurer tier $7+)*
 - **Brush-based painting:** Freehand grungy brushes with adjustable size & opacity.
 - **Fill & mask tools:** Flood fill, rectangle, ellipse, polygonal lasso all support snap-to-grid for precise coverage.
 - **Eraser mode**: Brush & fill tools support Eraser mode too.
@@ -84,12 +86,11 @@ https://github.com/user-attachments/assets/b39f4b08-660e-4cac-af7e-9c4360ad513e
 - **Save as Tile**: Once you are happywith the masked texture, press S to save as Foundry Tile!
 
 
-https://github.com/user-attachments/assets/9d5898ea-319b-4c3a-8363-1f766b4e2b7b
-
+[texture_painting_v2.webm](https://github.com/user-attachments/assets/c80209fd-eaf6-4fd2-84ab-6a16b7a526d0)
 
 ---
 
-## Premium Path Placement *(Adventurer tier $7+)*
+## Path Placement *(Adventurer tier $7+)*
 - **Make it curve:** Drop control points to form smooth curves, adjust tension, support snap to grid.
 - **Path Texture controls:** Set scale, opacity, flip and offsets on the fly.
 - **Feathered endings:** Taper opacity, shrink width on both ends independently for natural blends.
@@ -98,7 +99,8 @@ https://github.com/user-attachments/assets/9d5898ea-319b-4c3a-8363-1f766b4e2b7b
 - **Texture swap:** Simply select a different texture from the main window to swap textures during editing.
 - **Save as Tile**: Once you are happywith the masked texture, press S to save as Foundry Tile!
 
-https://github.com/user-attachments/assets/5e8b8d4e-74a4-4776-a6e5-0868053bfc29
+
+[path_creation_v2.webm](https://github.com/user-attachments/assets/68f1d65b-3888-4264-b05e-92531aced376)
 
 ---
 
