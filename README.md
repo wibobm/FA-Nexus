@@ -1,15 +1,12 @@
 # FA Nexus
 
-<img width="1416" height="800" alt="image" src="https://github.com/user-attachments/assets/78f48919-864c-4e2d-8021-cc1788bef675" />
-
-
 ![Foundry VTT v13](https://img.shields.io/badge/Foundry%20VTT-v13+-green)
-![Version](https://img.shields.io/badge/version-0.1.3-orange)
+![Version](https://img.shields.io/badge/version-0.2.x-orange)
 ![Status](https://img.shields.io/badge/status-Beta-yellow)
 
 FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Foundry VTT. It brings tokens, assets, premium texture tools, and path editing into a single streamlined window. Launch the app from the FA Nexus button above the player list and dive straight into the full catalog of free Forgotten Adventures content—no manual setup required.
 
-⚠️ **Beta notice:** v0.1.0 is our first public release. Expect occasional rough edges, placeholder copy, and the odd gremlin. Please keep the feedback coming so we can polish the experience quickly. We also plan on implementing more features so if you have a specific feature request drop that into issues too!
+⚠️ **Beta notice:** Expect occasional rough edges, placeholder copy, and the odd gremlin. Please keep the feedback coming so we can polish the experience quickly. We also plan on implementing more features so if you have a specific feature request drop that into issues too!
 
 <img width="1998" height="908" alt="image" src="https://github.com/user-attachments/assets/7c292296-b9f4-4ed9-a1bb-c3470fdca7ad" />
 
@@ -24,9 +21,13 @@ FA Nexus is the new all-in-one content hub for Forgotten Adventures inside Found
 - **Elevation based Drop Shadow:** Elevation-based drop shadows for assets, bring new depth to your scenes!
 - **Lightning-fast grids:** One-time indexing, virtualized scrolling, hover previews, and a thumbnail size slider keep browsing fluid even on massive scenes.
 - **Cloud + local harmony:** Cloud Downloads keep the full folder structure, smart de-duplication and high-quality cloud thumbnails for matched local files, local folders stay in sync with folder filters & bookmarks.
-- **Premium unlocks:** Subscribers at Adventurer ($7) or higher get access to Premium Tokens & Assets as well as texture painting and path editors, plus future premium features.
-- **Texture painting studio *(Adventurer tier $7+)*:** Premium supporters unlock brush and fill tools with live transforms for rapid terrain blending.
-- **Path editor toolkit *(Adventurer tier $7+)*:** Build splines with per-point width, texture flips/offsets, and feathered fades once authenticated.
+- **GM-only access:** FA Nexus and module settings only visible to GMs, keeping the interface out of player hands.
+
+# Premium Features *(Patreon Adventurer tier ($7) or higher)*
+- **Premium unlocks:** All Token Color variants, Premium Tokens, Assets, Paths & Textures
+- **Texture painting studio:** Brush and fill tools with live transforms for rapid terrain blending.
+- **Path editor toolkit:** Build splines with per-point width, texture flips/offsets, automatic shadows and more.
+- **Building Tool:** Draw outer and inner walls, place doors and windows, build entire structures in seconds with automatic shadows, foundry walls and texturing.
 
 ---
 
@@ -64,6 +65,14 @@ https://github.com/user-attachments/assets/b39f4b08-660e-4cac-af7e-9c4360ad513e
 
 ---
 
+## Building Tool
+- **Rapid structure creation:** Construct building footprints with help of rectangle, elipse and polygon shapes (with arcs support) and inner walls that auto-generate foundry walls.
+- **Portals:** Place textured doors, windows and gaps on any wall segment, the tool automatically cuts openings, creates appropriate foundry walls and textures. Doors and windows can even be animated!
+- **Texture per surface:** Assign different textures to exterior walls, interior walls, and floor independently.
+- **Automatic shadows:** Structures inherit the same elevation-based shadow system as regular assets for consistent depth.
+
+---
+
 ## Premium Texture Painting *(Adventurer tier $7+)*
 - **Brush-based painting:** Freehand grungy brushes with adjustable size & opacity.
 - **Fill & mask tools:** Flood fill, rectangle, ellipse, polygonal lasso all support snap-to-grid for precise coverage.
@@ -85,18 +94,9 @@ https://github.com/user-attachments/assets/9d5898ea-319b-4c3a-8363-1f766b4e2b7b
 - **Per-point width control:** Pinch or bulge individual points for finer width adjustments.
 - **Path Shadows:**  Elevation based shadows (same as Assets) with path shadow geometry editing.
 - **Texture swap:** Simply select a different texture from the main window to swap textures during editing.
-- **Save as Tile:** Once you are happywith the masked texture, press S to save as Foundry Tile!
+- **Save as Tile**: Once you are happywith the masked texture, press S to save as Foundry Tile!
 
 https://github.com/user-attachments/assets/5e8b8d4e-74a4-4776-a6e5-0868053bfc29
-
----
-
-## Flatten & Deconstruct
-- **Merge Selected:** Select multiple tiles and flatten/merge them into a single webp tile for improved performance!
-- **Deconstruct flattened:** Flattened tiles can be deconstructed back to individual tiles if you need to fix something.
-(limited testing, we will improve upon this feature in the future)
-
-https://github.com/user-attachments/assets/a7f289df-8092-4af9-81a1-d238d125fc7c
 
 ---
 
