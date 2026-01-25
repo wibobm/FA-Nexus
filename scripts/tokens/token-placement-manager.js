@@ -3,7 +3,7 @@ import { ActorFactory } from './actor-factory.js';
 import * as SystemDetection from './system-detection.js';
 import { NexusLogger as Logger } from '../core/nexus-logger.js';
 import { getCanvasInteractionController, announceChange } from '../canvas/canvas-interaction-controller.js';
-import { isPointerOverCanvas } from '../canvas/canvas-pointer-utils.js';
+import { getZoomAtCursorView, isPointerOverCanvas } from '../canvas/canvas-pointer-utils.js';
 import { createCanvasGestureSession } from '../canvas/canvas-gesture-session.js';
 import { toolOptionsController } from '../core/tool-options-controller.js';
 import { PlacementPrefetchQueue } from '../core/placement/placement-prefetch-queue.js';
@@ -14,7 +14,6 @@ const MAX_PLACE_AS_SUGGESTIONS = 10;
 const MIN_AUTO_PLACE_AS_SCORE = 35;
 const HP_MODES = ['actor', 'formula', 'percent', 'static'];
 const DEFAULT_HP_PERCENT = 20;
-
 const joinPath = (folder, name) => {
   const filename = String(name || '').trim();
   if (!filename) return String(folder || '').trim();
@@ -91,14 +90,20 @@ export class TokenPlacementManager {
     this._placeAsUserModified = false;
     this._placeAsSelectionAuto = false;
     this._placeAsSelectedOption = null;
+    this._placeAsExcludedPacks = new Set();
+    this._placeAsAvailablePacks = [];
+    this._placeAsFilterDialogOpen = false;
     this._hpMode = 'actor';
     this._hpPercent = DEFAULT_HP_PERCENT;
     this._hpStaticValue = '';
     this._hpFormulaWarned = false;
+    this._appendNumberOverride = null;
+    this._prependAdjectiveOverride = null;
     this._scrollingTextGuardReady = false;
 
     this._installGridSnapHooks();
     this._installActorOptionHooks();
+    this._loadExcludedPacks();
     this._ensureActorOptionsLoaded();
     this._syncToolOptionsState();
   }
@@ -501,26 +506,23 @@ export class TokenPlacementManager {
         const stage = canvas?.stage; if (!stage) return;
         const rect = pointer.canvas?.getBoundingClientRect();
         if (!rect) return;
-        const cx = pointer.screen.x - rect.left; const cy = pointer.screen.y - rect.top;
         const currentScale = Number(stage.scale?.x || 1);
         const step = 1.25;
         const dir = event.deltaY < 0 ? 1 : -1;
         const targetScale = currentScale * Math.pow(step, dir);
-        const cfgMin = Number((globalThis.CONFIG && globalThis.CONFIG.Canvas && globalThis.CONFIG.Canvas.minZoom) || 0.25);
-        const cfgMax = Number((globalThis.CONFIG && globalThis.CONFIG.Canvas && globalThis.CONFIG.Canvas.maxZoom) || 4);
-        const minZ = isNaN(cfgMin) ? 0.25 : cfgMin;
-        const maxZ = isNaN(cfgMax) ? 4 : cfgMax;
-        const newScale = Math.min(maxZ, Math.max(minZ, targetScale));
-        if (Math.abs(newScale - currentScale) < 1e-6) return;
-        const worldUnderCursor = stage.worldTransform.applyInverse(new PIXI.Point(cx, cy));
+        const view = getZoomAtCursorView({
+          canvasEl: pointer.canvas,
+          screenX: pointer.screen.x,
+          screenY: pointer.screen.y,
+          targetScale
+        });
+        if (!view) return;
         const centerX = rect.width / 2; const centerY = rect.height / 2;
-        const desiredCenterX = worldUnderCursor.x + (centerX - cx) / newScale;
-        const desiredCenterY = worldUnderCursor.y + (centerY - cy) / newScale;
         if (typeof canvas?.animatePan === 'function') {
-          canvas.animatePan({ x: desiredCenterX, y: desiredCenterY, scale: newScale, duration: 50 });
+          canvas.animatePan({ ...view, duration: 50 });
         } else {
-          stage.scale.set(newScale, newScale);
-          stage.position.set(centerX - newScale * desiredCenterX, centerY - newScale * desiredCenterY);
+          stage.scale.set(view.scale, view.scale);
+          stage.position.set(centerX - view.scale * view.x, centerY - view.scale * view.y);
         }
       } catch (_) {}
     };
@@ -690,21 +692,25 @@ export class TokenPlacementManager {
             try {
               cardElement._resolvedLocalPath = local;
               cardElement.setAttribute('data-url', local);
-              cardElement.setAttribute('data-cached', 'true');
-              const icon = cardElement.querySelector('.fa-nexus-status-icon');
-              if (icon) {
-                icon.classList.remove('cloud-plus', 'cloud', 'premium');
-                icon.classList.add('cloud', 'cached');
-                icon.title = 'Downloaded';
-                icon.innerHTML = '<i class="fas fa-cloud-check"></i>';
-              }
-              const variantIcon = cardElement.querySelector('.fa-nexus-token-status-icon');
-              if (variantIcon) {
-                variantIcon.classList.remove('premium', 'cloud-plus');
-                variantIcon.classList.add('cloud', 'cached');
-                variantIcon.title = 'Downloaded';
-                variantIcon.innerHTML = '<i class="fas fa-cloud-check"></i>';
-                cardElement.classList.remove('locked-token');
+              // Only mark as cached if actually downloaded (not using direct CDN URL)
+              const isDirectUrl = /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(local);
+              if (!isDirectUrl) {
+                cardElement.setAttribute('data-cached', 'true');
+                const icon = cardElement.querySelector('.fa-nexus-status-icon');
+                if (icon) {
+                  icon.classList.remove('cloud-plus', 'cloud', 'premium');
+                  icon.classList.add('cloud', 'cached');
+                  icon.title = 'Downloaded';
+                  icon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+                }
+                const variantIcon = cardElement.querySelector('.fa-nexus-token-status-icon');
+                if (variantIcon) {
+                  variantIcon.classList.remove('premium', 'cloud-plus');
+                  variantIcon.classList.add('cloud', 'cached');
+                  variantIcon.title = 'Downloaded';
+                  variantIcon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+                  cardElement.classList.remove('locked-token');
+                }
               }
             } catch (_) {}
             return local;
@@ -845,15 +851,22 @@ export class TokenPlacementManager {
         let pendingHpOverride = null;
         const created = await ActorFactory.createActorFromDragData(dragData, drop, {
           beforeTokenCreate: async (actorDoc) => {
+            const tokenOptions = {};
             try {
               pendingHpOverride = await this._resolveHpOverride({ actor: actorDoc });
             } catch (error) {
               Logger.warn('TokenPlacement.hp.resolveFailed', { scope: 'new-actor', error: String(error?.message || error) });
               pendingHpOverride = null;
             }
-            if (!pendingHpOverride) return {};
-            await this._applyHpOverrideToActorDocument(actorDoc, pendingHpOverride);
-            return { hpOverride: pendingHpOverride };
+            if (pendingHpOverride) {
+              await this._applyHpOverrideToActorDocument(actorDoc, pendingHpOverride);
+              tokenOptions.hpOverride = pendingHpOverride;
+            }
+            if (this._supportsTokenNamingOptions()) {
+              if (this._appendNumberOverride !== null) tokenOptions.appendNumber = !!this._appendNumberOverride;
+              if (this._prependAdjectiveOverride !== null) tokenOptions.prependAdjective = !!this._prependAdjectiveOverride;
+            }
+            return tokenOptions;
           }
         });
         if (created?.actor && created?.token) {
@@ -916,7 +929,7 @@ export class TokenPlacementManager {
       display_name: cardElement.getAttribute('data-display-name') || payload?.displayName || '',
       grid_width: Number(cardElement.getAttribute('data-grid-w') || payload?.tokenSize?.gridWidth || 1) || 1,
       grid_height: Number(cardElement.getAttribute('data-grid-h') || payload?.tokenSize?.gridHeight || 1) || 1,
-      scale: Number(cardElement.getAttribute('data-scale') || payload?.tokenSize?.scale || 1) || 1,
+      scale: (() => { const s = cardElement.getAttribute('data-scale') || payload?.tokenSize?.scale || 1; return (typeof s === 'string' && s.endsWith('x')) ? (Number(s.replace('x', '')) || 1) : (Number(s) || 1); })(),
       color_variant: cardElement.getAttribute('data-variant') || payload?.colorVariant || null,
       base_name_no_variant: payload?.baseName || '',
       has_color_variant: !!payload?.hasVariants,
@@ -944,12 +957,17 @@ export class TokenPlacementManager {
       const cardUrl = card?.getAttribute?.('data-url') ?? '';
       if (cardCached && cardUrl) cachedLocalPath = cardUrl;
     }
+    // For local tokens, file_path is always available - use it as cachedLocalPath
+    const source = entry.source ?? item?.source ?? card?.getAttribute?.('data-source') ?? 'local';
+    if (!cachedLocalPath && String(source).toLowerCase() === 'local' && resolvedFilePath) {
+      cachedLocalPath = resolvedFilePath;
+    }
     let resolvedPath = folderPath;
     if (!resolvedPath && cachedLocalPath) resolvedPath = cachedLocalPath;
     const normalized = {
       card,
       source_item: item,
-      source: entry.source ?? item?.source ?? card?.getAttribute?.('data-source') ?? 'local',
+      source,
       tier: entry.tier ?? item?.tier ?? card?.getAttribute?.('data-tier') ?? 'free',
       filename,
       file_path: resolvedFilePath,
@@ -958,7 +976,7 @@ export class TokenPlacementManager {
       display_name: entry.display_name ?? item?.display_name ?? card?.getAttribute?.('data-display-name') ?? '',
       grid_width: Number(entry.grid_width ?? item?.grid_width ?? card?.getAttribute?.('data-grid-w') ?? 1) || 1,
       grid_height: Number(entry.grid_height ?? item?.grid_height ?? card?.getAttribute?.('data-grid-h') ?? 1) || 1,
-      scale: Number(entry.scale ?? item?.scale ?? card?.getAttribute?.('data-scale') ?? 1) || 1,
+      scale: (() => { const s = entry.scale ?? item?.scale ?? card?.getAttribute?.('data-scale') ?? 1; return (typeof s === 'string' && s.endsWith('x')) ? (Number(s.replace('x', '')) || 1) : (Number(s) || 1); })(),
       color_variant: entry.color_variant ?? item?.color_variant ?? card?.getAttribute?.('data-variant') ?? null,
       base_name_no_variant: entry.base_name_no_variant ?? item?.base_name_no_variant ?? '',
       has_color_variant: entry.has_color_variant ?? !!item?.has_color_variant,
@@ -1063,7 +1081,11 @@ export class TokenPlacementManager {
 
   _markEntryCached(entry, localPath) {
     if (!entry || !localPath) return;
-    entry.cachedLocalPath = localPath;
+    // Check if this is a direct CDN URL (not actually cached locally)
+    const isDirectUrl = /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(localPath);
+    if (!isDirectUrl) {
+      entry.cachedLocalPath = localPath;
+    }
     entry.path = entry.path || localPath;
     entry.file_path = entry.file_path || localPath;
     const card = entry.card || null;
@@ -1071,15 +1093,18 @@ export class TokenPlacementManager {
     try {
       card._resolvedLocalPath = localPath;
       card.setAttribute('data-url', localPath);
-      card.setAttribute('data-cached', 'true');
-      const statusIcon = card.querySelector?.('.fa-nexus-status-icon');
-      if (statusIcon) {
-        statusIcon.classList.remove('cloud-plus', 'cloud', 'premium');
-        statusIcon.classList.add('cloud', 'cached');
-        statusIcon.title = 'Downloaded';
-        statusIcon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+      // Only mark as cached if actually downloaded locally
+      if (!isDirectUrl) {
+        card.setAttribute('data-cached', 'true');
+        const statusIcon = card.querySelector?.('.fa-nexus-status-icon');
+        if (statusIcon) {
+          statusIcon.classList.remove('cloud-plus', 'cloud', 'premium');
+          statusIcon.classList.add('cloud', 'cached');
+          statusIcon.title = 'Downloaded';
+          statusIcon.innerHTML = '<i class="fas fa-cloud-check"></i>';
+        }
+        card.classList.remove('locked-token');
       }
-      card.classList.remove('locked-token');
     } catch (_) {}
   }
 
@@ -1413,6 +1438,10 @@ export class TokenPlacementManager {
     state.flip = this._buildFlipToolState();
     const placeAs = this._buildPlaceAsUIState();
     if (placeAs) state.placeAs = placeAs;
+    // Tool options window sometimes runs "sync-only" updates which cannot create new DOM.
+    // Bump layoutRevision when conditional sections (like naming toggles) appear/disappear so
+    // the controller forces a re-render.
+    state.layoutRevision = `token.placement:${placeAs?.naming?.available ? 'n1' : 'n0'}`;
     return state;
   }
 
@@ -1578,13 +1607,16 @@ export class TokenPlacementManager {
           setPlaceAsHpMode: (mode) => this._setPlaceAsHpMode(mode),
           setPlaceAsHpPercent: (value) => this._setPlaceAsHpPercent(value),
           setPlaceAsHpStatic: (value) => this._setPlaceAsHpStatic(value),
+          setPlaceAsAppendNumber: (value) => this._setPlaceAsAppendNumber(value),
+          setPlaceAsPrependAdjective: (value) => this._setPlaceAsPrependAdjective(value),
           toggleFlipHorizontal: () => this._handleFlipHorizontalToggle(),
           toggleFlipVertical: () => this._handleFlipVerticalToggle(),
           toggleFlipHorizontalRandom: () => this._handleFlipRandomHorizontalToggle(),
           toggleFlipVerticalRandom: () => this._handleFlipRandomVerticalToggle(),
           setRotation: (value) => this._handleRotationSliderInput(value),
           toggleRotationRandom: () => this._handleRotationRandomToggle(),
-          setRotationRandomStrength: (value) => this._handleRotationRandomStrength(value)
+          setRotationRandomStrength: (value) => this._handleRotationRandomStrength(value),
+          openCompendiumFilterDialog: () => this._openCompendiumFilterDialog()
         },
         suppressRender
       });
@@ -1778,7 +1810,105 @@ export class TokenPlacementManager {
     if (this._placeAsSelectionId !== DEFAULT_PLACE_AS_SELECTION && !this._placeAsOptionMap.has(this._placeAsSelectionId)) {
       this._placeAsSelectionId = DEFAULT_PLACE_AS_SELECTION;
       this._placeAsLinked = false;
+      this._resetTokenNamingOverrides();
     }
+  }
+
+  _loadExcludedPacks() {
+    try {
+      const raw = globalThis?.game?.settings?.get?.('fa-nexus', 'placeAsExcludedPacks') || '[]';
+      const parsed = JSON.parse(raw);
+      this._placeAsExcludedPacks = new Set(Array.isArray(parsed) ? parsed : []);
+    } catch (error) {
+      Logger.warn('TokenPlacement.placeAs.loadExcludedPacksFailed', { error: String(error?.message || error) });
+      this._placeAsExcludedPacks = new Set();
+    }
+  }
+
+  _saveExcludedPacks() {
+    try {
+      const value = JSON.stringify(Array.from(this._placeAsExcludedPacks));
+      globalThis?.game?.settings?.set?.('fa-nexus', 'placeAsExcludedPacks', value);
+    } catch (error) {
+      Logger.warn('TokenPlacement.placeAs.saveExcludedPacksFailed', { error: String(error?.message || error) });
+    }
+  }
+
+  _isPackExcluded(packId) {
+    return this._placeAsExcludedPacks.has(packId);
+  }
+
+  _setPackExcluded(packId, excluded) {
+    if (excluded) {
+      this._placeAsExcludedPacks.add(packId);
+    } else {
+      this._placeAsExcludedPacks.delete(packId);
+    }
+    this._saveExcludedPacks();
+    this._refreshActorOptions();
+  }
+
+  _setMultiplePacksExcluded(packIds, excluded) {
+    for (const packId of packIds) {
+      if (excluded) {
+        this._placeAsExcludedPacks.add(packId);
+      } else {
+        this._placeAsExcludedPacks.delete(packId);
+      }
+    }
+    this._saveExcludedPacks();
+    this._refreshActorOptions();
+  }
+
+  _getAvailableActorPacks() {
+    const packs = Array.from(globalThis?.game?.packs ?? []);
+    return packs
+      .filter((pack) => pack && pack.documentName === 'Actor')
+      .map((pack) => {
+        const folderPath = this._buildFolderPath(pack.folder);
+        const packageName = pack.metadata?.packageName || null;
+        return {
+          id: pack.collection,
+          label: pack.metadata?.label || pack.title || pack.collection,
+          folder: folderPath,
+          packageName,
+          excluded: this._placeAsExcludedPacks.has(pack.collection)
+        };
+      })
+      .sort((a, b) => {
+        // Sort by folder first, then by label
+        const folderA = a.folder || '';
+        const folderB = b.folder || '';
+        if (folderA !== folderB) return folderA.localeCompare(folderB);
+        return a.label.localeCompare(b.label);
+      });
+  }
+
+  _buildFolderPath(folder) {
+    if (!folder) return null;
+    const parts = [];
+    let current = folder;
+    while (current) {
+      if (current.name) parts.unshift(current.name);
+      current = current.folder;
+    }
+    return parts.length > 0 ? parts.join(' / ') : null;
+  }
+
+  _getExcludedPackCount() {
+    return this._placeAsExcludedPacks.size;
+  }
+
+  _openCompendiumFilterDialog() {
+    import('./place-as-compendium-filter-dialog.js').then(({ PlaceAsCompendiumFilterDialog }) => {
+      const dialog = new PlaceAsCompendiumFilterDialog({
+        manager: this,
+        packs: this._getAvailableActorPacks()
+      });
+      dialog.render(true);
+    }).catch((error) => {
+      Logger.error('TokenPlacement.placeAs.openFilterDialogFailed', { error: String(error?.message || error) });
+    });
   }
 
   _togglePlaceAsOpen(value) {
@@ -1900,7 +2030,12 @@ export class TokenPlacementManager {
 
   _rankPlaceAsOptions({ tokens = [], normalized = '', includeCompendium = true, limit = MAX_PLACE_AS_SUGGESTIONS, allowZero = false } = {}) {
     const candidates = [...this._placeAsWorldOptions];
-    if (includeCompendium) candidates.push(...this._placeAsCompendiumOptions);
+    if (includeCompendium) {
+      const filteredCompendium = this._placeAsCompendiumOptions.filter(
+        (option) => !this._placeAsExcludedPacks.has(option.pack)
+      );
+      candidates.push(...filteredCompendium);
+    }
     const results = new Map();
 
     candidates.forEach((option, index) => {
@@ -2002,6 +2137,9 @@ export class TokenPlacementManager {
       this._placeAsSelectionId = DEFAULT_PLACE_AS_SELECTION;
       this._placeAsLinked = false;
       this._placeAsSelectedOption = null;
+      // Ensure naming controls reflect whatever actor gets auto-selected for this token,
+      // rather than retaining overrides from a previous placement session.
+      this._resetTokenNamingOverrides();
     }
     this._refreshPlaceAsSuggestions({ autoSelect });
   }
@@ -2102,6 +2240,7 @@ export class TokenPlacementManager {
     const options = this._composePlaceAsDisplayList();
     const selection = this._getActivePlaceAsSelection();
     const hpState = this._buildHpUIState(selection);
+    const namingState = this._buildTokenNamingUIState(selection);
     const isFiltered = (this._placeAsSearch || '').trim().length > 0;
     const selectedLabel = (() => {
       if (selection.mode === 'actor' && selection.option) {
@@ -2129,6 +2268,7 @@ export class TokenPlacementManager {
       return hasSelectableOptions ? '' : 'No world actors available. Create or import actors to reuse them.';
     })();
     const linkedDisabled = this._placeAsSelectionId === DEFAULT_PLACE_AS_SELECTION;
+    const excludedPackCount = this._getExcludedPackCount();
     return {
       available: true,
       open: !!this._placeAsOpen,
@@ -2149,8 +2289,103 @@ export class TokenPlacementManager {
       selectedLabel,
       selectedSubtitle,
       hasSelectableOptions,
-      hp: hpState
+      hp: hpState,
+      naming: namingState,
+      filter: {
+        excludedCount: excludedPackCount,
+        hasExcluded: excludedPackCount > 0,
+        tooltip: excludedPackCount > 0
+          ? `${excludedPackCount} compendium${excludedPackCount === 1 ? '' : 's'} excluded`
+          : 'Filter compendiums'
+      }
     };
+  }
+
+  _supportsTokenNamingOptions() {
+    return true;
+  }
+
+  _resolveSelectedActorForNaming(selection) {
+    if (!selection || selection.mode !== 'actor' || !selection.option) return null;
+    const option = selection.option;
+    if (option.type === 'world') {
+      return globalThis?.game?.actors?.get?.(option.actorId) || null;
+    }
+    if (option.type === 'compendium') {
+      const cachedId = this._placeAsResolvedCompendium.get(option.id);
+      if (cachedId) return globalThis?.game?.actors?.get?.(cachedId) || null;
+      const flagged = this._findActorByCompendiumSource(option.pack, option.documentId);
+      if (flagged) return flagged;
+    }
+    return null;
+  }
+
+  _getTokenNamingDefaults(selection) {
+    if (!this._supportsTokenNamingOptions() || !selection || selection.mode !== 'actor') {
+      return { supported: false, defaults: { appendNumber: false, prependAdjective: false }, actor: null };
+    }
+    const actor = this._resolveSelectedActorForNaming(selection);
+    const defaults = {
+      appendNumber: !!actor?.prototypeToken?.appendNumber,
+      prependAdjective: !!actor?.prototypeToken?.prependAdjective
+    };
+    return { supported: true, defaults, actor };
+  }
+
+  _buildTokenNamingUIState(selection) {
+    const { supported, defaults } = this._getTokenNamingDefaults(selection);
+    if (!supported) return { available: false };
+    const appendNumber = this._appendNumberOverride === null ? defaults.appendNumber : !!this._appendNumberOverride;
+    const prependAdjective = this._prependAdjectiveOverride === null ? defaults.prependAdjective : !!this._prependAdjectiveOverride;
+    return {
+      available: true,
+      appendNumber,
+      prependAdjective,
+      appendNumberLabel: 'Append incrementing number',
+      prependAdjectiveLabel: 'Prepend random adjective',
+      appendNumberTooltip: 'Append an auto-incrementing number to the name of unlinked tokens (e.g. Goblin 3).',
+      prependAdjectiveTooltip: 'Prepend a random adjective to the name of unlinked tokens (e.g. Angry Goblin).'
+    };
+  }
+
+  _resetTokenNamingOverrides() {
+    this._appendNumberOverride = null;
+    this._prependAdjectiveOverride = null;
+  }
+
+  _hasTokenNamingOverrides() {
+    return this._appendNumberOverride !== null || this._prependAdjectiveOverride !== null;
+  }
+
+  async _applyTokenNamingOverridesToActor(actor) {
+    if (!this._supportsTokenNamingOptions()) return false;
+    if (!actor || typeof actor.update !== 'function') return false;
+    if (!this._hasTokenNamingOverrides()) return false;
+
+    const update = {};
+    if (this._appendNumberOverride !== null) {
+      const next = !!this._appendNumberOverride;
+      if (next !== !!actor?.prototypeToken?.appendNumber) update['prototypeToken.appendNumber'] = next;
+    }
+    if (this._prependAdjectiveOverride !== null) {
+      const next = !!this._prependAdjectiveOverride;
+      if (next !== !!actor?.prototypeToken?.prependAdjective) update['prototypeToken.prependAdjective'] = next;
+    }
+    if (!Object.keys(update).length) {
+      // Overrides match actor already; treat as consumed.
+      this._resetTokenNamingOverrides();
+      return false;
+    }
+
+    try {
+      await actor.update(update);
+      this._resetTokenNamingOverrides();
+      this._syncToolOptionsState({ suppressRender: false });
+      return true;
+    } catch (error) {
+      Logger.warn('TokenPlacement.naming.updatePrototypeFailed', { error: String(error?.message || error) });
+      return false;
+    }
   }
 
   _normalizeHpMode(mode) {
@@ -2343,6 +2578,36 @@ export class TokenPlacementManager {
     return true;
   }
 
+  _setPlaceAsAppendNumber(value) {
+    const selection = this._getActivePlaceAsSelection();
+    const { supported, defaults } = this._getTokenNamingDefaults(selection);
+    if (!supported) return false;
+    const next = !!value;
+    const override = next === defaults.appendNumber ? null : next;
+    if (this._appendNumberOverride === override) {
+      this._syncToolOptionsState();
+      return true;
+    }
+    this._appendNumberOverride = override;
+    this._syncToolOptionsState({ suppressRender: false });
+    return true;
+  }
+
+  _setPlaceAsPrependAdjective(value) {
+    const selection = this._getActivePlaceAsSelection();
+    const { supported, defaults } = this._getTokenNamingDefaults(selection);
+    if (!supported) return false;
+    const next = !!value;
+    const override = next === defaults.prependAdjective ? null : next;
+    if (this._prependAdjectiveOverride === override) {
+      this._syncToolOptionsState();
+      return true;
+    }
+    this._prependAdjectiveOverride = override;
+    this._syncToolOptionsState({ suppressRender: false });
+    return true;
+  }
+
   _ensureScrollingTextGuard() {
     if (canvas?.interface && !canvas.interface._faNexusOriginalScrollingText) {
       this._scrollingTextGuardReady = false;
@@ -2412,6 +2677,7 @@ export class TokenPlacementManager {
   }
 
   _selectPlaceAsOption(optionId, { user = true, auto = false, option = null } = {}) {
+    const previousSelectionId = this._placeAsSelectionId;
     const id = typeof optionId === 'string' && optionId.length ? optionId : DEFAULT_PLACE_AS_SELECTION;
     if (user) {
       this._placeAsUserModified = true;
@@ -2427,6 +2693,7 @@ export class TokenPlacementManager {
       this._placeAsSearch = '';
       this._placeAsSelectedOption = null;
       if (!auto) this._placeAsSelectionAuto = false;
+      if (previousSelectionId !== this._placeAsSelectionId) this._resetTokenNamingOverrides();
       this._syncToolOptionsState({ suppressRender: false });
       return true;
     }
@@ -2449,6 +2716,7 @@ export class TokenPlacementManager {
     this._placeAsOpen = false;
     this._placeAsSearch = '';
     this._placeAsSelectedOption = resolvedOption;
+    if (previousSelectionId !== this._placeAsSelectionId) this._resetTokenNamingOverrides();
     this._syncToolOptionsState({ suppressRender: false });
     return true;
   }
@@ -2560,15 +2828,32 @@ export class TokenPlacementManager {
     if (!actor) throw new Error('Selected actor is no longer available.');
 
     const shouldUpdatePrototype = !!selection?.linked || option.type === 'compendium';
+    let prototypeUpdated = false;
     if (shouldUpdatePrototype) {
       try {
-        await ActorFactory.updateActorPrototypeToken(actor, dragData, { updateActorImage: true });
+        const updateOptions = { updateActorImage: true };
+        if (this._appendNumberOverride !== null) updateOptions.appendNumber = !!this._appendNumberOverride;
+        if (this._prependAdjectiveOverride !== null) updateOptions.prependAdjective = !!this._prependAdjectiveOverride;
+        await ActorFactory.updateActorPrototypeToken(actor, dragData, updateOptions);
+        prototypeUpdated = true;
       } catch (error) {
         Logger.warn('TokenPlacement.placeAs.updatePrototypeFailed', { error: String(error?.message || error) });
       }
     }
 
     const linked = !!selection?.linked;
+
+    // If the user changed naming rules in the tool options, persist them onto the selected actor
+    // before token creation so Actor#getTokenDocument can generate the correct name.
+    if (!prototypeUpdated && this._hasTokenNamingOverrides()) {
+      await this._applyTokenNamingOverridesToActor(actor);
+    } else if (prototypeUpdated && this._hasTokenNamingOverrides()) {
+      // updateActorPrototypeToken already applied these fields; clear local overrides so the UI
+      // reflects the actor's saved prototype settings.
+      this._resetTokenNamingOverrides();
+      this._syncToolOptionsState({ suppressRender: false });
+    }
+
     let hpOverride = null;
     try {
       hpOverride = await this._resolveHpOverride({ actor });
@@ -2635,13 +2920,6 @@ export class TokenPlacementManager {
     const x = world.x - tokenWidthPx / 2;
     const y = world.y - tokenHeightPx / 2;
 
-    let protoData = {};
-    try {
-      protoData = actor.prototypeToken?.toObject?.() ?? foundry?.utils?.deepClone?.(actor.prototypeToken ?? {}) ?? {};
-    } catch (_) {
-      protoData = {};
-    }
-
     const utils = foundry?.utils;
     const protoScaleX = Number(tokenProto?.texture?.scaleX ?? tokenSize.scale ?? 1) || 1;
     const protoScaleY = Number(tokenProto?.texture?.scaleY ?? tokenSize.scale ?? 1) || 1;
@@ -2649,50 +2927,102 @@ export class TokenPlacementManager {
     const protoMirrorY = tokenProto?.mirrorY ?? (protoScaleY < 0);
     const baseScaleX = Math.abs(protoScaleX);
     const baseScaleY = Math.abs(protoScaleY);
+    const actorProtoScaleX = Number(actor?.prototypeToken?.texture?.scaleX ?? 1) || 1;
+    const actorProtoScaleY = Number(actor?.prototypeToken?.texture?.scaleY ?? 1) || 1;
+    const actorProtoMirrorX = (actorProtoScaleX < 0) || !!actor?.prototypeToken?.mirrorX;
+    const actorProtoMirrorY = (actorProtoScaleY < 0) || !!actor?.prototypeToken?.mirrorY;
     const requestMirrorX = dragData?.mirrorX !== undefined
       ? !!dragData.mirrorX
-      : (protoMirrorX || (protoData?.texture?.scaleX ?? 1) < 0 || !!protoData?.mirrorX);
+      : (protoMirrorX || actorProtoMirrorX);
     const requestMirrorY = dragData?.mirrorY !== undefined
       ? !!dragData.mirrorY
-      : (protoMirrorY || (protoData?.texture?.scaleY ?? 1) < 0 || !!protoData?.mirrorY);
+      : (protoMirrorY || actorProtoMirrorY);
     const appliedScaleX = baseScaleX * (requestMirrorX ? -1 : 1);
     const appliedScaleY = baseScaleY * (requestMirrorY ? -1 : 1);
 
-    const baseData = {
-      name: actor.name,
-      actorId: actor.id,
-      actorLink: !!linked,
-      x,
-      y,
-      width: Number(tokenProto.width || 1) || 1,
-      height: Number(tokenProto.height || 1) || 1,
-      rotation,
-      lockRotation: false,
-      randomImg: false,
-      texture: {
-        ...(protoData.texture || {}),
-        src: dragData?.url || protoData.texture?.src || '',
-        scaleX: appliedScaleX,
-        scaleY: appliedScaleY,
-        fit: tokenProto.texture?.fit || protoData.texture?.fit || 'contain'
-      },
-      flags: {
-        ...(protoData.flags || {}),
-        'fa-nexus': {
-          ...(protoData.flags?.['fa-nexus'] || {}),
-          customScale: true,
-          originalScale: baseScaleX
+    // Build token data using Actor#getTokenDocument where available so system-specific
+    // prototype token behavior (e.g. name generation) is preserved.
+    let merged = {};
+    try {
+      if (typeof actor.getTokenDocument === 'function') {
+        const namingOverrides = (!linked && this._supportsTokenNamingOptions())
+          ? {
+            ...(this._appendNumberOverride !== null ? { appendNumber: !!this._appendNumberOverride } : {}),
+            ...(this._prependAdjectiveOverride !== null ? { prependAdjective: !!this._prependAdjectiveOverride } : {})
+          }
+          : {};
+        const tokenTemplate = actor.getTokenDocument({
+          x,
+          y,
+          width: Number(tokenProto.width || 1) || 1,
+          height: Number(tokenProto.height || 1) || 1,
+          rotation,
+          lockRotation: false,
+          randomImg: false,
+          actorLink: !!linked,
+          ...namingOverrides
+        });
+        const resolvedTemplate = tokenTemplate && typeof tokenTemplate.then === 'function'
+          ? await tokenTemplate
+          : tokenTemplate;
+        merged = resolvedTemplate?.toObject?.() ?? resolvedTemplate ?? {};
+      } else {
+        merged = actor.prototypeToken?.toObject?.() ?? foundry?.utils?.deepClone?.(actor.prototypeToken ?? {}) ?? {};
+        if (utils?.mergeObject) {
+          merged = utils.mergeObject(merged, {
+            x,
+            y,
+            width: Number(tokenProto.width || 1) || 1,
+            height: Number(tokenProto.height || 1) || 1,
+            rotation,
+            lockRotation: false,
+            randomImg: false,
+            actorLink: !!linked
+          }, { inplace: false, overwrite: true, recursive: true });
         }
       }
-    };
+    } catch (_) {
+      merged = {};
+    }
 
-    let merged = baseData;
+    // Apply explicit texture overrides while preserving the rest of the prototype token data.
     if (utils?.mergeObject) {
       try {
-        merged = utils.mergeObject(protoData || {}, baseData, { inplace: false, overwrite: true, recursive: true });
-      } catch (_) {
-        merged = baseData;
-      }
+        merged = utils.mergeObject(merged, {
+          texture: {
+            ...(merged?.texture || {}),
+            src: dragData?.url || merged?.texture?.src || actor.prototypeToken?.texture?.src || '',
+            scaleX: appliedScaleX,
+            scaleY: appliedScaleY,
+            fit: tokenProto?.texture?.fit || merged?.texture?.fit || actor.prototypeToken?.texture?.fit || 'contain'
+          },
+          flags: {
+            ...(merged?.flags || {}),
+            'fa-nexus': {
+              ...(merged?.flags?.['fa-nexus'] || {}),
+              customScale: true,
+              originalScale: baseScaleX
+            }
+          }
+        }, { inplace: false, overwrite: true, recursive: true });
+      } catch (_) {}
+    } else {
+      merged.texture = merged.texture || {};
+      merged.texture.src = dragData?.url || merged.texture.src || actor.prototypeToken?.texture?.src || '';
+      merged.texture.scaleX = appliedScaleX;
+      merged.texture.scaleY = appliedScaleY;
+      merged.texture.fit = tokenProto?.texture?.fit || merged.texture.fit || actor.prototypeToken?.texture?.fit || 'contain';
+      merged.flags = merged.flags || {};
+      merged.flags['fa-nexus'] = {
+        ...(merged.flags['fa-nexus'] || {}),
+        customScale: true,
+        originalScale: baseScaleX
+      };
+    }
+
+    if (!linked && this._supportsTokenNamingOptions()) {
+      if (this._appendNumberOverride !== null) merged.appendNumber = !!this._appendNumberOverride;
+      if (this._prependAdjectiveOverride !== null) merged.prependAdjective = !!this._prependAdjectiveOverride;
     }
 
     try { delete merged._id; } catch (_) {}

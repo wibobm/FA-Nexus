@@ -167,6 +167,7 @@ export function registerFaNexusSettings() {
   client('thumbWidthTextures', { name: 'Texture Thumbnail Width', type: Number, default: 108, config: false });
   client('thumbWidthPaths', { name: 'Path Thumbnail Width', type: Number, default: 108, config: false });
   client('thumbWidthBuildingTextures', { name: 'Building Fill Texture Thumbnail Width', type: Number, default: 108, config: false });
+  client('solidTextureColor', { name: 'Solid Texture Color', type: String, default: '#808080', config: false });
   client('windowPos', { name: 'Window Position', type: Object, default: {}, config: false });
   client('toolOptionsWindowPos', { name: 'Tool Options Window Position', type: Object, default: {}, config: false });
   client('toolOptionsShortcuts', { name: 'Tool Options Shortcuts Collapse State', type: Object, default: {}, config: false });
@@ -175,6 +176,29 @@ export function registerFaNexusSettings() {
   client('buildingsSubtabSearch', { name: 'Building Tab Search State', type: Object, default: {}, config: false });
   client('buildingPortalDoorDefaults', { name: 'Building Portal Door Defaults', type: Object, default: {}, config: false });
   client('buildingPortalWindowDefaults', { name: 'Building Portal Window Defaults', type: Object, default: {}, config: false });
+  client('buildingToolDefaults', { name: 'Building Tool Defaults', type: Object, default: {}, config: false });
+  client('buildingToolActiveSubtool', { name: 'Building Tool Active Subtool', type: String, default: '', config: false });
+  client('pathToolDefaults', { name: 'Path Tool Defaults', type: Object, default: {}, config: false });
+  client('pathToolActiveSubtool', { name: 'Path Tool Active Subtool', type: String, default: '', config: false });
+  client('flattenOptions', {
+    name: 'Flatten Options',
+    type: Object,
+    default: {
+      ppi: 200,
+      quality: 0.85,
+      paddingSnap: 'none',
+      paddingExtra: 0,
+      exportSplitLayers: false,
+      exportChunked: false,
+      exportAction: 'flatten'
+    },
+    config: false
+  });
+  client('layerManagerElevationMin', { name: 'Layer Manager Elevation Min', type: String, default: '', config: false });
+  client('layerManagerElevationMax', { name: 'Layer Manager Elevation Max', type: String, default: '', config: false });
+  client('layerManagerSkipLocked', { name: 'Layer Manager Skip Locked', type: Boolean, default: false, config: false });
+  client('layerManagerSkipHidden', { name: 'Layer Manager Skip Hidden', type: Boolean, default: false, config: false });
+  client('layerManagerIgnoreForeground', { name: 'Layer Manager Ignore Foreground', type: Boolean, default: false, config: false });
   // Cloud download directories (separate per kind)
   world('cloudDownloadDirTokens', { name: 'Cloud Download Folder (Tokens)', type: String, filePicker: 'folder', default: 'fa-nexus-tokens', config: true, restricted: true });
   world('cloudDownloadDirAssets', { name: 'Cloud Download Folder (Assets)', type: String, filePicker: 'folder', default: 'fa-nexus-assets', config: true, restricted: true });
@@ -284,12 +308,123 @@ export function registerFaNexusSettings() {
     config: false,
     onChange: notifyShadowSetting('assetDropShadowPresets')
   });
+  client('assetScatterBrushSize', {
+    name: 'Asset Scatter Brush Size',
+    type: Number,
+    default: 320,
+    config: false
+  });
+  client('assetScatterDensity', {
+    name: 'Asset Scatter Density',
+    type: Number,
+    default: 3,
+    config: false
+  });
+  client('assetScatterSprayDeviation', {
+    name: 'Asset Scatter Spray Deviation',
+    type: Number,
+    default: 50,
+    config: false
+  });
+  client('assetScatterSpacing', {
+    name: 'Asset Scatter Spacing',
+    type: Number,
+    default: 25,
+    config: false
+  });
+  client('assetScatterMerge', {
+    name: 'Asset Scatter Merge',
+    type: Boolean,
+    default: true,
+    config: false
+  });
+  client('assetPlacementScale', {
+    name: 'Asset Placement Scale',
+    type: Number,
+    default: 1,
+    config: false
+  });
+  client('assetPlacementScaleRandomEnabled', {
+    name: 'Asset Placement Scale Random Enabled',
+    type: Boolean,
+    default: false,
+    config: false
+  });
+  client('assetPlacementScaleRandomStrength', {
+    name: 'Asset Placement Scale Random Strength',
+    type: Number,
+    default: 15,
+    config: false
+  });
+  client('assetPlacementRotation', {
+    name: 'Asset Placement Rotation',
+    type: Number,
+    default: 0,
+    config: false
+  });
+  client('assetPlacementRotationRandomEnabled', {
+    name: 'Asset Placement Rotation Random Enabled',
+    type: Boolean,
+    default: false,
+    config: false
+  });
+  client('assetPlacementRotationRandomStrength', {
+    name: 'Asset Placement Rotation Random Strength',
+    type: Number,
+    default: 45,
+    config: false
+  });
+  client('assetPlacementFlipHorizontal', {
+    name: 'Asset Placement Flip Horizontal',
+    type: Boolean,
+    default: false,
+    config: false
+  });
+  client('assetPlacementFlipVertical', {
+    name: 'Asset Placement Flip Vertical',
+    type: Boolean,
+    default: false,
+    config: false
+  });
+  client('assetPlacementFlipRandomHorizontal', {
+    name: 'Asset Placement Flip Random Horizontal',
+    type: Boolean,
+    default: false,
+    config: false
+  });
+  client('assetPlacementFlipRandomVertical', {
+    name: 'Asset Placement Flip Random Vertical',
+    type: Boolean,
+    default: false,
+    config: false
+  });
+  client('assetPlacementScatterMode', {
+    name: 'Asset Placement Scatter Mode',
+    type: String,
+    default: 'single',
+    config: false
+  });
+  client('assetPlacementDropShadowPreference', {
+    name: 'Asset Placement Drop Shadow Preference',
+    type: String,
+    default: 'global',
+    config: false
+  });
   client('pathShadowPresets', {
     name: 'Path Shadow Presets',
     type: String,
     default: '[]',
     config: false,
     onChange: notifyShadowSetting('pathShadowPresets')
+  });
+  client('pathMergeOnCommit', {
+    name: 'Path Merge On Commit',
+    type: Boolean,
+    default: true,
+    config: false,
+    onChange: (value) => {
+      try { Hooks.callAll('updateSetting', { namespace: MODULE_ID, key: 'pathMergeOnCommit', value }); } catch (_) { }
+    }
   });
   world('tokenElevationOffset', {
     name: 'Shift BG & Tile Elevation Down',

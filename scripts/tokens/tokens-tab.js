@@ -1306,6 +1306,10 @@ export class TokensTab extends GridBrowseTab {
           if (local) cachedLocalPath = local;
         } catch (_) {}
       }
+      // For local tokens, file_path is always available - use it as cachedLocalPath
+      if (!cachedLocalPath && String(record.source || '').toLowerCase() === 'local' && record.file_path) {
+        cachedLocalPath = record.file_path;
+      }
       const entry = {
         source: record.source || 'local',
         tier: record.tier || 'free',
@@ -1316,7 +1320,7 @@ export class TokensTab extends GridBrowseTab {
         display_name: record.display_name || '',
         grid_width: Number(record.grid_width || 1) || 1,
         grid_height: Number(record.grid_height || 1) || 1,
-        scale: Number(record.scale || 1) || 1,
+        scale: (typeof record.scale === 'string' && record.scale.endsWith('x')) ? (Number(record.scale.replace('x', '')) || 1) : (Number(record.scale) || 1),
         color_variant: record.color_variant || null,
         base_name_no_variant: record.base_name_no_variant || '',
         has_color_variant: !!record.has_color_variant,
@@ -1667,15 +1671,19 @@ export class TokensTab extends GridBrowseTab {
                 try {
                   if (localPath) {
                     item.setAttribute('data-url', localPath);
-                    item.setAttribute('data-cached', 'true');
-                    cachedLocalPath = cachedLocalPath || localPath;
-                    const iconEl = item.querySelector('.fa-nexus-token-status-icon');
-                    if (iconEl) { iconEl.classList.remove('premium','cloud-plus'); iconEl.classList.add('cloud','cached'); iconEl.title = 'Downloaded'; iconEl.innerHTML = '<i class="fas fa-cloud-check"></i>'; }
-                    if (isMainVariant && anchorCard) {
-                      try { anchorCard.setAttribute('data-url', localPath); } catch (_) {}
-                      try { anchorCard.setAttribute('data-cached', 'true'); } catch (_) {}
-                      const statusIcon = anchorCard.querySelector('.fa-nexus-status-icon');
-                      if (statusIcon) { statusIcon.classList.add('cloud','cached'); statusIcon.title = 'Downloaded'; statusIcon.innerHTML = '<i class="fas fa-cloud-check"></i>'; }
+                    // Only mark as cached if actually downloaded (not using direct CDN URL)
+                    const isDirectUrl = /^https?:\/\/r2-public\.forgotten-adventures\.net\//i.test(localPath);
+                    if (!isDirectUrl) {
+                      item.setAttribute('data-cached', 'true');
+                      cachedLocalPath = cachedLocalPath || localPath;
+                      const iconEl = item.querySelector('.fa-nexus-token-status-icon');
+                      if (iconEl) { iconEl.classList.remove('premium','cloud-plus'); iconEl.classList.add('cloud','cached'); iconEl.title = 'Downloaded'; iconEl.innerHTML = '<i class="fas fa-cloud-check"></i>'; }
+                      if (isMainVariant && anchorCard) {
+                        try { anchorCard.setAttribute('data-url', localPath); } catch (_) {}
+                        try { anchorCard.setAttribute('data-cached', 'true'); } catch (_) {}
+                        const statusIcon = anchorCard.querySelector('.fa-nexus-status-icon');
+                        if (statusIcon) { statusIcon.classList.add('cloud','cached'); statusIcon.title = 'Downloaded'; statusIcon.innerHTML = '<i class="fas fa-cloud-check"></i>'; }
+                      }
                     }
                   }
                 } catch (_) {}

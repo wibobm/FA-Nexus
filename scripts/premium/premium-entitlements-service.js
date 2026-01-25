@@ -167,6 +167,7 @@ export class PremiumEntitlementsService {
         downloadUrl: item.download_url || item.url || null,
         signature: item.signature || null,
         hash: item.hash || null,
+        fileVersion: item.file_version || null,
         version: item.version || null,
         minModule: item.min_module || null,
         maxModule: item.max_module || null,

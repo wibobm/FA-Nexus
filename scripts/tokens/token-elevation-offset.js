@@ -4,9 +4,43 @@ import { getTileRenderElevation, isKeepTokensAboveTileElevationsEnabled } from '
 const EPSILON = 1e-4;
 const SCENE_BACKGROUND_RENDER_ELEVATION = -5;
 const BG_SORT_NUDGE = -1e9;
+const BG_RENDER_OVERRIDE_KEY = 'faNexusBgBandRenderElevation';
+
+function deferAfterHooks(callback) {
+  if (typeof callback !== 'function') return;
+  try {
+    if (typeof queueMicrotask === 'function') {
+      queueMicrotask(callback);
+      return;
+    }
+  } catch (_) {}
+  try { setTimeout(callback, 0); } catch (_) {}
+}
 
 function isEnabled() {
   return isKeepTokensAboveTileElevationsEnabled();
+}
+
+function resolveSceneBackgroundRenderElevation() {
+  const sceneOverride = Number(canvas?.scene?.[BG_RENDER_OVERRIDE_KEY]);
+  if (Number.isFinite(sceneOverride)) return sceneOverride;
+  const extract = (target) => {
+    const raw = Number(target?.[BG_RENDER_OVERRIDE_KEY]);
+    return Number.isFinite(raw) ? raw : null;
+  };
+  const roots = [];
+  if (canvas?.primary?.background) roots.push(canvas.primary.background);
+  if (canvas?.background) roots.push(canvas.background);
+  for (const root of roots) {
+    const direct = extract(root);
+    if (direct !== null) return direct;
+    const candidates = [root.mesh, root.sprite, root.background, root._background];
+    for (const candidate of candidates) {
+      const value = extract(candidate);
+      if (value !== null) return value;
+    }
+  }
+  return SCENE_BACKGROUND_RENDER_ELEVATION;
 }
 
 function applySceneBackgroundBand({ reason = 'refresh', force = false } = {}) {
@@ -21,6 +55,7 @@ function applySceneBackgroundBand({ reason = 'refresh', force = false } = {}) {
     } catch (_) {}
     if (!targets.length) return;
 
+    const targetElevation = resolveSceneBackgroundRenderElevation();
     const applyTo = (obj) => {
       if (!obj) return;
       if (!('elevation' in obj)) return;
@@ -30,13 +65,19 @@ function applySceneBackgroundBand({ reason = 'refresh', force = false } = {}) {
         return;
       }
 
-      const baseElevation = Number(obj.faNexusBgBandBaseElevation ?? obj.elevation ?? 0) || 0;
-      const target = SCENE_BACKGROUND_RENDER_ELEVATION;
-      if (!force && obj.faNexusBgBandApplied && Math.abs(Number(obj.elevation ?? 0) - target) <= EPSILON) return;
+      const storedBase = Number(obj.faNexusBgBandBaseElevation);
+      let baseElevation = Number.isFinite(storedBase) ? storedBase : null;
+      if (baseElevation === null) {
+        const current = Number(obj.elevation ?? 0);
+        if (Number.isFinite(current) && Math.abs(current - targetElevation) > EPSILON) baseElevation = current;
+        else baseElevation = 0;
+      }
+      if (!force && obj.faNexusBgBandApplied && Math.abs(Number(obj.elevation ?? 0) - targetElevation) <= EPSILON) return;
 
       obj.faNexusBgBandApplied = true;
       obj.faNexusBgBandBaseElevation = baseElevation;
-      obj.elevation = target;
+      obj.faNexusBgBandRenderElevation = targetElevation;
+      obj.elevation = targetElevation;
 
       // Defensive: ensure background stays behind shifted tiles even if Foundry compares by elevation first.
       try {
@@ -57,10 +98,15 @@ function applySceneBackgroundBand({ reason = 'refresh', force = false } = {}) {
     }
 
     try { if (canvas?.primary) canvas.primary.sortDirty = true; } catch (_) {}
-    Logger.debug('SceneBackgroundBand.apply', { target: SCENE_BACKGROUND_RENDER_ELEVATION, reason });
+    Logger.debug('SceneBackgroundBand.apply', { target: targetElevation, reason });
   } catch (error) {
     Logger.warn('SceneBackgroundBand.apply.failed', String(error?.message || error));
   }
+}
+
+function scheduleSceneBackgroundBand({ reason = 'refresh', force = false } = {}) {
+  if (!isEnabled()) return;
+  deferAfterHooks(() => applySceneBackgroundBand({ reason, force }));
 }
 
 function restoreSceneBackgroundElevation({ reason = 'restore' } = {}) {
@@ -83,6 +129,7 @@ function restoreSceneBackgroundElevation({ reason = 'restore' } = {}) {
       }
       delete obj.faNexusBgBandApplied;
       delete obj.faNexusBgBandBaseElevation;
+      delete obj.faNexusBgBandRenderElevation;
     };
 
     for (const t of targets) {
@@ -215,8 +262,18 @@ try {
   Hooks.on('refreshTile', (tile) => applyTileBackgroundBand(tile, { reason: 'refresh' }));
   Hooks.on('drawTile', (tile) => applyTileBackgroundBand(tile, { reason: 'draw', force: true }));
   Hooks.on('canvasReady', () => {
-    applySceneBackgroundBand({ reason: 'canvasReady', force: true });
+    scheduleSceneBackgroundBand({ reason: 'canvasReady', force: true });
     applyAllTiles('canvasReady', { force: true });
+  });
+  Hooks.on('updateScene', (scene, updates) => {
+    try {
+      if (!scene || scene.id !== canvas?.scene?.id) return;
+      const levelBgChanged = updates?.flags?.levels?.backgroundElevation !== undefined;
+      const coreBgChanged = updates?.backgroundElevation !== undefined;
+      const bgChanged = updates?.background !== undefined;
+      if (!levelBgChanged && !coreBgChanged && !bgChanged) return;
+      scheduleSceneBackgroundBand({ reason: 'updateScene', force: true });
+    } catch (_) {}
   });
   Hooks.on('updateTile', (...args) => {
     try {
@@ -228,7 +285,7 @@ try {
   });
   Hooks.on('fa-nexus-token-elevation-offset-changed', ({ enabled }) => {
     if (enabled) {
-      applySceneBackgroundBand({ reason: 'setting-enabled', force: true });
+      scheduleSceneBackgroundBand({ reason: 'setting-enabled', force: true });
       applyAllTiles('setting-enabled', { force: true });
     } else {
       restoreAllTiles('setting-disabled');
@@ -241,7 +298,7 @@ try {
       patchTileKeyboardMoveElevation();
       // Apply once on initial ready if the canvas is already up.
       if (canvas?.ready) {
-        applySceneBackgroundBand({ reason: 'ready', force: true });
+        scheduleSceneBackgroundBand({ reason: 'ready', force: true });
         applyAllTiles('ready', { force: true });
       }
     } catch (_) {}

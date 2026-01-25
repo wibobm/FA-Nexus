@@ -9,6 +9,46 @@ const TRANSPARENT_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABC
 const TEXTURE_SCALE_MIN = 0.25;
 const TEXTURE_SCALE_MAX = 3;
 const DEG_TO_RAD = Math.PI / 180;
+const MASK_TYPE_ARRAY = 'array';
+const ARC_SAMPLE_SPACING = 20;
+const ARC_SAMPLE_MIN = 8;
+const ARC_SAMPLE_MAX = 72;
+const ARC_DUPLICATE_EPSILON = 0.5;
+const ARC_CIRCULAR_ALIGNMENT_RATIO = 0.02;
+const ARC_CIRCULAR_ALIGNMENT_MIN = 0.75;
+const ARC_CIRCULAR_ANGLE_EPSILON = Math.PI / 90;
+const ARC_CIRCULAR_DOT_RATIO = 0.001;
+const ARC_CIRCULAR_CENTER_RATIO = 0.45;
+const TAU = Math.PI * 2;
+const RIGHT_ANGLE = Math.PI / 2;
+const SOLID_COLOR_FULL_RE = /^#([0-9a-f]{6})$/i;
+const SOLID_COLOR_SHORT_RE = /^#([0-9a-f]{3})$/i;
+
+function normalizeSolidColor(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const full = SOLID_COLOR_FULL_RE.exec(trimmed);
+  if (full) return `#${full[1].toLowerCase()}`;
+  const short = SOLID_COLOR_SHORT_RE.exec(trimmed);
+  if (short) {
+    const [r, g, b] = short[1].split('');
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  return null;
+}
+
+function parseSolidColorTint(value) {
+  const normalized = normalizeSolidColor(value);
+  if (!normalized) return null;
+  return Number.parseInt(normalized.slice(1), 16);
+}
+
+function getSolidColorTexture() {
+  try {
+    if (PIXI?.Texture?.WHITE) return PIXI.Texture.WHITE;
+  } catch (_) {}
+  return PIXI.Texture.EMPTY;
+}
 
 export function encodeTexturePath(path) {
   if (!path) return path;
@@ -74,6 +114,474 @@ function applyTilingSamplingFix(tiling) {
       uv.update();
     }
   } catch (_) {}
+}
+
+function getMaxTextureSize() {
+  try {
+    const gl = canvas?.app?.renderer?.gl || canvas?.app?.renderer?.context?.gl;
+    if (!gl) return 4096;
+    const val = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    const max = Number(val || 4096) || 4096;
+    return Math.max(1024, Math.min(max, 8192));
+  } catch (_) {
+    return 4096;
+  }
+}
+
+function isTextureUsable(texture) {
+  if (!texture || texture.destroyed) return false;
+  const base = texture.baseTexture;
+  if (!base || base.destroyed) return false;
+  if (base.valid === false) return false;
+  return true;
+}
+
+function clampValue(value, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return min;
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function pointsEqual(a, b, epsilon = ARC_DUPLICATE_EPSILON) {
+  if (!a || !b) return false;
+  return Math.abs((a.x ?? 0) - (b.x ?? 0)) <= epsilon
+    && Math.abs((a.y ?? 0) - (b.y ?? 0)) <= epsilon;
+}
+
+function distanceBetween(a, b) {
+  if (!a || !b) return 0;
+  const dx = (b.x ?? 0) - (a.x ?? 0);
+  const dy = (b.y ?? 0) - (a.y ?? 0);
+  return Math.hypot(dx, dy);
+}
+
+function segmentSide(a, b, point, epsilon = 1e-4) {
+  if (!a || !b || !point) return 0;
+  const ax = a.x ?? 0;
+  const ay = a.y ?? 0;
+  const bx = b.x ?? 0;
+  const by = b.y ?? 0;
+  const px = point.x ?? 0;
+  const py = point.y ?? 0;
+  const cross = ((bx - ax) * (py - ay)) - ((by - ay) * (px - ax));
+  if (Math.abs(cross) <= epsilon) return 0;
+  return cross > 0 ? 1 : -1;
+}
+
+function sampleQuadraticBezier(start, control, end, segments = ARC_SAMPLE_MIN) {
+  const count = clampValue(Math.trunc(segments), ARC_SAMPLE_MIN, ARC_SAMPLE_MAX);
+  const points = [];
+  if (!start || !control || !end) return points;
+  for (let i = 0; i <= count; i += 1) {
+    const t = i / count;
+    const mt = 1 - t;
+    const x = (mt * mt * (start.x ?? 0))
+      + (2 * mt * t * (control.x ?? 0))
+      + (t * t * (end.x ?? 0));
+    const y = (mt * mt * (start.y ?? 0))
+      + (2 * mt * t * (control.y ?? 0))
+      + (t * t * (end.y ?? 0));
+    points.push({ x, y });
+  }
+  return points;
+}
+
+function dedupeSequentialPoints(points = [], epsilon = ARC_DUPLICATE_EPSILON) {
+  if (!Array.isArray(points) || points.length <= 1) return points;
+  const result = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = result[result.length - 1];
+    const current = points[i];
+    if (!pointsEqual(prev, current, epsilon)) result.push(current);
+  }
+  return result;
+}
+
+function resolveArcSnapStep() {
+  const grid = Number(canvas?.scene?.grid?.size || 0);
+  if (Number.isFinite(grid) && grid > 0) return grid;
+  return 200;
+}
+
+function getArcSampleCount(distance) {
+  const spacing = Math.max(6, ARC_SAMPLE_SPACING);
+  const estimate = Math.max(ARC_SAMPLE_MIN, Math.ceil(distance / spacing) * 2);
+  return clampValue(estimate, ARC_SAMPLE_MIN, ARC_SAMPLE_MAX);
+}
+
+function isQuarterAxisAligned(vec, tolerance) {
+  if (!vec) return false;
+  const alignedX = Math.abs(vec.x ?? 0) <= tolerance;
+  const alignedY = Math.abs(vec.y ?? 0) <= tolerance;
+  if (alignedX && alignedY) return false;
+  return alignedX || alignedY;
+}
+
+function resolveQuarterCircleCenters(startPoint, endPoint, controlPoint) {
+  if (!startPoint || !endPoint || !controlPoint) return [];
+  if (Math.abs((endPoint.x ?? 0) - (startPoint.x ?? 0)) <= ARC_DUPLICATE_EPSILON) return [];
+  if (Math.abs((endPoint.y ?? 0) - (startPoint.y ?? 0)) <= ARC_DUPLICATE_EPSILON) return [];
+  const snapStep = Math.abs(resolveArcSnapStep()) || 200;
+  const centerTolerance = Math.max(ARC_CIRCULAR_ALIGNMENT_MIN, snapStep * ARC_CIRCULAR_CENTER_RATIO);
+  const candidates = [
+    { x: startPoint.x, y: endPoint.y },
+    { x: endPoint.x, y: startPoint.y }
+  ];
+  const unique = [];
+  for (const candidate of candidates) {
+    if (!Number.isFinite(candidate.x) || !Number.isFinite(candidate.y)) continue;
+    const exists = unique.some((existing) => Math.abs(existing.x - candidate.x) <= ARC_DUPLICATE_EPSILON
+      && Math.abs(existing.y - candidate.y) <= ARC_DUPLICATE_EPSILON);
+    if (!exists) unique.push(candidate);
+  }
+  const centers = [];
+  let hasPreferred = false;
+  unique.forEach((center) => {
+    const distance = distanceBetween(center, controlPoint);
+    const preferred = Number.isFinite(distance) && distance <= centerTolerance;
+    const weight = preferred ? distance : distance + centerTolerance;
+    centers.push({ center, weight, preferred });
+    if (preferred) hasPreferred = true;
+  });
+  if (!hasPreferred) return [];
+  centers.sort((a, b) => (a.weight ?? 0) - (b.weight ?? 0));
+  return centers;
+}
+
+function resolveArcOrientationFromControl(startPoint, endPoint, controlPoint, prevPoint) {
+  const chord = {
+    x: (endPoint?.x ?? 0) - (startPoint?.x ?? 0),
+    y: (endPoint?.y ?? 0) - (startPoint?.y ?? 0)
+  };
+  const controlVec = controlPoint ? {
+    x: (controlPoint.x ?? 0) - (startPoint?.x ?? 0),
+    y: (controlPoint.y ?? 0) - (startPoint?.y ?? 0)
+  } : chord;
+  let cross = (controlVec.x * chord.y) - (controlVec.y * chord.x);
+  if (Math.abs(cross) <= 1e-6 && prevPoint) {
+    const prevVec = {
+      x: (startPoint?.x ?? 0) - (prevPoint?.x ?? 0),
+      y: (startPoint?.y ?? 0) - (prevPoint?.y ?? 0)
+    };
+    cross = (prevVec.x * chord.y) - (prevVec.y * chord.x);
+  }
+  if (Math.abs(cross) <= 1e-6) {
+    return chord.y >= 0 ? 1 : -1;
+  }
+  return cross >= 0 ? 1 : -1;
+}
+
+function buildCircularArcFromCenter(startPoint, endPoint, center, options = {}) {
+  if (!startPoint || !endPoint || !center) return null;
+  const snapStep = Math.abs(resolveArcSnapStep()) || 200;
+  const axisTolerance = Math.max(ARC_CIRCULAR_ALIGNMENT_MIN, snapStep * ARC_CIRCULAR_ALIGNMENT_RATIO);
+  const startVec = {
+    x: (startPoint.x ?? 0) - (center.x ?? 0),
+    y: (startPoint.y ?? 0) - (center.y ?? 0)
+  };
+  const endVec = {
+    x: (endPoint.x ?? 0) - (center.x ?? 0),
+    y: (endPoint.y ?? 0) - (center.y ?? 0)
+  };
+  if (!isQuarterAxisAligned(startVec, axisTolerance)) return null;
+  if (!isQuarterAxisAligned(endVec, axisTolerance)) return null;
+
+  const startRadius = Math.hypot(startVec.x, startVec.y);
+  const endRadius = Math.hypot(endVec.x, endVec.y);
+  if (!Number.isFinite(startRadius) || !Number.isFinite(endRadius)) return null;
+  if (startRadius <= axisTolerance || endRadius <= axisTolerance) return null;
+  if (Math.abs(startRadius - endRadius) > axisTolerance) return null;
+  const radius = (startRadius + endRadius) / 2;
+
+  const dot = (startVec.x * endVec.x) + (startVec.y * endVec.y);
+  const dotTolerance = Math.max(1, radius * radius * ARC_CIRCULAR_DOT_RATIO);
+  if (Math.abs(dot) > dotTolerance) return null;
+  const cross = (startVec.x * endVec.y) - (startVec.y * endVec.x);
+  if (Math.abs(cross) <= dotTolerance) return null;
+  const orientation = cross >= 0 ? 1 : -1;
+
+  let startAngle = Math.atan2(startVec.y, startVec.x);
+  let endAngle = Math.atan2(endVec.y, endVec.x);
+  let delta = endAngle - startAngle;
+  if (orientation > 0 && delta < 0) delta += TAU;
+  if (orientation < 0 && delta > 0) delta -= TAU;
+  const angleDelta = Math.abs(delta);
+  const angleTolerance = Math.max(ARC_CIRCULAR_ANGLE_EPSILON, angleDelta * 0.05);
+  if (Math.abs(angleDelta - RIGHT_ANGLE) > angleTolerance) return null;
+
+  const segments = clampValue(Math.trunc(options?.segments ?? ARC_SAMPLE_MIN), ARC_SAMPLE_MIN, ARC_SAMPLE_MAX);
+  const step = delta / segments;
+  const points = [];
+  for (let i = 0; i <= segments; i += 1) {
+    const theta = startAngle + (step * i);
+    points.push({
+      x: Number(((center.x ?? 0) + (Math.cos(theta) * radius)).toFixed(3)),
+      y: Number(((center.y ?? 0) + (Math.sin(theta) * radius)).toFixed(3))
+    });
+  }
+  const samples = dedupeSequentialPoints(points);
+  if (!samples.length) return null;
+  samples[0] = { x: startPoint.x, y: startPoint.y };
+  samples[samples.length - 1] = { x: endPoint.x, y: endPoint.y };
+  return { points: samples, mode: 'circular', orientation };
+}
+
+function buildCircularArcPoints(startPoint, endPoint, controlPoint, options = {}) {
+  if (!startPoint || !endPoint || !controlPoint) return null;
+  const centers = resolveQuarterCircleCenters(startPoint, endPoint, controlPoint);
+  if (!centers.length) return null;
+  const desiredSide = segmentSide(startPoint, endPoint, options.sourceControlPoint || controlPoint);
+  let fallback = null;
+  for (const candidate of centers) {
+    const arc = buildCircularArcFromCenter(startPoint, endPoint, candidate.center, options);
+    if (!arc) continue;
+    const midSample = arc.points[Math.floor(arc.points.length / 2)] || arc.points[0];
+    const arcSide = segmentSide(startPoint, endPoint, midSample);
+    if (desiredSide && arcSide && desiredSide === arcSide) {
+      return arc;
+    }
+    if (!fallback || candidate.weight < fallback.weight) {
+      fallback = { arc, weight: candidate.weight };
+    }
+  }
+  return fallback?.arc ?? null;
+}
+
+function buildEllipticalArcPoints(startPoint, endPoint, controlPoint, options = {}) {
+  if (!startPoint || !endPoint || !controlPoint) return null;
+
+  const cx = controlPoint.x;
+  const cy = controlPoint.y;
+  const u = { x: startPoint.x - cx, y: startPoint.y - cy };
+  const v = { x: endPoint.x - cx, y: endPoint.y - cy };
+
+  const dot = (u.x * v.x) + (u.y * v.y);
+  const magU = Math.hypot(u.x, u.y);
+  const magV = Math.hypot(v.x, v.y);
+  if (magU < 1 || magV < 1) return null;
+
+  const cosTheta = dot / (magU * magV);
+  if (Math.abs(cosTheta) > 0.02) return null;
+
+  const center = {
+    x: startPoint.x + v.x,
+    y: startPoint.y + v.y
+  };
+
+  const segments = clampValue(Math.trunc(options?.segments ?? ARC_SAMPLE_MIN), ARC_SAMPLE_MIN, ARC_SAMPLE_MAX);
+  const points = [];
+  const axis1 = { x: startPoint.x - center.x, y: startPoint.y - center.y };
+  const axis2 = { x: endPoint.x - center.x, y: endPoint.y - center.y };
+
+  for (let i = 0; i <= segments; i++) {
+    const t = (i / segments) * (Math.PI / 2);
+    const ct = Math.cos(t);
+    const st = Math.sin(t);
+    points.push({
+      x: center.x + axis1.x * ct + axis2.x * st,
+      y: center.y + axis1.y * ct + axis2.y * st
+    });
+  }
+
+  const samples = dedupeSequentialPoints(points);
+  if (!samples.length) return null;
+  samples[0] = { x: startPoint.x, y: startPoint.y };
+  samples[samples.length - 1] = { x: endPoint.x, y: endPoint.y };
+
+  const orientation = resolveArcOrientationFromControl(startPoint, endPoint, controlPoint, options.prevPoint);
+  return { points: samples, mode: 'manual', orientation };
+}
+
+function buildArcSamplePoints(startPoint, endPoint, options = {}) {
+  if (!startPoint || !endPoint) return { points: [], mode: 'line', orientation: 0 };
+  const distance = distanceBetween(startPoint, endPoint);
+  if (distance <= ARC_DUPLICATE_EPSILON) {
+    return {
+      points: [
+        { x: startPoint.x, y: startPoint.y },
+        { x: endPoint.x, y: endPoint.y }
+      ],
+      mode: 'line',
+      orientation: 0
+    };
+  }
+  const segmentCount = getArcSampleCount(distance);
+  if (options.controlPoint) {
+    const circular = buildCircularArcPoints(startPoint, endPoint, options.controlPoint, {
+      prevPoint: options.prevPoint,
+      segments: segmentCount,
+      sourceControlPoint: options.controlPoint
+    });
+    if (circular) return circular;
+
+    const elliptical = buildEllipticalArcPoints(startPoint, endPoint, options.controlPoint, {
+      prevPoint: options.prevPoint,
+      segments: segmentCount
+    });
+    if (elliptical) return elliptical;
+
+    const bezierPoints = dedupeSequentialPoints(sampleQuadraticBezier(
+      startPoint,
+      options.controlPoint,
+      endPoint,
+      segmentCount
+    ));
+    if (bezierPoints.length) {
+      bezierPoints[0] = { x: startPoint.x, y: startPoint.y };
+      bezierPoints[bezierPoints.length - 1] = { x: endPoint.x, y: endPoint.y };
+    }
+    if (!bezierPoints.length) {
+      bezierPoints.push({ x: startPoint.x, y: startPoint.y });
+      bezierPoints.push({ x: endPoint.x, y: endPoint.y });
+    }
+    const orientation = resolveArcOrientationFromControl(startPoint, endPoint, options.controlPoint, options.prevPoint);
+    return { points: bezierPoints, mode: 'manual', orientation };
+  }
+  return {
+    points: [
+      { x: startPoint.x, y: startPoint.y },
+      { x: endPoint.x, y: endPoint.y }
+    ],
+    mode: 'line',
+    orientation: 0
+  };
+}
+
+function expandPolygonVertices(vertices = []) {
+  if (!Array.isArray(vertices) || !vertices.length) return [];
+  const points = [];
+  for (let i = 0; i < vertices.length; i += 1) {
+    const current = vertices[i];
+    const point = { x: Number(current?.x ?? 0), y: Number(current?.y ?? 0) };
+    if (i === 0) {
+      points.push(point);
+      continue;
+    }
+    const arc = current?.arc;
+    const controlX = Number.isFinite(arc?.controlX) ? Number(arc.controlX)
+      : (Number.isFinite(arc?.control?.x) ? Number(arc.control.x) : null);
+    const controlY = Number.isFinite(arc?.controlY) ? Number(arc.controlY)
+      : (Number.isFinite(arc?.control?.y) ? Number(arc.control.y) : null);
+    if (Number.isFinite(controlX) && Number.isFinite(controlY)) {
+      const prevPoint = vertices[i - 2] ? { x: Number(vertices[i - 2].x ?? 0), y: Number(vertices[i - 2].y ?? 0) } : null;
+      const arcResult = buildArcSamplePoints(
+        { x: Number(vertices[i - 1].x ?? 0), y: Number(vertices[i - 1].y ?? 0) },
+        point,
+        { controlPoint: { x: controlX, y: controlY }, prevPoint }
+      );
+      const samples = Array.isArray(arcResult?.points) ? arcResult.points : [];
+      if (samples.length) {
+        for (let j = 1; j < samples.length; j += 1) {
+          points.push({ x: samples[j].x, y: samples[j].y });
+        }
+        continue;
+      }
+    }
+    points.push(point);
+  }
+  return points;
+}
+
+function hashString(value) {
+  const input = String(value ?? '');
+  let hash = 5381;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = ((hash << 5) + hash) + input.charCodeAt(i);
+    hash &= 0xffffffff;
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function isArrayMask(flags) {
+  return flags?.maskType === MASK_TYPE_ARRAY
+    && (Array.isArray(flags?.maskShapes) || Array.isArray(flags?.maskShapes?.shapes));
+}
+
+function getMaskShapeData(flags) {
+  const raw = flags?.maskShapes ?? null;
+  const shapes = Array.isArray(raw) ? raw : (Array.isArray(raw?.shapes) ? raw.shapes : []);
+  if (!shapes.length) return null;
+  const key = flags?.maskShapeKey || hashString(JSON.stringify(raw));
+  return { shapes, key };
+}
+
+function resolveMaskKey(flags) {
+  if (isArrayMask(flags)) {
+    const data = getMaskShapeData(flags);
+    return data?.key || null;
+  }
+  return flags?.maskSrc || null;
+}
+
+function buildMaskTextureFromShapes(shapes, width, height) {
+  try {
+    if (!Array.isArray(shapes) || !shapes.length) return null;
+    const renderer = canvas?.app?.renderer;
+    if (!renderer) return null;
+    const targetWidth = Math.max(2, Math.ceil(Number(width) || 2));
+    const targetHeight = Math.max(2, Math.ceil(Number(height) || 2));
+    const maxTex = getMaxTextureSize();
+    const rtWidth = Math.max(2, Math.min(targetWidth, maxTex));
+    const rtHeight = Math.max(2, Math.min(targetHeight, maxTex));
+    const scaleX = rtWidth / targetWidth;
+    const scaleY = rtHeight / targetHeight;
+    const useScale = scaleX !== 1 || scaleY !== 1;
+    const rt = PIXI.RenderTexture.create({
+      width: rtWidth,
+      height: rtHeight,
+      resolution: 1
+    });
+    const g = new PIXI.Graphics();
+    const container = useScale ? new PIXI.Container() : null;
+    if (container) {
+      container.scale.set(scaleX, scaleY);
+      container.addChild(g);
+    }
+    let first = true;
+    for (const shape of shapes) {
+      if (!shape || !shape.type) continue;
+      const blend = shape.operation === 'subtract' ? PIXI.BLEND_MODES.ERASE : PIXI.BLEND_MODES.NORMAL;
+      g.clear();
+      g.beginFill(0xFFFFFF, 1);
+      if (shape.type === 'rectangle') {
+        const x = Number(shape.x ?? shape?.topLeft?.x ?? 0);
+        const y = Number(shape.y ?? shape?.topLeft?.y ?? 0);
+        const w = Math.max(1, Number(shape.width ?? shape?.size?.width ?? 0));
+        const h = Math.max(1, Number(shape.height ?? shape?.size?.height ?? 0));
+        g.drawRect(x, y, w, h);
+      } else if (shape.type === 'ellipse') {
+        const cx = Number(shape.x ?? shape?.center?.x ?? 0);
+        const cy = Number(shape.y ?? shape?.center?.y ?? 0);
+        const rx = Math.max(0.5, Number(shape.radiusX ?? shape?.radius?.x ?? 0));
+        const ry = Math.max(0.5, Number(shape.radiusY ?? shape?.radius?.y ?? 0));
+        g.drawEllipse(cx, cy, rx, ry);
+      } else if (shape.type === 'polygon') {
+        const verts = Array.isArray(shape.vertices) ? shape.vertices : (Array.isArray(shape.points) ? shape.points : []);
+        const expanded = expandPolygonVertices(verts);
+        if (expanded.length >= 3) {
+          const coords = [];
+          for (const point of expanded) coords.push(point.x, point.y);
+          g.drawPolygon(coords);
+        }
+      }
+      g.endFill();
+      g.blendMode = blend;
+      renderer.render(container || g, { renderTexture: rt, clear: first });
+      first = false;
+    }
+    if (container) {
+      try { container.removeChild(g); } catch (_) {}
+      try { container.destroy({ children: false }); } catch (_) {}
+    }
+    g.destroy({ children: true });
+    if (!isTextureUsable(rt)) {
+      try { rt.destroy(true); } catch (_) {}
+      return null;
+    }
+    return rt;
+  } catch (_) {
+    return null;
+  }
 }
 
 export function getTransparentTextureSrc() {
@@ -379,6 +887,9 @@ export async function applyMaskedTilingToTile(tile) {
   try {
     if (!tile || !tile.document) return;
     const flags = tile.document.getFlag('fa-nexus', 'maskedTiling');
+    const arrayMask = isArrayMask(flags);
+    const solidColor = normalizeSolidColor(flags?.baseColor);
+    const solidTint = parseSolidColorTint(solidColor);
     const docAlphaRaw = Number(tile?.document?.alpha ?? 1);
     const docAlpha = Number.isFinite(docAlphaRaw) ? Math.min(1, Math.max(0, docAlphaRaw)) : 1;
 
@@ -408,7 +919,7 @@ export async function applyMaskedTilingToTile(tile) {
       } catch (_) {}
     };
 
-    if (!flags || !flags.baseSrc || !flags.maskSrc) {
+    if (!flags || (!flags.baseSrc && !solidColor) || (!flags.maskSrc && !arrayMask)) {
       cleanupOverlay();
       clearMaskedTileRetry(tile);
       return;
@@ -433,25 +944,35 @@ export async function applyMaskedTilingToTile(tile) {
       try { tile.visible = false; } catch (_) {}
     }
 
-    let baseTex = reuse?.baseTex || null;
-    let maskTex = reuse?.maskTex || null;
-    try {
-      if (!baseTex || !maskTex) {
-        baseTex = await loadTexture(flags.baseSrc);
-        maskTex = await loadTexture(flags.maskSrc);
-      }
-    } catch (texErr) {
-      try { Logger.warn('TextureRender.apply.loadFailed', { error: String(texErr?.message || texErr), tileId: tile?.document?.id }); } catch (_) {}
-      scheduleMaskedTileRetry(tile, applyMaskedTilingToTile);
-      return;
-    }
-
     const meshWidth = Number(mesh?.width);
     const meshHeight = Number(mesh?.height);
     const docWidth = Number(tile?.document?.width);
     const docHeight = Number(tile?.document?.height);
     const w = Math.max(2, Number.isFinite(docWidth) && docWidth > 0 ? docWidth : (Number.isFinite(meshWidth) && meshWidth > 0 ? meshWidth : 2));
     const h = Math.max(2, Number.isFinite(docHeight) && docHeight > 0 ? docHeight : (Number.isFinite(meshHeight) && meshHeight > 0 ? meshHeight : 2));
+    const maskData = arrayMask ? getMaskShapeData(flags) : null;
+
+    let baseTex = reuse?.baseTex || null;
+    let maskTex = reuse?.maskTex || null;
+    if (solidTint !== null) baseTex = getSolidColorTexture();
+    try {
+      if (!baseTex || !maskTex) {
+        baseTex = solidTint !== null ? getSolidColorTexture() : await loadTexture(flags.baseSrc);
+        if (arrayMask) {
+          maskTex = buildMaskTextureFromShapes(maskData?.shapes, w, h);
+          if (!maskTex) throw new Error('Mask shape render failed');
+        } else {
+          maskTex = await loadTexture(flags.maskSrc);
+        }
+      }
+    } catch (texErr) {
+      try { Logger.warn('TextureRender.apply.loadFailed', { error: String(texErr?.message || texErr), tileId: tile?.document?.id }); } catch (_) {}
+      scheduleMaskedTileRetry(tile, applyMaskedTilingToTile);
+      return;
+    }
+    if (!isTextureUsable(baseTex)) throw new Error('Base texture invalid');
+    if (!isTextureUsable(maskTex)) throw new Error('Mask texture invalid');
+    const maskKey = resolveMaskKey(flags);
 
     let container = mesh.faNexusMaskContainer;
     if (!container || container.destroyed) {
@@ -466,6 +987,7 @@ export async function applyMaskedTilingToTile(tile) {
       mesh.addChild(container);
       tile.faNexusMaskContainer = container;
     }
+    const previousMaskTex = container.faNexusMaskTexture || null;
 
     let maskSprite = container.faNexusMaskSprite || null;
     let tiling = container.faNexusTilingSprite || null;
@@ -525,6 +1047,7 @@ export async function applyMaskedTilingToTile(tile) {
         maskSprite.width = w;
         maskSprite.height = h;
       } catch (_) {}
+      try { tiling.tint = solidTint !== null ? solidTint : 0xFFFFFF; } catch (_) {}
     };
 
     refreshMaskPlacement();
@@ -539,8 +1062,12 @@ export async function applyMaskedTilingToTile(tile) {
     container.faNexusTilingSprite = tiling;
     container.faNexusMaskTexture = maskTex;
     container.faNexusBaseTexture = baseTex;
-    container.faNexusMaskSrc = flags.maskSrc;
+    container.faNexusMaskSrc = maskKey;
     container.faNexusBaseSrc = flags.baseSrc;
+
+    if (arrayMask && previousMaskTex && previousMaskTex !== maskTex) {
+      try { previousMaskTex.destroy(true); } catch (_) {}
+    }
 
     tiling.mask = maskSprite;
 
@@ -559,6 +1086,13 @@ export async function applyMaskedTilingToTile(tile) {
     try { mesh.faNexusMaskReady = true; } catch (_) {}
   } catch (error) {
     Logger.warn('TextureRender.apply.failed', String(error?.message || error));
+    try {
+      const cont = tile?.mesh?.faNexusMaskContainer || tile?.faNexusMaskContainer;
+      const invalid = cont && (!isTextureUsable(cont.faNexusBaseTexture) || !isTextureUsable(cont.faNexusMaskTexture));
+      if (invalid) {
+        if (tile) clearMaskedOverlaysOnDelete(tile);
+      }
+    } catch (_) {}
   } finally {
     if (hidePreview && wasVisible !== null) {
       try { tile.visible = wasVisible; } catch (_) {}
@@ -574,10 +1108,21 @@ function getReusableTextures(tile, flags) {
     if (!container) return null;
     const baseSrc = container.faNexusBaseSrc;
     const maskSrc = container.faNexusMaskSrc;
-    if (baseSrc === flags.baseSrc && maskSrc === flags.maskSrc) {
+    const maskTex = container.faNexusMaskTexture;
+    const expectedMask = resolveMaskKey(flags);
+    if (baseSrc === flags.baseSrc && maskSrc === expectedMask) {
+      if (!isTextureUsable(container.faNexusBaseTexture) || !isTextureUsable(maskTex)) return null;
+      if (isArrayMask(flags) && maskTex) {
+        const maxTex = getMaxTextureSize();
+        const texW = Number(maskTex?.baseTexture?.realWidth || maskTex?.width || 0);
+        const texH = Number(maskTex?.baseTexture?.realHeight || maskTex?.height || 0);
+        if ((Number.isFinite(texW) && texW > maxTex) || (Number.isFinite(texH) && texH > maxTex)) {
+          return null;
+        }
+      }
       return {
         baseTex: container.faNexusBaseTexture,
-        maskTex: container.faNexusMaskTexture,
+        maskTex,
         ready: !!mesh.faNexusMaskReady
       };
     }

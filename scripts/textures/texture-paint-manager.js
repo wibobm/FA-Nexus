@@ -20,6 +20,16 @@ export class TexturePaintManager {
     return !!this._delegate?.isActive;
   }
 
+  hasSessionChanges() {
+    if (!this._delegate?.isActive) return false;
+    try {
+      if (typeof this._delegate?.hasSessionChanges === 'function') {
+        return !!this._delegate.hasSessionChanges();
+      }
+    } catch (_) {}
+    return true;
+  }
+
   async _ensureDelegate() {
     if (this._delegate) {
       this._bindDelegate(this._delegate);
@@ -63,6 +73,7 @@ export class TexturePaintManager {
     let result;
     try {
       result = delegate.start?.(...args);
+      try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
       this._syncToolOptionsState({ suppressRender: false });
       toolOptionsController.activateTool('texture.paint', { label: 'Texture Painter' });
       this._beginToolWindowMonitor('texture.paint', delegate);
@@ -86,6 +97,7 @@ export class TexturePaintManager {
     let result;
     try {
       result = delegate.editTile(targetTile, options);
+      try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
       this._syncToolOptionsState({ suppressRender: false });
       toolOptionsController.activateTool('texture.paint', { label: 'Texture Painter' });
       this._beginToolWindowMonitor('texture.paint', delegate);
@@ -246,7 +258,7 @@ export class TexturePaintManager {
         'E to toggle erase mode.',
         'Ctrl/Cmd+Wheel adjusts brush size.',
         'Alt+Wheel changes tile elevation (Shift=coarse, Ctrl/Cmd=fine).',
-        'Press S to save the tile, ESC to exit.'
+        'Press S to commit the tile; ESC to cancel.'
       ],
       texturePaint: { available: false },
       textureOffset: { available: false },
@@ -271,8 +283,44 @@ export class TexturePaintManager {
           try { return fn.call(this._delegate, actionId); }
           catch (_) { return false; }
         },
+        handleEditorAction: (actionId) => {
+          const fn = this._delegate?.handleEditorAction;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, actionId); }
+          catch (_) { return false; }
+        },
         setTextureOpacity: (value, commit) => {
           const fn = this._delegate?.setTextureOpacity;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, value, commit); }
+          catch (_) { return false; }
+        },
+        setBrushSize: (value, commit) => {
+          const fn = this._delegate?.setBrushSize;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, value, commit); }
+          catch (_) { return false; }
+        },
+        setParticleSize: (value, commit) => {
+          const fn = this._delegate?.setParticleSize;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, value, commit); }
+          catch (_) { return false; }
+        },
+        setParticleDensity: (value, commit) => {
+          const fn = this._delegate?.setParticleDensity;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, value, commit); }
+          catch (_) { return false; }
+        },
+        setSprayDeviation: (value, commit) => {
+          const fn = this._delegate?.setSprayDeviation;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, value, commit); }
+          catch (_) { return false; }
+        },
+        setBrushSpacing: (value, commit) => {
+          const fn = this._delegate?.setBrushSpacing;
           if (typeof fn !== 'function') return false;
           try { return fn.call(this._delegate, value, commit); }
           catch (_) { return false; }
@@ -300,8 +348,36 @@ export class TexturePaintManager {
           if (typeof fn !== 'function') return false;
           try { return fn.call(this._delegate, value, commit); }
           catch (_) { return false; }
+        },
+        setHeightThreshold: (axis, value, commit) => {
+          const fn = this._delegate?.setHeightThreshold;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, axis, value, commit); }
+          catch (_) { return false; }
+        },
+        setHeightContrast: (value, commit) => {
+          const fn = this._delegate?.setHeightContrast;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, value, commit); }
+          catch (_) { return false; }
+        },
+        setHeightLift: (value, commit) => {
+          const fn = this._delegate?.setHeightLift;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate, value, commit); }
+          catch (_) { return false; }
+        },
+        toggleHeightMapCollapsed: () => {
+          const fn = this._delegate?.toggleHeightMapCollapsed;
+          if (typeof fn !== 'function') return false;
+          try { return fn.call(this._delegate); }
+          catch (_) { return false; }
         }
       };
+      const customToggles = this._delegate?.getCustomToggleHandlers?.();
+      if (customToggles && typeof customToggles === 'object') {
+        handlers.customToggles = customToggles;
+      }
       toolOptionsController.setToolOptions('texture.paint', {
         state: this._buildToolOptionsState(),
         handlers,

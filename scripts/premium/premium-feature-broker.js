@@ -153,7 +153,7 @@ export class PremiumFeatureBroker {
 
     this._ensureCompatibility(bundleId, descriptor);
 
-    Logger.info('PremiumFeatureBroker.bundle.fetch', { bundleId, expiresAt: descriptor.expiresAt });
+    Logger.info('PremiumFeatureBroker.bundle.fetch', { bundleId, bundleVersion: descriptor.version, fileVersion: descriptor.fileVersion, expiresAt: descriptor.expiresAt });
 
     const response = await fetch(descriptor.downloadUrl, { cache: 'no-store', signal: options.signal });
     if (!response.ok) {

@@ -31,6 +31,19 @@ export function ensurePremiumFeaturesRegistered() {
     })
   });
 
+  premiumFeatureBroker.registerFeature('path.edit.v2', {
+    entitlementKey: 'path.edit',
+    bundleId: 'path-editor-v2',
+    factory: (mod) => ({
+      create(app) {
+        if (typeof mod?.createPathManagerV2 === 'function') return mod.createPathManagerV2(app);
+        const Klass = mod?.PathManagerV2 || mod?.default;
+        if (typeof Klass !== 'function') throw new Error('Premium path v2 bundle missing PathManagerV2 export');
+        return new Klass(app);
+      }
+    })
+  });
+
   premiumFeatureBroker.registerFeature('building.edit', {
     entitlementKey: 'building.edit',
     bundleId: 'building-editor',

@@ -153,6 +153,10 @@ export class TokenSelectionHelper extends GridSelectionHelper {
           }
         } catch (_) {}
       }
+      // For local tokens, file_path is always available - use it as cachedLocalPath
+      if (!cachedLocalPath && String(item?.source || '').toLowerCase() === 'local' && item?.file_path) {
+        cachedLocalPath = item.file_path;
+      }
       const filename = item?.filename || card?.getAttribute?.('data-filename') || '';
       const filePathAttr = item?.file_path || card?.getAttribute?.('data-file-path') || '';
       const folderPathAttr = item?.path || card?.getAttribute?.('data-path') || '';
@@ -171,7 +175,7 @@ export class TokenSelectionHelper extends GridSelectionHelper {
         display_name: item?.display_name || card?.getAttribute?.('data-display-name') || '',
         grid_width: Number(item?.grid_width ?? card?.getAttribute?.('data-grid-w') ?? 1) || 1,
         grid_height: Number(item?.grid_height ?? card?.getAttribute?.('data-grid-h') ?? 1) || 1,
-        scale: Number(item?.scale ?? card?.getAttribute?.('data-scale') ?? 1) || 1,
+        scale: (() => { const s = item?.scale ?? card?.getAttribute?.('data-scale') ?? 1; return (typeof s === 'string' && s.endsWith('x')) ? (Number(s.replace('x', '')) || 1) : (Number(s) || 1); })(),
         color_variant: item?.color_variant ?? card?.getAttribute?.('data-variant') ?? null,
         base_name_no_variant: item?.base_name_no_variant || '',
         has_color_variant: !!item?.has_color_variant,
