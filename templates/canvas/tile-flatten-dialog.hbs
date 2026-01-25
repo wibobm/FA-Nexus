@@ -1,10 +1,25 @@
 <form class="fa-nexus-tile-flatten" autocomplete="off">
   <header class="fa-nexus-dialog-header">
-    <h2>Flatten {{tileCount}} tile{{#if pluralSuffix}}s{{/if}}</h2>
-    <p>Combine the selected tiles into a single WebP image while preserving FA Nexus metadata for future restoration.</p>
+    <h2>{{dialogTitle}}</h2>
+    <p data-dialog-description>{{dialogDescription}}</p>
   </header>
 
   <section class="fa-nexus-dialog-body">
+    {{#if isExport}}
+    <div class="form-group">
+      <label>Scene Action</label>
+      <label class="fa-nexus-checkbox-label" for="flatten-export-action-flatten">
+        <input id="flatten-export-action-flatten" type="radio" name="flatten-export-action" value="flatten" {{#if exportActionIsFlatten}}checked{{/if}} />
+        <span>Flatten scene into tiles</span>
+      </label>
+      <label class="fa-nexus-checkbox-label" for="flatten-export-action-export">
+        <input id="flatten-export-action-export" type="radio" name="flatten-export-action" value="export" {{#if exportActionIsExport}}checked{{/if}} />
+        <span>Export scene images</span>
+      </label>
+      <p class="hint" data-export-action-hint>{{exportActionHint}}</p>
+    </div>
+    {{/if}}
+
     <div class="form-group">
       <label for="flatten-ppi">Output Density (px per grid square)</label>
       <input id="flatten-ppi" type="number" min="50" max="1000" step="10" value="{{defaultPPI}}" />
@@ -17,25 +32,65 @@
       <p class="hint">Higher quality increases file size.</p>
     </div>
 
+    <div class="form-group">
+      <label for="flatten-padding-snap">Output Snap</label>
+      <select id="flatten-padding-snap">
+        <option value="none" {{#if snapNone}}selected{{/if}}>Off (natural padding)</option>
+        <option value="half" {{#if snapHalf}}selected{{/if}}>Round to half squares</option>
+        <option value="full" {{#if snapFull}}selected{{/if}}>Round to full squares</option>
+      </select>
+      <p class="hint">Rounds output tile bounds to grid increments for clean snapping.</p>
+    </div>
+
+    <div class="form-group">
+      <label for="flatten-padding-extra">
+        Padding Adjust (grid squares)
+        <span class="fa-nexus-range-value" data-padding-extra-value>{{defaultPaddingExtra}}</span>
+      </label>
+      <input id="flatten-padding-extra" type="range" min="-2" max="2" step="0.1" value="{{defaultPaddingExtra}}" />
+      <p class="hint">Positive adds padding; negative trims (may crop).</p>
+    </div>
+
+    {{#if isExport}}
+    <div class="form-group">
+      <label class="fa-nexus-checkbox-label" for="flatten-export-split">
+        <input id="flatten-export-split" type="checkbox" {{#if defaultExportSplitLayers}}checked{{/if}} />
+        <span>Split by scene foreground elevation</span>
+      </label>
+      <p class="hint" data-export-split-hint>{{exportSplitHint}}</p>
+    </div>
+
+    <div class="form-group">
+      <label class="fa-nexus-checkbox-label" for="flatten-export-chunk">
+        <input id="flatten-export-chunk" type="checkbox" {{#if defaultExportChunked}}checked{{/if}} />
+        <span>Enable auto chunking</span>
+      </label>
+      <p class="hint" data-export-chunk-hint></p>
+    </div>
+    {{/if}}
+
     <div class="fa-nexus-dialog-meta">
       <span class="meta-item">
         <i class="fas fa-layer-group"></i>
-        {{tileCount}} selected
+        {{#if isExport}}
+          {{tileCount}} tile{{#if pluralSuffix}}s{{/if}} in scene
+        {{else}}
+          {{tileCount}} selected
+        {{/if}}
       </span>
-      {{#if estimatedWidth}}
-        <span class="meta-item">
-          <i class="fas fa-image"></i>
-          ~{{estimatedWidth}} × {{estimatedHeight}} px
-        </span>
-      {{/if}}
+      <span class="meta-item" data-flatten-estimate {{#unless estimatedWidth}}hidden{{/unless}}>
+        <i class="fas fa-image"></i>
+        <span data-flatten-estimate-text>~{{estimatedWidth}} x {{estimatedHeight}} px</span>
+      </span>
     </div>
+
   </section>
 
   <footer class="fa-nexus-dialog-footer">
     <button type="button" class="btn" data-action="cancel">Cancel</button>
     <button type="submit" class="btn btn-primary" data-action="flatten">
-      <i class="fas fa-compress-arrows-alt"></i>
-      Flatten Tiles
+      <i class="fas {{submitIcon}}" data-submit-icon></i>
+      <span data-submit-label>{{submitLabel}}</span>
     </button>
   </footer>
 </form>

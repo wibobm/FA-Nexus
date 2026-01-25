@@ -214,6 +214,8 @@ export class ForgeIntegrationService {
       result = stripPrefixes(result, [lowerSource]);
     }
     while (result.startsWith('/')) result = result.slice(1);
+    try { result = decodeURI(result); }
+    catch (_) { try { result = decodeURIComponent(result); } catch (_) {} }
     return result;
   }
 

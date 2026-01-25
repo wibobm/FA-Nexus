@@ -4,6 +4,10 @@ import { premiumEntitlementsService } from '../premium/premium-entitlements-serv
 import { ensurePremiumFeaturesRegistered } from '../premium/premium-feature-registry.js';
 import { toolOptionsController } from '../core/tool-options-controller.js';
 
+const MODULE_ID = 'fa-nexus';
+const BUILDING_SUBTOOL_SETTING_KEY = 'buildingToolActiveSubtool';
+const BUILDING_SUBTOOL_IDS = new Set(['rectangle', 'ellipse', 'polygon', 'inner-wall']);
+
 const FEATURE_ID = 'building.edit';
 const TOOL_LABEL = 'Building Editor';
 
@@ -16,6 +20,8 @@ export class BuildingManager {
     this._toolMonitor = null;
     this._portalMode = false;
     this._onToolOptionsChange = null;
+    this._lastPersistedSubtool = null;
+    this._toolDefaultsPersistTimer = null;
   }
 
   /**
@@ -29,6 +35,17 @@ export class BuildingManager {
 
   get isActive() {
     return !!this._delegate?.isActive;
+  }
+
+  hasSessionChanges() {
+    const delegate = this._delegate;
+    if (!delegate?.isActive) return false;
+    try {
+      if (typeof delegate?.hasSessionChanges === 'function') {
+        return !!delegate.hasSessionChanges();
+      }
+    } catch (_) {}
+    return true;
   }
 
   get version() {
@@ -46,12 +63,18 @@ export class BuildingManager {
         delegate.setPortalMode(this._portalMode);
       }
       result = delegate.start?.(session);
+      try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
       // Sync tool options state BEFORE activating the tool to ensure the cached
       // state reflects the new session mode (e.g., 'inner' vs 'outer'). Otherwise,
       // activateTool would use stale cached state from the previous session.
-      this._syncToolOptionsState({ suppressRender: true });
+      this._syncToolOptionsState({
+        suppressRender: true,
+        suppressSubtoolPersistence: true,
+        suppressToolDefaultsPersistence: true
+      });
       toolOptionsController.activateTool(FEATURE_ID, { label: TOOL_LABEL });
       this._beginToolWindowMonitor(delegate);
+      this._restoreSubtoolPreference();
       if (result && typeof result.catch === 'function') {
         result.catch(() => {
           this._cancelToolWindowMonitor();
@@ -78,10 +101,15 @@ export class BuildingManager {
         delegate.setPortalMode(this._portalMode);
       }
       result = delegate.editTile(tileDocument, options);
+      try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
       // Sync tool options state BEFORE activating the tool to ensure the cached
       // state reflects the new session mode. Otherwise, activateTool would use
       // stale cached state from the previous session.
-      this._syncToolOptionsState({ suppressRender: true });
+      this._syncToolOptionsState({
+        suppressRender: true,
+        suppressSubtoolPersistence: true,
+        suppressToolDefaultsPersistence: true
+      });
       toolOptionsController.activateTool(FEATURE_ID, { label: TOOL_LABEL });
       this._beginToolWindowMonitor(delegate);
       if (result && typeof result.catch === 'function') {
@@ -182,10 +210,46 @@ export class BuildingManager {
     toolOptionsController.deactivateTool(FEATURE_ID);
     if (!this._delegate) return;
     try {
+      this._persistDelegateToolDefaults();
       return this._delegate.stop?.(...args);
     } catch (error) {
       Logger.warn?.('BuildingManager.stop.failed', { error: String(error?.message || error) });
       throw error;
+    }
+  }
+
+  async commitBuilding(options = {}) {
+    const delegate = this._delegate;
+    if (!delegate?.isActive) return null;
+    if (typeof delegate.commitBuilding !== 'function') {
+      Logger.warn?.('BuildingManager.commitBuilding.methodMissing', { options });
+      return null;
+    }
+    try {
+      return await delegate.commitBuilding(options);
+    } catch (error) {
+      Logger.warn?.('BuildingManager.commitBuilding.failed', { error: String(error?.message || error), options });
+      throw error;
+    }
+  }
+
+  async requestCancelSession(options = {}) {
+    const delegate = this._delegate;
+    if (!delegate?.isActive) return false;
+    if (typeof delegate.requestCancelSession === 'function') {
+      try {
+        return await delegate.requestCancelSession(options);
+      } catch (error) {
+        Logger.warn?.('BuildingManager.cancel.failed', { error: String(error?.message || error), options });
+        return false;
+      }
+    }
+    try {
+      this.stop?.(options);
+      return true;
+    } catch (error) {
+      Logger.warn?.('BuildingManager.cancel.failed', { error: String(error?.message || error), options });
+      return false;
     }
   }
 
@@ -347,7 +411,11 @@ export class BuildingManager {
     return { state, handlers };
   }
 
-  _syncToolOptionsState({ suppressRender = true } = {}) {
+  _syncToolOptionsState({
+    suppressRender = true,
+    suppressSubtoolPersistence = false,
+    suppressToolDefaultsPersistence = false
+  } = {}) {
     try {
       const descriptor = this._buildToolOptionsState();
       toolOptionsController.setToolOptions(FEATURE_ID, {
@@ -355,6 +423,8 @@ export class BuildingManager {
         handlers: descriptor.handlers,
         suppressRender
       });
+      this._persistSubtoolFromState(descriptor.state, { suppress: suppressSubtoolPersistence });
+      if (!suppressToolDefaultsPersistence) this._scheduleToolDefaultsPersist();
       // Notify callback listeners of state change
       if (typeof this._onToolOptionsChange === 'function') {
         try {
@@ -364,6 +434,71 @@ export class BuildingManager {
         }
       }
     } catch (_) {}
+  }
+
+  _persistDelegateToolDefaults() {
+    const delegate = this._delegate;
+    if (!delegate) return;
+    if (typeof delegate._persistToolDefaults !== 'function') return;
+    try { delegate._persistToolDefaults(); } catch (_) {}
+  }
+
+  _scheduleToolDefaultsPersist() {
+    if (!this._delegate?.isActive) return;
+    if (this._toolDefaultsPersistTimer) return;
+    this._toolDefaultsPersistTimer = setTimeout(() => {
+      this._toolDefaultsPersistTimer = null;
+      if (!this._delegate?.isActive) return;
+      this._persistDelegateToolDefaults();
+    }, 200);
+  }
+
+  _readSubtoolPreference() {
+    try {
+      const value = game?.settings?.get?.(MODULE_ID, BUILDING_SUBTOOL_SETTING_KEY);
+      const normalized = typeof value === 'string' ? value : '';
+      return BUILDING_SUBTOOL_IDS.has(normalized) ? normalized : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _persistSubtoolPreference(value) {
+    if (!value || !BUILDING_SUBTOOL_IDS.has(value)) return;
+    if (this._lastPersistedSubtool === value) return;
+    this._lastPersistedSubtool = value;
+    try { game?.settings?.set?.(MODULE_ID, BUILDING_SUBTOOL_SETTING_KEY, value); } catch (_) {}
+  }
+
+  _extractActiveSubtoolId(state) {
+    const toggles = Array.isArray(state?.subtoolToggles) ? state.subtoolToggles : [];
+    for (const toggle of toggles) {
+      if (!toggle || typeof toggle !== 'object') continue;
+      if (!toggle.enabled) continue;
+      const id = String(toggle.id || '');
+      if (BUILDING_SUBTOOL_IDS.has(id)) return id;
+    }
+    return null;
+  }
+
+  _persistSubtoolFromState(state, { suppress = false } = {}) {
+    if (suppress) return;
+    const active = this._extractActiveSubtoolId(state);
+    if (!active) return;
+    this._persistSubtoolPreference(active);
+  }
+
+  _restoreSubtoolPreference() {
+    if (this._portalMode) return;
+    const preferred = this._readSubtoolPreference();
+    if (!preferred) return;
+    this._lastPersistedSubtool = preferred;
+    const apply = () => {
+      if (!this._delegate?.isActive) return;
+      this.setActiveTool(preferred);
+    };
+    if (typeof queueMicrotask === 'function') queueMicrotask(apply);
+    else setTimeout(apply, 0);
   }
 }
 

@@ -9,7 +9,7 @@ const MODULE_ID = 'fa-nexus';
 const PATH_SUBTOOL_SETTING_KEY = 'pathToolActiveSubtool';
 const PATH_SUBTOOL_IDS = new Set(['curve', 'draw']);
 
-export class PathManager {
+export class PathManagerV2 {
   constructor(app) {
     this._app = app;
     this._delegate = null;
@@ -23,6 +23,16 @@ export class PathManager {
 
   get isActive() {
     return !!this._delegate?.isActive;
+  }
+
+  hasSessionChanges() {
+    if (!this._delegate?.isActive) return false;
+    try {
+      if (typeof this._delegate?.hasSessionChanges === 'function') {
+        return !!this._delegate.hasSessionChanges();
+      }
+    } catch (_) {}
+    return true;
   }
 
   get pathTension() {
@@ -39,20 +49,20 @@ export class PathManager {
     ensurePremiumFeaturesRegistered();
     if (this._loading) return this._loading;
     this._loading = (async () => {
-      const helper = await premiumFeatureBroker.resolve('path.edit');
+      const helper = await premiumFeatureBroker.resolve('path.edit.v2');
       let instance = null;
       if (helper?.create) instance = helper.create(this._app);
       else if (typeof helper === 'function') instance = new helper(this._app);
-      if (!instance) throw new Error('Premium path editor bundle missing PathManager implementation');
+      if (!instance) throw new Error('Premium path editor v2 bundle missing PathManager implementation');
       this._delegate = instance;
       try { instance.attachHost?.(this); }
       catch (_) {}
       try {
-        Logger.info?.('PathEditor.bundle.loaded', { version: instance?.version || '0.0.15' });
+        Logger.info?.('PathEditorV2.bundle.loaded', { version: instance?.version || '0.0.15' });
         const hooks = globalThis?.Hooks;
-        hooks?.callAll?.('fa-nexus-path-editor-loaded', { version: instance?.version || '0.0.15' });
+        hooks?.callAll?.('fa-nexus-path-editor-v2-loaded', { version: instance?.version || '0.0.15' });
       } catch (logError) {
-        Logger.warn?.('PathEditor.bundle.loaded.logFailed', String(logError?.message || logError));
+        Logger.warn?.('PathEditorV2.bundle.loaded.logFailed', String(logError?.message || logError));
       }
       return instance;
     })();
@@ -64,6 +74,7 @@ export class PathManager {
   }
 
   async start(...args) {
+    this._cancelPlacementSessions();
     const delegate = await this._ensureDelegate();
     let result;
     try {
@@ -74,13 +85,13 @@ export class PathManager {
         suppressSubtoolPersistence: true,
         suppressToolDefaultsPersistence: true
       });
-      toolOptionsController.activateTool('path.edit', { label: 'Path Editor' });
-      this._beginToolWindowMonitor('path.edit', delegate);
+      toolOptionsController.activateTool('path.edit.v2', { label: 'Path Editor v2' });
+      this._beginToolWindowMonitor('path.edit.v2', delegate);
       this._restoreSubtoolPreference();
       if (result && typeof result.catch === 'function') {
         result.catch(() => {
           this._cancelToolWindowMonitor();
-          toolOptionsController.deactivateTool('path.edit');
+          toolOptionsController.deactivateTool('path.edit.v2');
         });
       }
     } finally {
@@ -90,6 +101,7 @@ export class PathManager {
   }
 
   async editTile(targetTile, options = {}) {
+    this._cancelPlacementSessions();
     const delegate = await this._ensureDelegate();
     if (!delegate || typeof delegate.editTile !== 'function') {
       throw new Error('Installed path editor bundle does not support editing existing tiles.');
@@ -103,12 +115,12 @@ export class PathManager {
         suppressSubtoolPersistence: true,
         suppressToolDefaultsPersistence: true
       });
-      toolOptionsController.activateTool('path.edit', { label: 'Path Editor' });
-      this._beginToolWindowMonitor('path.edit', delegate);
+      toolOptionsController.activateTool('path.edit.v2', { label: 'Path Editor v2' });
+      this._beginToolWindowMonitor('path.edit.v2', delegate);
       if (result && typeof result.catch === 'function') {
         result.catch(() => {
           this._cancelToolWindowMonitor();
-          toolOptionsController.deactivateTool('path.edit');
+          toolOptionsController.deactivateTool('path.edit.v2');
         });
       }
     } finally {
@@ -120,14 +132,14 @@ export class PathManager {
   stop(...args) {
     this._cancelToolWindowMonitor();
     if (!this._delegate) {
-      toolOptionsController.deactivateTool('path.edit');
+      toolOptionsController.deactivateTool('path.edit.v2');
       return;
     }
     try {
       if (this._delegate?.isActive) this._persistDelegateToolDefaults();
       return this._delegate.stop?.(...args);
     } finally {
-      toolOptionsController.deactivateTool('path.edit');
+      toolOptionsController.deactivateTool('path.edit.v2');
     }
   }
 
@@ -146,7 +158,7 @@ export class PathManager {
     if (this._entitlementProbe) return this._entitlementProbe;
     const probe = (async () => {
       try {
-        await premiumFeatureBroker.require('path.edit', { revalidate: true, reason: 'path-edit:revalidate' });
+        await premiumFeatureBroker.require('path.edit.v2', { revalidate: true, reason: 'path-edit-v2:revalidate' });
       } catch (error) {
         this._handleEntitlementFailure(error);
       } finally {
@@ -170,7 +182,7 @@ export class PathManager {
       });
       return;
     }
-    const message = '🔐 Authentication expired - premium path editing has been disabled. Please reconnect Patreon.';
+    const message = '🔐 Authentication expired - premium path editing v2 has been disabled. Please reconnect Patreon.';
     if (this._isAuthFailure(error)) {
       try { premiumEntitlementsService?.clear?.({ reason: 'path-revalidate-failed' }); }
       catch (_) {}
@@ -181,7 +193,7 @@ export class PathManager {
       const fallback = `Unable to confirm premium access: ${error?.message || error}`;
       ui?.notifications?.error?.(fallback);
     }
-    try { Hooks?.callAll?.('fa-nexus-premium-auth-lost', { featureId: 'path.edit', error }); }
+    try { Hooks?.callAll?.('fa-nexus-premium-auth-lost', { featureId: 'path.edit.v2', error }); }
     catch (_) {}
   }
 
@@ -202,6 +214,27 @@ export class PathManager {
     } catch (_) {
       return false;
     }
+  }
+
+  _cancelPlacementSessions() {
+    try {
+      const tabs = this._app?._tabManager?.getTabs?.();
+      const assetsTab = tabs?.assets;
+      const activeTab = this._app?._tabManager?.getActiveTab?.();
+      const managers = [
+        assetsTab?.placementManager,
+        assetsTab?._placement,
+        assetsTab?._controller?.placementManager,
+        activeTab?.placementManager,
+        activeTab?._placement,
+        activeTab?._controller?.placementManager
+      ];
+      for (const manager of managers) {
+        if (manager?.cancelPlacement) {
+          try { manager.cancelPlacement('path-edit'); } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
 
   _beginToolWindowMonitor(toolId, delegate) {
@@ -252,9 +285,10 @@ export class PathManager {
       'LMB Drag existing points to adjust;',
       'Shift+LMB inserts along the path;',
       'Alt+LMB deletes the closest point.',
+      'Double-click ends the current path.',
       'Ctrl/Cmd+Wheel adjusts scale;',
       'Alt+Wheel changes elevation (Shift=coarse, Ctrl/Cmd=fine).',
-      'Press S to save the path; ESC to exit.'
+      'Press S to commit the path; ESC to cancel.'
     ];
     let delegateState = {};
     let handlers = {};
@@ -282,7 +316,7 @@ export class PathManager {
   } = {}) {
     try {
       const descriptor = this._buildToolOptionsState();
-      toolOptionsController.setToolOptions('path.edit', {
+      toolOptionsController.setToolOptions('path.edit.v2', {
         state: descriptor.state,
         handlers: descriptor.handlers,
         suppressRender
@@ -380,4 +414,4 @@ export class PathManager {
   }
 }
 
-export default PathManager;
+export default PathManagerV2;

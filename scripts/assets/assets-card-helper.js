@@ -190,6 +190,7 @@ export class AssetsTabCardHelper {
     const hasPattern = /(?:^|[_\-\s])\d+x\d+$/.test(filename.replace(/\.[^/.]+$/, ''));
     if (hasPattern) return false;
     const tab = this.tab;
+    if (tab?._isSolidTextureItem?.(item)) return false;
     const looksPath = filename.includes('path');
     const inTextures = tab._isTextureItem(item);
     const inPaths = tab._isPathsItem(item);
@@ -254,6 +255,11 @@ export class AssetsTabCardHelper {
     const tab = this.tab;
     const card = document.createElement('div');
     card.className = 'fa-nexus-card';
+    const isSolid = tab?._isSolidTextureItem?.(item);
+    if (isSolid) {
+      card.classList.add('fa-nexus-solid-texture');
+      card.title = item?.display_name || item?.filename || 'Solid Color';
+    }
     const filePath = tab._resolveFilePath(item);
     const folderPath = tab._resolveFolderPath(item);
     const cachedPath = item.cachedLocalPath || '';
@@ -291,9 +297,18 @@ export class AssetsTabCardHelper {
     const media = useVideo
       ? `<video src="${initialVideoSrc}" muted playsinline preload="metadata" style="max-width:100%;max-height:100%;object-fit:contain"></video>`
       : `<img alt="${item.filename || ''}" style="max-width:100%;max-height:100%;object-fit:contain"/>`;
+    const colorPicker = isSolid
+      ? `
+        <label class="fa-nexus-solid-color-picker" title="Pick solid color" aria-label="Pick solid color">
+          <input type="color" data-fa-nexus-solid-color-input aria-label="Pick solid color">
+          <i class="fas fa-palette"></i>
+        </label>
+      `
+      : '';
     card.innerHTML = `
-      <div class="thumb fa-nexus-thumb-placeholder">
+      <div class="thumb ${isSolid ? 'fa-nexus-solid-texture-thumb' : 'fa-nexus-thumb-placeholder'}">
         ${media}
+        ${colorPicker}
         <div class="fa-nexus-status-icon" title=""></div>
         <div class="fa-nexus-grid-size-tag"></div>
       </div>
@@ -301,8 +316,86 @@ export class AssetsTabCardHelper {
     return card;
   }
 
+  _mountSolidTextureCard(cardElement, item) {
+    const tab = this.tab;
+    const resolvedItem = tab?._getSolidTextureItem?.() || item;
+    if (!resolvedItem) return;
+    const thumb = cardElement.querySelector('.thumb');
+    const img = cardElement.querySelector('img');
+    const picker = cardElement.querySelector('.fa-nexus-solid-color-picker');
+    const input = cardElement.querySelector('[data-fa-nexus-solid-color-input]');
+    const color = resolvedItem.solidColor || tab?._getSolidTextureColor?.() || '#808080';
+    const url = resolvedItem.cachedLocalPath || resolvedItem.thumbnail_url || resolvedItem.url || '';
+
+    if (thumb) {
+      thumb.classList.remove('fa-nexus-thumb-placeholder');
+    }
+    cardElement.classList.add('fa-nexus-solid-texture');
+    cardElement.style.setProperty('--fa-nexus-solid-color', color);
+    if (img) {
+      img.src = url;
+      img.alt = resolvedItem.filename || 'Solid Color';
+    }
+    if (input) {
+      input.value = color;
+      if (!input._faNexusBound) {
+        const stop = (event) => event.stopPropagation();
+        if (picker && !picker._faNexusBound) {
+          picker.addEventListener('click', stop);
+          picker._faNexusBound = true;
+        }
+        input.addEventListener('click', stop);
+        input.addEventListener('pointerdown', stop);
+        input.addEventListener('change', (event) => {
+          stop(event);
+          const nextColor = event?.target?.value;
+          const normalized = tab?._setSolidTextureColor?.(nextColor) || nextColor || color;
+          const updatedItem = tab?._getSolidTextureItem?.() || resolvedItem;
+          const nextUrl = updatedItem.cachedLocalPath || updatedItem.thumbnail_url || updatedItem.url || url;
+          if (img && nextUrl) img.src = nextUrl;
+          cardElement.style.setProperty('--fa-nexus-solid-color', normalized);
+          cardElement.setAttribute('data-url', nextUrl);
+          input.value = normalized;
+          cardElement._assetItem = updatedItem;
+        });
+        input._faNexusBound = true;
+      }
+    }
+
+    try { cardElement.setAttribute('data-source', 'local'); } catch (_) {}
+    try { cardElement.setAttribute('data-tier', 'free'); } catch (_) {}
+    try { cardElement.setAttribute('data-media-type', 'image'); } catch (_) {}
+    if (url) {
+      try { cardElement.setAttribute('data-url', url); } catch (_) {}
+      try { cardElement.setAttribute('data-cached', 'true'); } catch (_) {}
+    }
+    if (resolvedItem.file_path) {
+      try { cardElement.setAttribute('data-file-path', resolvedItem.file_path); } catch (_) {}
+    }
+    if (resolvedItem.filename) {
+      try { cardElement.setAttribute('data-filename', resolvedItem.filename); } catch (_) {}
+    }
+    const size = Number(resolvedItem.width || 200) || 200;
+    try { cardElement.setAttribute('data-width', String(size)); } catch (_) {}
+    try { cardElement.setAttribute('data-height', String(size)); } catch (_) {}
+    try { cardElement.setAttribute('data-grid-w', String(resolvedItem.grid_width || 1)); } catch (_) {}
+    try { cardElement.setAttribute('data-grid-h', String(resolvedItem.grid_height || 1)); } catch (_) {}
+
+    this.updateCardGridBadge(cardElement, resolvedItem);
+    try { cardElement._assetItem = resolvedItem; } catch (_) {}
+
+    const key = tab._keyFromCard(cardElement);
+    const selected = key && tab._selection.selectedKeys.has(key);
+    tab._setCardSelectionUI(cardElement, !!selected);
+    cardElement.addEventListener('click', (ev) => this.handleAssetCardClick(ev, cardElement, resolvedItem));
+  }
+
   async mountCard(cardElement, item) {
     const tab = this.tab;
+    if (tab?._isSolidTextureItem?.(item)) {
+      this._mountSolidTextureCard(cardElement, item);
+      return;
+    }
     try {
       if (item && item.width != null) cardElement.setAttribute('data-width', String(item.width)); else cardElement.removeAttribute('data-width');
       if (item && item.height != null) cardElement.setAttribute('data-height', String(item.height)); else cardElement.removeAttribute('data-height');
@@ -573,6 +666,8 @@ export class AssetsTabCardHelper {
     }
 
     const filename = cardElement.getAttribute('data-filename') || item?.filename || '';
+    const isSolid = tab?._isSolidTextureItem?.(item);
+    let solidColor = null;
     const requestId = (this._textureRequestId = (this._textureRequestId || 0) + 1);
 
     let localPath = '';
@@ -596,10 +691,16 @@ export class AssetsTabCardHelper {
       return;
     }
 
-    localPath = await this.ensureLocalAssetForCard(cardElement, item, {
-      triggerEvent,
-      label: 'Preparing texture...'
-    });
+    if (isSolid) {
+      const solidItem = tab?._getSolidTextureItem?.() || item;
+      solidColor = solidItem?.solidColor || tab?._getSolidTextureColor?.() || null;
+      localPath = solidItem?.cachedLocalPath || solidItem?.thumbnail_url || solidItem?.url || '';
+    } else {
+      localPath = await this.ensureLocalAssetForCard(cardElement, item, {
+        triggerEvent,
+        label: 'Preparing texture...'
+      });
+    }
 
     if (requestId !== this._textureRequestId) {
       return;
@@ -612,7 +713,9 @@ export class AssetsTabCardHelper {
 
     const sanitizedName = filename ? filename.replace(/\.[^.]+$/, '') : 'masked-texture';
     try {
-      await texturePaint?.start?.(localPath, `masked-${sanitizedName}.webp`, { pointer: pointerCoords, pointerEvent: triggerEvent });
+      const startOptions = { pointer: pointerCoords, pointerEvent: triggerEvent };
+      if (solidColor) startOptions.solidColor = solidColor;
+      await texturePaint?.start?.(localPath, `masked-${sanitizedName}.webp`, startOptions);
     } catch (error) {
       Logger.warn('AssetsTab.texture.paint.start.failed', { error: String(error?.message || error) });
       if (this._isAuthFailure(error)) {
@@ -630,10 +733,12 @@ export class AssetsTabCardHelper {
   async handlePathCardClick(cardElement, item, triggerEvent = null) {
     const tab = this.tab;
     if (!cardElement) return;
-    if (!(await this._requirePremiumFeature('path.edit', { label: 'Path Editing' }))) return;
+    const featureId = 'path.edit.v2';
+    const label = 'Path Editing';
+    if (!(await this._requirePremiumFeature(featureId, { label }))) return;
     try { await tab._controller.ensureServices(); }
     catch (error) { Logger.warn('AssetsTab.paths.ensure.failed', { error: String(error?.message || error) }); }
-    const pathManager = tab.pathManager;
+    const pathManager = tab.pathManagerV2 || tab.pathManager;
     if (!pathManager) {
       Logger.warn('AssetsTab.paths.manager.unavailable');
       return;
@@ -688,12 +793,12 @@ export class AssetsTabCardHelper {
       Logger.warn('AssetsTab.path.manager.start.failed', { error: String(error?.message || error) });
       if (this._isAuthFailure(error)) {
         await this._handlePremiumAuthFailure(error, {
-          featureId: 'path.edit',
-          label: 'Path Editing',
+          featureId,
+          label,
           source: 'assets-card:path:start'
         });
       } else {
-        ui.notifications?.error?.(`Failed to start Path Editing: ${error?.message || error}`);
+        ui.notifications?.error?.(`Failed to start ${label}: ${error?.message || error}`);
       }
     }
   }

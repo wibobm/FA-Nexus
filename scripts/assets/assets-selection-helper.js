@@ -135,6 +135,12 @@ export class AssetsTabSelectionHelper extends GridSelectionHelper {
     if (!prepared.length) return;
     try { Logger.info('AssetsTab.place.selection.start', { total: prepared.length, lazy: true }); } catch (_) {}
     const placement = this.tab.placementManager;
+    if (placement?.updatePlacementAssets) {
+      try {
+        const updated = await placement.updatePlacementAssets(prepared);
+        if (updated) return;
+      } catch (_) {}
+    }
     try {
       placement?.startPlacementRandom?.(prepared, true);
     } catch (_) {

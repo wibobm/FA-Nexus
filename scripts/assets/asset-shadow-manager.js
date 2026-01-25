@@ -15,10 +15,17 @@ import {
 const SHADOW_BLUR_QUALITY_MIN = 3;
 const SHADOW_BLUR_QUALITY_STEP = 4;
 const SHADOW_BLUR_QUALITY_MAX = 9;
+const MODULE_ID = 'fa-nexus';
+const LAYER_HIDDEN_FLAG = 'layerHidden';
+const SCATTER_FLAG_KEY = 'assetScatter';
+const SCATTER_VERSION = 1;
 
 let _singleton = null;
 // Allow generous range so wall/window shadows can reuse wall shadow offsets (±5 grid @200px ≈ 1000px).
 const MAX_OFFSET_DISTANCE = 1200;
+const SCATTER_SHADOW_MAX_SPRITES = 60000;
+const SCATTER_SHADOW_MAX_INSTANCES = 8000;
+const SCATTER_SHADOW_MAX_DIMENSION = 4096;
 
 /**
  * Manages aggregated drop-shadow render layers for FA Nexus asset tiles.
@@ -35,6 +42,7 @@ export class AssetShadowManager {
     this._layers = new Map();
     this._tileIndex = new Map(); // tile id -> elevation key
     this._textureCache = new Map();
+    this._scatterShadowCache = new Map();
     this._rebuildTimers = new Map();
     this._renderer = null;
     this._hooksBound = false;
@@ -48,6 +56,9 @@ export class AssetShadowManager {
       offsetAngle: 135,
       debounce: 2
     };
+    this._rebuildSuspendCount = 0;
+    this._pendingRebuilds = new Set();
+    this._pendingRebuildImmediate = false;
     this._buildingShadowMaterial = null;
 
     this._bindHooks();
@@ -219,6 +230,7 @@ export class AssetShadowManager {
       const elevation = this._tileIndex.get(tileId);
       this._tileIndex.delete(tileId);
       this._suspendedTiles.delete(tileId);
+      this._clearScatterShadowCache(tileId);
       const layer = this._layers.get(elevation);
       if (!layer) return;
       layer.tiles.delete(tileId);
@@ -271,6 +283,28 @@ export class AssetShadowManager {
     }
   }
 
+  suspendRebuilds() {
+    this._rebuildSuspendCount += 1;
+  }
+
+  resumeRebuilds({ immediate = false } = {}) {
+    if (this._rebuildSuspendCount <= 0) return false;
+    this._rebuildSuspendCount -= 1;
+    if (this._rebuildSuspendCount > 0) return true;
+    if (!this._pendingRebuilds.size) {
+      this._pendingRebuildImmediate = false;
+      return true;
+    }
+    const pending = Array.from(this._pendingRebuilds);
+    this._pendingRebuilds.clear();
+    const runImmediate = !!immediate || this._pendingRebuildImmediate;
+    this._pendingRebuildImmediate = false;
+    for (const elevation of pending) {
+      this._scheduleRebuild(elevation, runImmediate);
+    }
+    return true;
+  }
+
   _scheduleRebuild(elevation, immediate = false) {
     const layer = this._layers.get(elevation);
     if (!layer || !canvas?.ready) return;
@@ -279,6 +313,11 @@ export class AssetShadowManager {
     if (handle) {
       try { clearTimeout(handle); } catch (_) {}
       this._rebuildTimers.delete(elevation);
+    }
+    if (this._rebuildSuspendCount > 0) {
+      this._pendingRebuilds.add(elevation);
+      if (immediate) this._pendingRebuildImmediate = true;
+      return;
     }
     const run = () => {
       this._rebuildTimers.delete(elevation);
@@ -432,6 +471,35 @@ export class AssetShadowManager {
                 tempDisplayObjects.push(mesh);
               }
             }
+            continue;
+          }
+
+          const scatterStamp = await this._getScatterShadowStamp(doc, cfg, scale, renderer);
+          if (scatterStamp?.texture) {
+            const tileX = Number(doc?.x) || 0;
+            const tileY = Number(doc?.y) || 0;
+            const docWidth = Math.max(1, Number(doc?.width || 0));
+            const docHeight = Math.max(1, Number(doc?.height || 0));
+            const stampScale = Number(scatterStamp.scale || scale) || scale;
+            const centerX = (tileX + (docWidth / 2) + Number(cfg?.offsetX || 0) - sr.x) * scale;
+            const centerY = (tileY + (docHeight / 2) + Number(cfg?.offsetY || 0) - sr.y) * scale;
+            const pivotX = ((docWidth / 2) - scatterStamp.bounds.x) * stampScale;
+            const pivotY = ((docHeight / 2) - scatterStamp.bounds.y) * stampScale;
+            const rotationDeg = Number(doc?.rotation || 0) * (Math.PI / 180);
+
+            const sprite = new PIXI.Sprite(scatterStamp.texture);
+            sprite.anchor.set(0, 0);
+            sprite.pivot.set(pivotX, pivotY);
+            sprite.position.set(centerX, centerY);
+            sprite.rotation = rotationDeg;
+            sprite.alpha = 1;
+            sprite.eventMode = 'none';
+            if (stampScale !== scale) {
+              const ratio = scale / stampScale;
+              sprite.scale.set(ratio, ratio);
+            }
+            drawContainer.addChild(sprite);
+            tempDisplayObjects.push(sprite);
             continue;
           }
 
@@ -640,8 +708,10 @@ export class AssetShadowManager {
   _resolveShadowPathDescriptors(doc) {
     const descriptors = [];
     try {
-      const pathDescriptor = this._resolvePathShadowDescriptorFromPath(doc);
-      if (pathDescriptor) descriptors.push(pathDescriptor);
+      const pathDescriptors = this._resolvePathShadowDescriptorsFromPath(doc);
+      if (Array.isArray(pathDescriptors) && pathDescriptors.length) {
+        descriptors.push(...pathDescriptors);
+      }
     } catch (_) {}
     try {
       const buildingDescriptors = this._resolveBuildingShadowDescriptors(doc);
@@ -652,15 +722,365 @@ export class AssetShadowManager {
     return descriptors;
   }
 
-  _resolvePathShadowDescriptorFromPath(doc) {
+  _readScatterPayload(doc) {
     try {
-      const pathFlags = doc?.getFlag?.('fa-nexus', 'path');
+      const direct = doc?.getFlag?.('fa-nexus', SCATTER_FLAG_KEY);
+      if (direct !== undefined) return direct;
+    } catch (_) {}
+    const flags = doc?.flags?.['fa-nexus'] || doc?._source?.flags?.['fa-nexus'];
+    return flags ? flags[SCATTER_FLAG_KEY] : null;
+  }
+
+  _resolveScatterInstances(doc) {
+    try {
+      const payload = this._readScatterPayload(doc);
+      if (!payload || typeof payload !== 'object') return [];
+      const version = Number(payload.version || SCATTER_VERSION);
+      if (version !== SCATTER_VERSION) return [];
+      const raw = Array.isArray(payload.instances) ? payload.instances : [];
+      if (!raw.length) return [];
+      return raw
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+          src: typeof entry.src === 'string' ? entry.src : '',
+          x: Number(entry.x) || 0,
+          y: Number(entry.y) || 0,
+          w: Math.max(1, Number(entry.w) || 0),
+          h: Math.max(1, Number(entry.h) || 0),
+          r: Number(entry.r) || 0,
+          flipH: !!entry.flipH,
+          flipV: !!entry.flipV
+        }))
+        .filter((entry) => entry.src);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  _buildScatterShadowSignature(instances, cfg, scale, extra = null) {
+    const dilation = Number(cfg?.dilation) || 0;
+    const safeScale = Number(scale) || 1;
+    const roundedDilation = Math.round(dilation * 1000) / 1000;
+    const roundedScale = Math.round(safeScale * 10000) / 10000;
+    try {
+      const payload = { d: roundedDilation, s: roundedScale, i: instances };
+      if (extra && typeof extra === 'object') {
+        Object.assign(payload, extra);
+      }
+      return JSON.stringify(payload);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  _getScatterShadowBounds(doc, instances) {
+    try {
+      const docWidth = Math.max(1, Number(doc?.width || 0));
+      const docHeight = Math.max(1, Number(doc?.height || 0));
+      if (Number.isFinite(docWidth) && Number.isFinite(docHeight) && docWidth > 0 && docHeight > 0) {
+        return {
+          minX: 0,
+          minY: 0,
+          maxX: docWidth,
+          maxY: docHeight,
+          width: docWidth,
+          height: docHeight
+        };
+      }
+    } catch (_) {}
+    return this._computeScatterBounds(instances);
+  }
+
+  _computeScatterShadowScale(baseScale, bounds) {
+    const safeScale = Number(baseScale) || 1;
+    const width = Math.max(1, Number(bounds?.width || 0));
+    const height = Math.max(1, Number(bounds?.height || 0));
+    if (!width || !height) return safeScale;
+    const pixelWidth = width * safeScale;
+    const pixelHeight = height * safeScale;
+    const maxDim = Math.max(pixelWidth, pixelHeight);
+    if (maxDim <= SCATTER_SHADOW_MAX_DIMENSION) return safeScale;
+    const factor = SCATTER_SHADOW_MAX_DIMENSION / maxDim;
+    return Math.max(0.01, safeScale * factor);
+  }
+
+  _computeScatterShadowInstanceLimit(offsetCount) {
+    const offsets = Math.max(1, Number(offsetCount) || 1);
+    const maxBySprites = Math.floor(SCATTER_SHADOW_MAX_SPRITES / offsets);
+    if (!Number.isFinite(maxBySprites) || maxBySprites <= 0) return 1;
+    return Math.max(1, Math.min(SCATTER_SHADOW_MAX_INSTANCES, maxBySprites));
+  }
+
+  _sampleScatterShadowInstances(instances, limit) {
+    if (!Array.isArray(instances)) return { instances: [], stride: 1 };
+    if (!Number.isFinite(limit) || limit <= 0 || instances.length <= limit) {
+      return { instances, stride: 1 };
+    }
+    const stride = Math.ceil(instances.length / limit);
+    const sampled = [];
+    for (let i = 0; i < instances.length; i += stride) {
+      sampled.push(instances[i]);
+    }
+    return { instances: sampled, stride };
+  }
+
+  _buildScatterDilationOffsets(radius, instanceCount = 0) {
+    const offsets = [{ x: 0, y: 0 }];
+    const r = Math.max(0, Number(radius || 0));
+    if (r < 0.5) return offsets;
+    let steps = 16;
+    if (instanceCount > 8000) steps = 6;
+    else if (instanceCount > 4000) steps = 8;
+    else if (instanceCount > 2000) steps = 12;
+    const full = Math.PI * 2;
+    for (let i = 0; i < steps; i += 1) {
+      const angle = (full * i) / steps;
+      offsets.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
+    }
+    const inner = r * 0.55;
+    if (inner >= 0.5 && steps >= 8) {
+      const innerSteps = Math.max(4, Math.floor(steps * 0.75));
+      for (let i = 0; i < innerSteps; i += 1) {
+        const angle = (full * i) / innerSteps + (full / (innerSteps * 2));
+        offsets.push({ x: Math.cos(angle) * inner, y: Math.sin(angle) * inner });
+      }
+    }
+    return offsets;
+  }
+
+  _computeScatterInstanceBounds(instance) {
+    const cx = Number(instance?.x) || 0;
+    const cy = Number(instance?.y) || 0;
+    const hw = Math.max(1, Number(instance?.w) || 0) / 2;
+    const hh = Math.max(1, Number(instance?.h) || 0) / 2;
+    const rot = ((Number(instance?.r) || 0) * Math.PI) / 180;
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const corners = [
+      { x: -hw, y: -hh },
+      { x: hw, y: -hh },
+      { x: hw, y: hh },
+      { x: -hw, y: hh }
+    ];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const corner of corners) {
+      const x = cx + corner.x * cos - corner.y * sin;
+      const y = cy + corner.x * sin + corner.y * cos;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  _computeScatterBounds(instances) {
+    if (!Array.isArray(instances) || !instances.length) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const instance of instances) {
+      if (!instance) continue;
+      const bounds = this._computeScatterInstanceBounds(instance);
+      if (!bounds) continue;
+      if (bounds.minX < minX) minX = bounds.minX;
+      if (bounds.minY < minY) minY = bounds.minY;
+      if (bounds.maxX > maxX) maxX = bounds.maxX;
+      if (bounds.maxY > maxY) maxY = bounds.maxY;
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: Math.max(1, maxX - minX),
+      height: Math.max(1, maxY - minY)
+    };
+  }
+
+  _clearScatterShadowCache(tileId = null) {
+    try {
+      if (!tileId) {
+        for (const entry of this._scatterShadowCache.values()) {
+          if (entry?.texture && !entry.texture.destroyed) {
+            try { entry.texture.destroy(true); } catch (_) {}
+          }
+        }
+        this._scatterShadowCache.clear();
+        return;
+      }
+      const entry = this._scatterShadowCache.get(tileId);
+      if (!entry) return;
+      if (entry.texture && !entry.texture.destroyed) {
+        try { entry.texture.destroy(true); } catch (_) {}
+      }
+      this._scatterShadowCache.delete(tileId);
+    } catch (_) {}
+  }
+
+  async _getScatterShadowStamp(doc, cfg, scale, renderer) {
+    try {
+      const tileId = doc?.id;
+      if (!tileId) return null;
+      if (!renderer) return null;
+      const instances = this._resolveScatterInstances(doc);
+      if (!instances.length) {
+        this._clearScatterShadowCache(tileId);
+        return null;
+      }
+
+      const bounds = this._getScatterShadowBounds(doc, instances);
+      if (!bounds) return null;
+
+      const renderScale = this._computeScatterShadowScale(scale, bounds);
+      const dilationRadius = Math.max(0, Number(cfg?.dilation || 0)) * renderScale;
+      const offsets = this._buildScatterDilationOffsets(dilationRadius, instances.length);
+      const instanceLimit = this._computeScatterShadowInstanceLimit(offsets.length);
+      const sample = this._sampleScatterShadowInstances(instances, instanceLimit);
+      const sampledInstances = sample.instances;
+
+      const signature = this._buildScatterShadowSignature(sampledInstances, cfg, renderScale, {
+        c: instances.length,
+        t: sample.stride,
+        w: Math.round(bounds.width || 0),
+        h: Math.round(bounds.height || 0)
+      });
+      const cached = this._scatterShadowCache.get(tileId);
+      if (cached && cached.signature === signature && cached.texture && !cached.texture.destroyed) {
+        return cached;
+      }
+      if (cached) this._clearScatterShadowCache(tileId);
+
+      const dilation = Math.max(0, Number(cfg?.dilation || 0));
+      const minX = bounds.minX - dilation;
+      const minY = bounds.minY - dilation;
+      const maxX = bounds.maxX + dilation;
+      const maxY = bounds.maxY + dilation;
+      const width = Math.max(1, maxX - minX);
+      const height = Math.max(1, maxY - minY);
+
+      const pixelWidth = Math.max(4, Math.ceil(width * renderScale));
+      const pixelHeight = Math.max(4, Math.ceil(height * renderScale));
+      if (!Number.isFinite(pixelWidth) || !Number.isFinite(pixelHeight)) return null;
+
+      const rt = PIXI.RenderTexture.create({
+        width: pixelWidth,
+        height: pixelHeight,
+        scaleMode: PIXI.SCALE_MODES.LINEAR
+      });
+
+      const drawContainer = new PIXI.Container();
+      const tempDisplayObjects = [];
+      const textureCache = new Map();
+      const getTexture = async (src) => {
+        if (!src) return null;
+        if (textureCache.has(src)) return textureCache.get(src);
+        const texture = await this._obtainTexture(src);
+        textureCache.set(src, texture);
+        return texture;
+      };
+
+      for (const instance of sampledInstances) {
+        const tex = await getTexture(instance.src);
+        if (!tex) continue;
+        const baseWidth = Math.max(1, Number(instance.w) || 0) * renderScale;
+        const baseHeight = Math.max(1, Number(instance.h) || 0) * renderScale;
+        const baseX = ((Number(instance.x) || 0) - minX) * renderScale;
+        const baseY = ((Number(instance.y) || 0) - minY) * renderScale;
+        const rotationDeg = Number(instance.r || 0) * (Math.PI / 180);
+
+        for (const offset of offsets) {
+          const sprite = new PIXI.Sprite(tex);
+          sprite.anchor.set(0.5, 0.5);
+          sprite.width = baseWidth;
+          sprite.height = baseHeight;
+          if (instance.flipH) sprite.scale.x *= -1;
+          if (instance.flipV) sprite.scale.y *= -1;
+          sprite.position.set(baseX + offset.x, baseY + offset.y);
+          sprite.rotation = rotationDeg;
+          sprite.alpha = 1;
+          sprite.eventMode = 'none';
+          drawContainer.addChild(sprite);
+          tempDisplayObjects.push(sprite);
+        }
+      }
+
+      if (!tempDisplayObjects.length) {
+        try { rt.destroy(true); } catch (_) {}
+        return null;
+      }
+
+      renderer.render(drawContainer, { renderTexture: rt, clear: true });
+
+      for (const displayObject of tempDisplayObjects) {
+        try { displayObject.destroy({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+      }
+      try { drawContainer.destroy({ children: false }); } catch (_) {}
+
+      const entry = {
+        signature,
+        texture: rt,
+        bounds: { x: minX, y: minY, width, height },
+        scale: renderScale
+      };
+      this._scatterShadowCache.set(tileId, entry);
+      return entry;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _resolvePathShadowDescriptorsFromPath(doc) {
+    const descriptors = [];
+    try {
+      const tileX = Number(doc?.x) || 0;
+      const tileY = Number(doc?.y) || 0;
+      const payloads = this._collectPathShadowPayloads(doc);
+      if (!payloads.length) return descriptors;
+      for (const pathFlags of payloads) {
+        const descriptor = this._resolvePathShadowDescriptorFromFlags(pathFlags, doc, tileX, tileY);
+        if (descriptor) descriptors.push(descriptor);
+      }
+    } catch (error) {
+      Logger.warn('AssetShadow.pathDescriptor.failed', String(error?.message || error));
+    }
+    return descriptors;
+  }
+
+  _collectPathShadowPayloads(doc) {
+    const readFlag = (key) => {
+      try {
+        const value = doc?.getFlag?.('fa-nexus', key);
+        if (value !== undefined) return value;
+      } catch (_) {}
+      const flags = doc?.flags?.['fa-nexus'] || doc?._source?.flags?.['fa-nexus'];
+      return flags ? flags[key] : null;
+    };
+    const annotate = (entry, kind) => ({ ...entry, _faNexusPathKind: kind });
+    const merged = readFlag('pathsV2');
+    if (merged && Array.isArray(merged.paths)) {
+      return merged.paths
+        .filter((entry) => entry && Array.isArray(entry.controlPoints))
+        .map((entry) => annotate(entry, 'v2'));
+    }
+    const v2 = readFlag('pathV2');
+    if (v2 && Array.isArray(v2.controlPoints)) return [annotate(v2, 'v2')];
+    const v1 = readFlag('path');
+    if (v1 && Array.isArray(v1.controlPoints)) return [annotate(v1, 'v1')];
+    return [];
+  }
+
+  _resolvePathShadowDescriptorFromFlags(pathFlags, doc, tileX, tileY) {
+    try {
       const shadow = pathFlags?.shadow;
       if (!shadow || !shadow.enabled) return null;
       const pointsRaw = Array.isArray(shadow.points) ? shadow.points : [];
       if (pointsRaw.length < PATH_MIN_POINTS) return null;
-      const tileX = Number(doc?.x) || 0;
-      const tileY = Number(doc?.y) || 0;
       const points = [];
       for (const raw of pointsRaw) {
         if (!raw) continue;
@@ -685,6 +1105,7 @@ export class AssetShadowManager {
       const pathWidth = baseWidth * shadowScale;
       const repeatBase = Math.max(1e-3, Number(pathFlags?.repeatSpacing) || baseWidth);
       const repeatSpacing = repeatBase * shadowScale;
+      const useVisibleRows = pathFlags?._faNexusPathKind === 'v2';
       const meshOptions = {
         textureOffset: {
           x: Number(pathFlags?.textureOffset?.x) || 0,
@@ -705,7 +1126,8 @@ export class AssetShadowManager {
         repeatSpacing,
         meshOptions,
         bounds,
-        textureSrc
+        textureSrc,
+        useVisibleRows
       };
     } catch (error) {
       Logger.warn('AssetShadow.pathDescriptor.failed', String(error?.message || error));
@@ -967,12 +1389,20 @@ export class AssetShadowManager {
       if (!descriptor || !Array.isArray(descriptor.samples) || !descriptor.samples.length) return null;
       const texture = await this._obtainPathShadowTexture(descriptor.textureSrc);
       if (!texture) return null;
+      const meshOptions = descriptor.meshOptions ? { ...descriptor.meshOptions } : {};
+      if (descriptor.useVisibleRows) {
+        const visibleData = descriptor.visibleData || texture._cachedVisibleData || this._detectTextureVisibleRows(texture);
+        if (visibleData) {
+          texture._cachedVisibleData = visibleData;
+          meshOptions.visibleData = visibleData;
+        }
+      }
       const mesh = createPathMesh(
         descriptor.samples,
         descriptor.width,
         descriptor.repeatSpacing,
         texture,
-        descriptor.meshOptions || {}
+        meshOptions
       );
       if (!mesh) return null;
       mesh.eventMode = 'none';
@@ -1229,6 +1659,7 @@ export class AssetShadowManager {
     }
     this._layers.clear();
     this._tileIndex.clear();
+    this._clearScatterShadowCache();
   }
 
   _destroyLayer(elevation) {
@@ -1261,10 +1692,21 @@ export class AssetShadowManager {
 
   _isShadowTile(doc) {
     try {
-      return !!doc?.getFlag?.('fa-nexus', 'shadow');
+      const hidden = doc?.hidden ?? doc?._source?.hidden;
+      if (hidden && !game?.user?.isGM) return false;
+      const alpha = Number(doc?.alpha ?? 1);
+      if (Number.isFinite(alpha) && alpha <= 0) return false;
+      if (doc?.getFlag?.(MODULE_ID, LAYER_HIDDEN_FLAG)) return false;
+      return !!doc?.getFlag?.(MODULE_ID, 'shadow');
     } catch (_) {
-      const flags = doc?.flags;
-      return !!(flags && flags['fa-nexus'] && flags['fa-nexus'].shadow);
+      const hidden = doc?._source?.hidden;
+      if (hidden && !game?.user?.isGM) return false;
+      const flags = doc?.flags?.[MODULE_ID] || doc?._source?.flags?.[MODULE_ID];
+      if (!flags) return false;
+      if (flags[LAYER_HIDDEN_FLAG]) return false;
+      const alpha = Number(doc?.alpha ?? 1);
+      if (Number.isFinite(alpha) && alpha <= 0) return false;
+      return !!flags.shadow;
     }
   }
 

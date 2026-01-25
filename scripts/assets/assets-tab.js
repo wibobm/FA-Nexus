@@ -15,6 +15,35 @@ import { AssetsTabSelectionHelper } from './assets-selection-helper.js';
 import { AssetsTabProbeHelper } from './assets-probe-helper.js';
 import { AssetsTabCardHelper } from './assets-card-helper.js';
 
+const SOLID_TEXTURE_ITEM_ID = '__fa-nexus-solid-color';
+const SOLID_TEXTURE_DEFAULT_COLOR = '#808080';
+const SOLID_TEXTURE_SIZE = 200;
+
+const normalizeSolidTextureColor = (value) => {
+  if (typeof value !== 'string') return SOLID_TEXTURE_DEFAULT_COLOR;
+  const trimmed = value.trim();
+  const full = /^#([0-9a-f]{6})$/i.exec(trimmed);
+  if (full) return `#${full[1].toLowerCase()}`;
+  const short = /^#([0-9a-f]{3})$/i.exec(trimmed);
+  if (short) {
+    const [r, g, b] = short[1].split('');
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  return SOLID_TEXTURE_DEFAULT_COLOR;
+};
+
+const buildSolidTextureDataUrl = (color) => {
+  if (!globalThis?.document?.createElement) return '';
+  const canvas = document.createElement('canvas');
+  canvas.width = SOLID_TEXTURE_SIZE;
+  canvas.height = SOLID_TEXTURE_SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.fillStyle = normalizeSolidTextureColor(color);
+  ctx.fillRect(0, 0, SOLID_TEXTURE_SIZE, SOLID_TEXTURE_SIZE);
+  return canvas.toDataURL('image/png');
+};
+
 /**
  * AssetsTab
  * Local assets browser tab with virtualized grid, per‑tab search and thumbnail sizing,
@@ -39,6 +68,7 @@ export class AssetsTab extends GridBrowseTab {
     this._pendingProbeAfterThumbAdjust = false;
     this._deferredActivationTimeout = null;
     this._needsReload = false;
+    this._didDeactivate = false;
     this._dropShadowUpdateHandler = null;
     const requestedMode = String(options?.mode || 'assets').toLowerCase();
     this._mode = ['textures', 'paths'].includes(requestedMode) ? requestedMode : 'assets';
@@ -50,6 +80,7 @@ export class AssetsTab extends GridBrowseTab {
       tree: createEmptyFolderTreeIndex(),
       version: 0
     };
+    this._solidTextureItem = null;
   }
 
   get id() { return this._mode; }
@@ -70,6 +101,10 @@ export class AssetsTab extends GridBrowseTab {
 
   get pathManager() {
     return this._controller?.pathManager || this._pathManager || null;
+  }
+
+  get pathManagerV2() {
+    return this._controller?.pathManagerV2 || this._pathManagerV2 || null;
   }
 
   get contentService() {
@@ -258,6 +293,7 @@ export class AssetsTab extends GridBrowseTab {
   async onActivate() {
     Logger.info('AssetsTab.onActivate:start', { tab: this.id, hasItems: !!(this._items && this._items.length) });
     const app = this.app;
+    this._didDeactivate = false;
 
     await this._controller.ensureServices();
 
@@ -382,19 +418,64 @@ export class AssetsTab extends GridBrowseTab {
       try { this.app?.updateFolderFilterSelection?.(this.id, this._activeFolderSelection); } catch (_) {}
     }
     this._updateDropShadowControl();
+    try {
+      queueMicrotask(() => {
+        if (!this.app || this.app._activeTab !== this.id) return;
+        this._refreshSelectionUIInView();
+      });
+    } catch (_) {}
   }
 
   /** Cleanup listeners and transient UI when leaving the tab */
   onDeactivate() {
+    if (this._didDeactivate) return;
+    this._didDeactivate = true;
     if (this._deferredActivationTimeout) {
       try { clearTimeout(this._deferredActivationTimeout); } catch (_) {}
       this._deferredActivationTimeout = null;
     }
     this._cancelInFlight('deactivate');
     if (this.isTexturesMode) {
-      try { this.texturePaintManager?.stop?.(); } catch (_) {}
+      try {
+        if (this.texturePaintManager?.isActive) {
+          const hasChanges = typeof this.texturePaintManager?.hasSessionChanges === 'function'
+            ? this.texturePaintManager.hasSessionChanges()
+            : true;
+          if (hasChanges) {
+            const result = this.texturePaintManager?.save?.();
+            if (result?.catch) result.catch(() => {});
+          } else {
+            this.texturePaintManager?.stop?.({ reason: 'tab-deactivate' });
+          }
+        }
+      } catch (_) {}
     } else if (this.isPathsMode) {
-      try { this.pathManager?.stop?.(); } catch (_) {}
+      try {
+        if (this.pathManagerV2?.isActive) {
+          const hasChanges = typeof this.pathManagerV2?.hasSessionChanges === 'function'
+            ? this.pathManagerV2.hasSessionChanges()
+            : true;
+          if (hasChanges) {
+            const result = this.pathManagerV2?.savePath?.() ?? this.pathManagerV2?.save?.();
+            if (result?.catch) result.catch(() => {});
+          } else {
+            this.pathManagerV2?.stop?.({ reason: 'tab-deactivate' });
+          }
+        }
+      } catch (_) {}
+      try {
+        if (this.pathManager?.isActive) {
+          const hasChanges = typeof this.pathManager?.hasSessionChanges === 'function'
+            ? this.pathManager.hasSessionChanges()
+            : true;
+          if (hasChanges) {
+            const result = this.pathManager?.save?.();
+            if (result?.catch) result.catch(() => {});
+          } else {
+            this.pathManager?.stop?.({ reason: 'tab-deactivate' });
+          }
+        }
+      } catch (_) {}
     } else {
       // Cancel any active placement when leaving assets tab
       try { this.placementManager?.cancelPlacement?.('tab-switch'); } catch (_) {}
@@ -402,6 +483,10 @@ export class AssetsTab extends GridBrowseTab {
         if (this._placementCancelHandler) {
           this.app?.element?.removeEventListener?.('fa-nexus:placement-cancelled', this._placementCancelHandler);
         }
+      } catch (_) {}
+      try {
+        this._selection?.clearSelection?.();
+        this._refreshSelectionUIInView?.();
       } catch (_) {}
     }
     try {
@@ -744,7 +829,14 @@ export class AssetsTab extends GridBrowseTab {
       actual_width: it?.actual_width || widthPx,
       actual_height: it?.actual_height || heightPx
     };
-    try { this.placementManager?.startPlacement(assetData, isStickyMode, { pointerEvent }); } catch (_) {}
+    const placement = this.placementManager;
+    if (placement?.updatePlacementAssets) {
+      try {
+        const updated = await placement.updatePlacementAssets(assetData, { pointerEvent });
+        if (updated) return;
+      } catch (_) {}
+    }
+    try { placement?.startPlacement?.(assetData, isStickyMode, { pointerEvent }); } catch (_) {}
   }
 
   async _handleTextureCardClick(cardElement, item) {
@@ -803,6 +895,87 @@ export class AssetsTab extends GridBrowseTab {
     if (folder && filename) return `${folder.replace(/\/$/, '')}/${filename}`;
     if (!folder && filename) return filename;
     return folder || '';
+  }
+
+  _isSolidTextureItem(item) {
+    return !!(item && (item.isSolidTexture || item.id === SOLID_TEXTURE_ITEM_ID));
+  }
+
+  _getSolidTextureColor() {
+    try {
+      const stored = game?.settings?.get?.('fa-nexus', 'solidTextureColor');
+      return normalizeSolidTextureColor(stored);
+    } catch (_) {
+      return SOLID_TEXTURE_DEFAULT_COLOR;
+    }
+  }
+
+  _setSolidTextureColor(value) {
+    const normalized = normalizeSolidTextureColor(value);
+    if (this._solidTextureItem && this._solidTextureItem.solidColor !== normalized) {
+      this._applySolidTextureColor(this._solidTextureItem, normalized);
+    }
+    try {
+      const result = game?.settings?.set?.('fa-nexus', 'solidTextureColor', normalized);
+      if (result?.catch) result.catch(() => {});
+    } catch (_) {}
+    return normalized;
+  }
+
+  _applySolidTextureColor(item, color) {
+    if (!item) return null;
+    const normalized = normalizeSolidTextureColor(color);
+    const dataUrl = buildSolidTextureDataUrl(normalized);
+    item.solidColor = normalized;
+    item.cachedLocalPath = dataUrl;
+    item.thumbnail_url = dataUrl;
+    item.url = dataUrl;
+    item.width = SOLID_TEXTURE_SIZE;
+    item.height = SOLID_TEXTURE_SIZE;
+    item.actual_width = SOLID_TEXTURE_SIZE;
+    item.actual_height = SOLID_TEXTURE_SIZE;
+    item.grid_width = 1;
+    item.grid_height = 1;
+    return item;
+  }
+
+  _getSolidTextureItem() {
+    const color = this._getSolidTextureColor();
+    if (!this._solidTextureItem) {
+      const item = {
+        id: SOLID_TEXTURE_ITEM_ID,
+        file_path: SOLID_TEXTURE_ITEM_ID,
+        path: '',
+        filename: 'Solid Color',
+        display_name: 'Solid Color',
+        source: 'local',
+        tier: 'free',
+        type: 'texture',
+        isSolidTexture: true,
+        tags: ['solid', 'color', 'paint']
+      };
+      this._solidTextureItem = this._applySolidTextureColor(item, color);
+    } else if (this._solidTextureItem.solidColor !== color) {
+      this._applySolidTextureColor(this._solidTextureItem, color);
+    }
+    return this._solidTextureItem;
+  }
+
+  _injectSolidTextureItem(items) {
+    if (!this.isTexturesMode) return items;
+    const list = Array.isArray(items) ? items : [];
+    const solidItem = this._getSolidTextureItem();
+    if (!solidItem) return list;
+    const index = list.findIndex((it) => this._isSolidTextureItem(it));
+    if (index === -1) {
+      list.unshift(solidItem);
+    } else if (index > 0) {
+      list.splice(index, 1);
+      list.unshift(solidItem);
+    } else if (list[0] !== solidItem) {
+      list[0] = solidItem;
+    }
+    return list;
   }
 
   _resolveFolderPath(item) {
@@ -909,10 +1082,13 @@ export class AssetsTab extends GridBrowseTab {
 
   _isTextureItem(item) {
     if (!item) return false;
+    if (this._isSolidTextureItem(item)) return true;
     const filePath = String(this._resolveFilePath(item) || '').toLowerCase();
     const folderPath = String(this._resolveFolderPath(item) || '').toLowerCase();
     if (/\/textures\//.test(filePath)) return true;
     if (/\/textures\//.test(folderPath)) return true;
+    if (/\/texture[_-]?overlays\//.test(filePath)) return true;
+    if (/\/texture[_-]?overlays\//.test(folderPath)) return true;
     return false;
   }
 

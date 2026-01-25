@@ -71,6 +71,7 @@ function isOffline() {
  * @param {number} options.initialDelay - Initial delay in ms
  * @param {number} options.maxDelay - Maximum delay in ms
  * @param {Function} options.onRetry - Callback before each retry
+ * @param {Function} options.shouldRetry - Predicate to skip retries for certain errors
  * @param {AbortSignal} options.signal - Abort signal
  * @returns {Promise}
  */
@@ -79,6 +80,7 @@ async function retryWithBackoff(fn, {
   initialDelay = 1000,
   maxDelay = 30000,
   onRetry,
+  shouldRetry,
   signal
 } = {}) {
   let lastError;
@@ -98,6 +100,10 @@ async function retryWithBackoff(fn, {
       lastError = error;
 
       if (error?.name === 'AbortError' || signal?.aborted) {
+        throw error;
+      }
+
+      if (typeof shouldRetry === 'function' && !shouldRetry(error)) {
         throw error;
       }
 
@@ -169,6 +175,10 @@ export class NexusContentService {
     this._authService = null;
     this._authServiceFactory = null;
     this._authDisconnectInFlight = false;
+    this._lastAuthFailureAt = 0;
+    this._authDisconnectCooldownMs = Number.isFinite(options.authDisconnectCooldownMs)
+      ? options.authDisconnectCooldownMs
+      : 15000;
     this.setAuthContext({ app: options.app, authService: options.authService });
   }
 
@@ -397,19 +407,39 @@ export class NexusContentService {
     }
 
     try {
+      const looksLikeAuthFailure = (status, payload, rawText) => {
+        if (status === 401 || status === 403) return true;
+        if (status !== 400) return false;
+        const hint = `${payload?.error || ''} ${payload?.message || ''} ${rawText || ''}`.trim();
+        if (!hint) return false;
+        return /auth|state|oauth|patreon|expired|mismatch|unauthor/i.test(hint);
+      };
+      const isAuthError = (error) => {
+        if (!error) return false;
+        const code = String(error?.code || error?.name || '').toUpperCase();
+        if (code && code.includes('AUTH')) return true;
+        const message = String(error?.message || error);
+        return message === 'AUTH' || /auth/i.test(message);
+      };
       const dl = this._downloadEndpoint(kind, p, state);
       const body = await retryWithBackoff(
         async () => {
           this.progressEmitter.emit('url:fetch', { kind, file_path: pRaw, url: dl });
           const res = await fetch(dl, { headers: { 'Accept': 'application/json' } });
-          if (res.status === 401 || res.status === 403) throw new Error('AUTH');
+          const rawText = await res.text();
+          let payload = null;
+          if (rawText) {
+            try { payload = JSON.parse(rawText); } catch (_) {}
+          }
+          if (looksLikeAuthFailure(res.status, payload, rawText)) throw new Error('AUTH');
           if (!res.ok) throw new Error(`Signed URL fetch failed (${res.status})`);
-          return res.json();
+          return payload;
         },
         {
           maxRetries: 2,
           initialDelay: 1000,
           maxDelay: 8000,
+          shouldRetry: (error) => !isAuthError(error),
           onRetry: ({ attempt, maxRetries, delay }) => {
             this.progressEmitter.emit('url:retry', { kind, file_path: pRaw, attempt, maxRetries, delay });
             Logger.info('ContentService.url.retry', { kind, file_path: pRaw, attempt, maxRetries, delay });
@@ -417,7 +447,7 @@ export class NexusContentService {
         }
       );
 
-      if (!body.success || !body.download_url) {
+      if (!body || !body.success || !body.download_url) {
         throw new Error('Signed URL fetch failed');
       }
 
@@ -508,6 +538,14 @@ export class NexusContentService {
   /** Handle premium auth failures by clearing cache and disconnecting */
   async _handleAuthFailure({ reason = 'AUTH', kind = null, source = null, message = null, notify = true } = {}) {
     if (this._authDisconnectInFlight) return;
+    const authData = this._readAuthData();
+    const hasAuth = !!(authData && authData.authenticated && authData.state);
+    if (!hasAuth) return;
+    const now = Date.now();
+    if (this._lastAuthFailureAt && (now - this._lastAuthFailureAt) < this._authDisconnectCooldownMs) {
+      return;
+    }
+    this._lastAuthFailureAt = now;
     this._authDisconnectInFlight = true;
     try {
       Logger.warn('ContentService.authDisconnect:start', { reason, kind, source });

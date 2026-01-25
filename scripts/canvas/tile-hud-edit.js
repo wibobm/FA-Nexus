@@ -29,7 +29,7 @@ function resolveTileDocument(hud) {
 function getTileMode(doc) {
   if (!doc) return null;
   try {
-    if (doc.getFlag('fa-nexus', 'path')) return 'paths';
+    if (doc.getFlag('fa-nexus', 'path') || isPathV2Tile(doc)) return 'paths';
     if (doc.getFlag('fa-nexus', 'maskedTiling')) return 'textures';
     if (doc.getFlag('fa-nexus', 'building')) return 'buildings';
     const src = String(doc.texture?.src || '').trim();
@@ -79,11 +79,11 @@ function ensureButton(root, mode) {
   return button;
 }
 
-function ensureFlattenButton(root, count) {
+function ensureFlattenButton(root, count, allowSingleMerged) {
   const column = root?.querySelector?.('.col.right') || null;
   const existing = column?.querySelector?.(`button[data-action="${FLATTEN_ACTION}"]`) || null;
 
-  if (!column || !count || count < 2) {
+  if (!column || !count || (count < 2 && !allowSingleMerged)) {
     if (existing) existing.remove();
     return null;
   }
@@ -98,7 +98,9 @@ function ensureFlattenButton(root, count) {
     column.appendChild(button);
   }
 
-  const label = `Flatten ${count} selected tile${count === 1 ? '' : 's'} in FA Nexus`;
+  const label = count > 1
+    ? `Flatten ${count} selected tile${count === 1 ? '' : 's'} in FA Nexus`
+    : 'Flatten merged tile in FA Nexus';
   button.dataset.count = String(count);
   button.dataset.tooltip = label;
   button.setAttribute('aria-label', label);
@@ -211,6 +213,24 @@ function resolveBuildingModeFromTile(doc) {
   return null;
 }
 
+function isPathV2Tile(doc) {
+  try {
+    const flags = doc?.getFlag?.('fa-nexus', 'pathV2')
+      || doc?.flags?.['fa-nexus']?.pathV2
+      || doc?._source?.flags?.['fa-nexus']?.pathV2
+      || null;
+    if (flags) return true;
+  } catch (_) {}
+  try {
+    const flags = doc?.getFlag?.('fa-nexus', 'pathsV2')
+      || doc?.flags?.['fa-nexus']?.pathsV2
+      || doc?._source?.flags?.['fa-nexus']?.pathsV2
+      || null;
+    return !!flags;
+  } catch (_) {}
+  return false;
+}
+
 async function launchEditor(doc, mode) {
   if (!doc) throw new Error('Tile document not available');
   const pointerPayload = buildPointerPayload(doc) || {};
@@ -233,7 +253,10 @@ async function launchEditor(doc, mode) {
     catch (error) { Logger.warn('TileHud.forceNoFill.failed', { error: String(error?.message || error) }); }
   }
   let manager = null;
-  if (mode === 'paths') manager = tab?.pathManager;
+  if (mode === 'paths') {
+    const useV2 = isPathV2Tile(doc);
+    manager = useV2 ? (tab?.pathManagerV2 || tab?.pathManager) : (tab?.pathManager || tab?.pathManagerV2);
+  }
   else if (mode === 'buildings') manager = tab?.buildingManager;
   else if (mode === 'textures') manager = tab?.texturePaintManager;
   else manager = tab?.placementManager;
@@ -261,7 +284,8 @@ Hooks.on('renderTileHUD', (hud, html) => {
 
     const selectedTiles = TileFlattenManager.getSelectedTiles();
     const flattenCount = Array.isArray(selectedTiles) ? selectedTiles.length : 0;
-    const flattenButton = ensureFlattenButton(root, flattenCount);
+    const allowSingleMerged = flattenCount === 1 && TileFlattenManager.isMergedTile(selectedTiles[0]);
+    const flattenButton = ensureFlattenButton(root, flattenCount, allowSingleMerged);
     if (flattenButton) {
       if (flattenButton._faNexusFlattenHandler) {
         flattenButton.removeEventListener('click', flattenButton._faNexusFlattenHandler);
@@ -269,12 +293,16 @@ Hooks.on('renderTileHUD', (hud, html) => {
       updateFlattenState = () => {
         const selection = TileFlattenManager.getSelectedTiles();
         const count = Array.isArray(selection) ? selection.length : 0;
+        const canFlatten = TileFlattenManager.canFlattenSelection(selection);
+        const singleMerged = count === 1 && TileFlattenManager.isMergedTile(selection[0]);
         const busy = manager?.isBusy ? manager.isBusy() : !!manager?._flattening;
-        const disabled = busy || count < 2;
+        const disabled = busy || !canFlatten;
         flattenButton.disabled = disabled;
         flattenButton.classList.toggle('disabled', disabled);
         flattenButton.dataset.count = String(count);
-        const label = `Flatten ${count} selected tile${count === 1 ? '' : 's'} in FA Nexus`;
+        const label = count > 1
+          ? `Flatten ${count} selected tile${count === 1 ? '' : 's'} in FA Nexus`
+          : (singleMerged ? 'Flatten merged tile in FA Nexus' : 'Flatten tiles in FA Nexus');
         flattenButton.dataset.tooltip = label;
         flattenButton.setAttribute('aria-label', label);
         flattenButton.title = label;

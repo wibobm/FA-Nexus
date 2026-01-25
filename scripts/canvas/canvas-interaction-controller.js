@@ -6,8 +6,8 @@ const documentTarget = typeof document !== 'undefined' ? document : null;
 const EVENT_CONFIG = {
   pointermove: { target: defaultTarget, options: { capture: true, passive: false } },
   pointerdown: { target: defaultTarget, options: { capture: true, passive: false } },
-  pointerup: { target: defaultTarget, options: { capture: true, passive: true } },
-  pointercancel: { target: defaultTarget, options: { capture: true, passive: true } },
+  pointerup: { target: defaultTarget, options: { capture: true, passive: false } },
+  pointercancel: { target: defaultTarget, options: { capture: true, passive: false } },
   wheel: { target: documentTarget || defaultTarget, options: { capture: true, passive: false } },
   keydown: { target: defaultTarget, options: { capture: true } },
   keyup: { target: defaultTarget, options: { capture: true } },

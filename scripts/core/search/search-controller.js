@@ -135,7 +135,8 @@ export class SearchController {
     }
 
     // Apply to tab if it's active
-    if (this.app._activeTab === tabId) {
+    const shouldApply = options.apply !== false;
+    if (this.app._activeTab === tabId && shouldApply) {
       try { this.app._activeTabObj?.applySearch?.(query, options); } catch (_) {}
     }
   }

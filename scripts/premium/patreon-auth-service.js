@@ -341,7 +341,9 @@ export async function warmPremiumFeatureBundles({ reason = 'auth', features } = 
     return false;
   }
 
-  const list = Array.isArray(features) && features.length ? features : ['texture.paint', 'path.edit', 'building.edit'];
+  const list = Array.isArray(features) && features.length
+    ? features
+    : ['texture.paint', 'path.edit', 'path.edit.v2', 'building.edit'];
 
   for (const featureId of list) {
     if (!premiumFeatureBroker.can(featureId)) continue;

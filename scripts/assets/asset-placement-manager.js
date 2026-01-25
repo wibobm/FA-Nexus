@@ -8,6 +8,7 @@ import { PlacementOverlay, createPlacementSpinner } from '../core/placement/plac
 import { PlacementPrefetchQueue } from '../core/placement/placement-prefetch-queue.js';
 import { getGridSnapStep } from '../core/grid-snap-utils.js';
 import { getZoomAtCursorView } from '../canvas/canvas-pointer-utils.js';
+import './asset-scatter-tiles.js';
 
 const quantizeElevation = (value) => {
   const numeric = Number(value);
@@ -27,6 +28,32 @@ const formatElevation = (value) => {
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 2.5;
+const DEFAULT_SCALE = 1;
+const DEFAULT_ROTATION = 0;
+const DEFAULT_SCALE_RANDOM_STRENGTH = 15;
+const DEFAULT_ROTATION_RANDOM_STRENGTH = 45;
+const ASSET_SCATTER_MODE_SINGLE = 'single';
+const ASSET_SCATTER_MODE_BRUSH = 'scatter';
+const SCATTER_BRUSH_SIZE_DEFAULT = 320;
+const SCATTER_BRUSH_SIZE_MIN = 40;
+const SCATTER_BRUSH_SIZE_MAX = 2400;
+const SCATTER_DENSITY_DEFAULT = 3;
+const SCATTER_DENSITY_MIN = 1;
+const SCATTER_DENSITY_MAX = 20;
+const SCATTER_SPRAY_DEVIATION_DEFAULT = 0.5;
+const SCATTER_SPRAY_DEVIATION_MIN = 0;
+const SCATTER_SPRAY_DEVIATION_MAX = 1;
+const SCATTER_SPACING_DEFAULT = 25;
+const SCATTER_SPACING_MIN = 1;
+const SCATTER_SPACING_MAX = 200;
+const SCATTER_RING_WIDTH = 0.2;
+const SCATTER_CENTER_POWER = 2.5;
+const SCATTER_FLAG_KEY = 'assetScatter';
+const SCATTER_VERSION = 1;
+const SCATTER_PREVIEW_Z_INDEX = 999998;
+const PREFETCH_COUNT_DEFAULT = 4;
+const SCATTER_PREFETCH_MIN = 5;
+const SCATTER_HISTORY_LIMIT = 30;
 const MAX_SHADOW_OFFSET = 40;
 const MAX_SHADOW_DILATION = 20;
 const MAX_SHADOW_BLUR = 12;
@@ -39,6 +66,7 @@ const DEFAULT_SHADOW_SETTINGS = Object.freeze({
   offsetAngle: 135
 });
 const FREEZE_SHORTCUT_BLOCKED_INPUTS = new Set(['text', 'search', 'email', 'url', 'password', 'tel']);
+const PREVIEW_LAYER_HOOK = 'fa-nexus-preview-layers-changed';
 
 export class AssetPlacementManager {
   constructor(app) {
@@ -51,13 +79,13 @@ export class AssetPlacementManager {
     this.previewElement = null;
     this._previewContainer = null;
     this._loadingOverlay = null;
-    this.currentRotation = 0;
-    this._rotationRandomEnabled = false;
-    this._rotationRandomStrength = 0;
+    this.currentRotation = this._readPlacementRotation();
+    this._rotationRandomEnabled = this._readPlacementRotationRandomEnabled();
+    this._rotationRandomStrength = this._readPlacementRotationRandomStrength();
     this.isDownloading = false;
     this.queuedPlacement = null; // {x,y}
     this._randomPrefetch = new PlacementPrefetchQueue({
-      prefetchCount: 4,
+      prefetchCount: PREFETCH_COUNT_DEFAULT,
       getItemKey: (asset) => this._assetKey(asset),
       needsPrefetch: (asset) => this._assetRequiresDownload(asset),
       prefetch: (asset) => this._ensureAssetLocal(asset),
@@ -69,22 +97,64 @@ export class AssetPlacementManager {
     this._suppressDragSelect = false;
     this._lastPointer = null;
     this._lastPointerWorld = null;
+    this._scatterMode = this._readStoredScatterMode();
+    this._scatterBrushSize = this._readStoredScatterBrushSize();
+    this._scatterDensity = this._readStoredScatterDensity();
+    this._scatterSprayDeviation = this._readStoredScatterSprayDeviation();
+    this._scatterSpacing = this._readStoredScatterSpacing();
+    this._scatterPainting = false;
+    this._scatterLastPointerWorld = null;
+    this._scatterStrokeDistance = 0;
+    this._scatterQueue = [];
+    this._scatterQueueRunning = false;
+    this._scatterQueuePromise = null;
+    this._scatterOverlay = null;
+    this._scatterGfx = null;
+    this._scatterMergeEnabled = this._readStoredScatterMergeEnabled();
+    this._scatterMergeBeforeEdit = null;
+    this._scatterEraseEnabled = false;
+    this._scatterEditing = false;
+    this._scatterEditTile = null;
+    this._scatterPreviewContainer = null;
+    this._scatterPreviewGroups = new Map();
+    this._scatterPreviewActiveKey = null;
+    this._scatterPreviewInstances = [];
+    this._scatterPreviewSprites = new Map();
+    this._scatterPreviewTextures = new Map();
+    this._scatterPreviewShadowFrame = null;
+    this._scatterPreviewShadowForce = false;
+    this._scatterPreviewShadowDirty = new Set();
+    this._scatterPreviewShadowSettings = new Map();
+    this._scatterPreviewShadowTextureListeners = new WeakMap();
+    this._scatterSessionActive = false;
+    this._scatterSessionGroups = new Map();
+    this._scatterShadowBatchActive = false;
+    this._scatterShadowBatchManager = null;
+    this._scatterPreviewShadowBatchActive = false;
+    this._scatterPreviewShadowBatchForce = false;
+    this._scatterPreviewShadowBatchNeedsAll = false;
+    this._scatterPreviewShadowBatchDirty = new Set();
+    this._scatterHistory = [];
+    this._scatterHistoryIndex = -1;
+    this._scatterHistoryDirty = false;
+    this._scatterCancelConfirmPromise = null;
+    this._scatterCancelConfirmDialog = null;
     this._previewFrozen = false;
     this._frozenPreviewWorld = null;
     this._frozenPointerScreen = null;
     // Track canvas zoom to keep preview sized accurately
     this._zoomWatcherId = null;
     this._lastZoom = 1;
-     // Per-placement scale multiplier (Shift+wheel)
-     this.currentScale = 1;
-     // Elevation for the active placement session (Alt+wheel)
+    // Per-placement scale multiplier (Shift+wheel)
+    this.currentScale = this._readPlacementScale();
+    // Elevation for the active placement session (Alt+wheel)
     this._previewElevation = 0;
     this._previewSort = 0;
     this._lastElevationAnnounce = 0;
     this._pendingElevationAnnouncePoint = null;
     this._elevationAnnounceTimer = null;
     // Drop shadow preference for the active placement session; null -> follow global
-    this._dropShadowPreference = null;
+    this._dropShadowPreference = this._readDropShadowPreference();
     this._dropShadowSettingsHook = null;
     this._dropShadowAlpha = this._readShadowSetting('assetDropShadowAlpha', 0.65, 0, 1);
     this._dropShadowDilation = this._readShadowSetting('assetDropShadowDilation', 1.6, 0, MAX_SHADOW_DILATION);
@@ -103,19 +173,19 @@ export class AssetPlacementManager {
     this._shadowPreviewRequestedId = 0;
     this._shadowPreviewForce = false;
     this._currentRandomOffset = 0;
-    this._pendingRotation = 0;
-    this._scaleRandomEnabled = false;
-    this._scaleRandomStrength = 0;
+    this._pendingRotation = this.currentRotation;
+    this._scaleRandomEnabled = this._readPlacementScaleRandomEnabled();
+    this._scaleRandomStrength = this._readPlacementScaleRandomStrength();
     this._currentScaleOffset = 0;
-    this._pendingScale = 1;
-    this._flipHorizontal = false;
-    this._flipVertical = false;
-    this._flipRandomHorizontalEnabled = false;
-    this._flipRandomVerticalEnabled = false;
+    this._pendingScale = this.currentScale;
+    this._flipHorizontal = this._readPlacementFlipHorizontal();
+    this._flipVertical = this._readPlacementFlipVertical();
+    this._flipRandomHorizontalEnabled = this._readPlacementFlipRandomHorizontalEnabled();
+    this._flipRandomVerticalEnabled = this._readPlacementFlipRandomVerticalEnabled();
     this._flipRandomHorizontalOffset = false;
     this._flipRandomVerticalOffset = false;
-    this._pendingFlipHorizontal = false;
-    this._pendingFlipVertical = false;
+    this._pendingFlipHorizontal = this._flipHorizontal;
+    this._pendingFlipVertical = this._flipVertical;
     this._editingTile = null;
     this._isEditingExistingTile = false;
     this._pendingEditState = null;
@@ -147,6 +217,7 @@ export class AssetPlacementManager {
     this._dropShadowOffsetDistance = clampedDistance;
     this._dropShadowOffsetAngle = normalizedAngle;
     this._updatePreviewShadow();
+    this._syncScatterPreviewShadowSettingsForActiveElevation({ force: commit });
     if (commit) {
       this._persistShadowSetting('assetDropShadowOffsetDistance', clampedDistance);
       this._persistShadowSetting('assetDropShadowOffsetAngle', normalizedAngle);
@@ -208,12 +279,140 @@ export class AssetPlacementManager {
     if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
   }
 
+  _shouldAutoCommitScatter(reason) {
+    if (!this._scatterMergeEnabled) return false;
+    const normalized = String(reason || '');
+    return (
+      normalized === 'tab-switch'
+      || normalized === 'tab-deactivate'
+      || normalized === 'app-close'
+      || normalized === 'canvas-teardown'
+      || normalized === 'path-edit'
+      || normalized === 'switch-mode'
+    );
+  }
+
+  _autoCommitScatterSession(reason) {
+    if (!this._shouldAutoCommitScatter(reason)) return false;
+    if (this._scatterEditing) {
+      void this._commitScatterEditChanges();
+      return true;
+    }
+    const groups = this._collectScatterCommitGroups();
+    if (!groups.length) return false;
+    void this._commitScatterGroups(groups);
+    return true;
+  }
+
+  _hasScatterSessionChanges() {
+    if (!this._scatterMergeEnabled) return false;
+    if (this._scatterEditing) return true;
+    const instances = Array.isArray(this._scatterPreviewInstances) ? this._scatterPreviewInstances.length : 0;
+    const sessions = this._scatterSessionGroups?.size || 0;
+    return instances > 0 || sessions > 0;
+  }
+
+  _forceScatterCancelDialog() {
+    const dialog = this._scatterCancelConfirmDialog;
+    if (!dialog) return false;
+    try {
+      const button = dialog.element?.querySelector?.('button[data-action="yes"]');
+      if (button) {
+        button.click();
+        return true;
+      }
+    } catch (_) {}
+    try { dialog.close?.({ submitted: true }); } catch (_) {}
+    return true;
+  }
+
+  async _confirmScatterCancel({ force = false } = {}) {
+    if (!this._hasScatterSessionChanges()) return true;
+    if (this._scatterCancelConfirmPromise) {
+      if (force) this._forceScatterCancelDialog();
+      return this._scatterCancelConfirmPromise;
+    }
+    const message = 'Cancel the current scatter session? This cannot be undone.';
+    try {
+      const DialogV2 = foundry?.applications?.api?.DialogV2;
+      if (DialogV2?.wait) {
+        const promise = DialogV2.wait({
+          window: { title: 'Cancel Scatter Session' },
+          modal: true,
+          content: `<p>${message}</p>`,
+          buttons: [
+            { action: 'yes', label: 'Cancel', icon: 'fas fa-trash', default: false, callback: () => true },
+            { action: 'no', label: 'Keep Editing', default: true, callback: () => false }
+          ],
+          close: () => false,
+          render: (_event, dialog) => {
+            this._scatterCancelConfirmDialog = dialog;
+          }
+        });
+        this._scatterCancelConfirmPromise = Promise.resolve(promise)
+          .then((result) => {
+            this._scatterCancelConfirmPromise = null;
+            this._scatterCancelConfirmDialog = null;
+            return !!result;
+          })
+          .catch(() => {
+            this._scatterCancelConfirmPromise = null;
+            this._scatterCancelConfirmDialog = null;
+            return false;
+          });
+        if (force) this._forceScatterCancelDialog();
+        return this._scatterCancelConfirmPromise;
+      }
+    } catch (_) {}
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      return window.confirm(message);
+    }
+    return true;
+  }
+
+  async _requestScatterCancel({ source = 'manual' } = {}) {
+    if (!this._hasScatterSessionChanges()) {
+      this.cancelPlacement('scatter-discard');
+      return true;
+    }
+    const force = source === 'escape' && !!this._scatterCancelConfirmPromise;
+    const confirmed = await this._confirmScatterCancel({ force });
+    if (!confirmed) return false;
+    this.cancelPlacement('scatter-discard');
+    return true;
+  }
+
+  async _handleEditorAction(actionId) {
+    const id = String(actionId || '');
+    switch (id) {
+      case 'scatter-undo':
+        return this._undoScatterHistory();
+      case 'scatter-redo':
+        return this._redoScatterHistory();
+      case 'scatter-commit':
+        if (this._scatterEditing) {
+          return this._commitScatterEditChanges().finally(() => {
+            this.cancelPlacement('scatter-commit');
+          });
+        }
+        return this._commitScatterMergeSession().finally(() => {
+          this.cancelPlacement('scatter-commit');
+        });
+      case 'scatter-discard':
+        return this._requestScatterCancel({ source: 'manual' });
+      default:
+        return false;
+    }
+  }
+
   startPlacement(assetData, stickyMode = false, options = {}) {
-    const previousPreference = this.isDropShadowEnabled();
+    const selectedElevation = this._getHighestControlledTileElevation();
+    try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
+    const storedPreference = this._readDropShadowPreference();
     this.cancelPlacement('replace');
     this._replaceOriginalOnPlace = false;
     this._ensurePointerSnapshot(options);
-    this._dropShadowPreference = previousPreference;
+    this._dropShadowPreference = storedPreference;
     this._notifyDropShadowChanged();
     this.isPlacementActive = true;
     this.isStickyMode = stickyMode;
@@ -221,30 +420,34 @@ export class AssetPlacementManager {
     this.isRandomMode = false;
     this.randomAssets = [];
     this._pendingEditState = null;
-    this.currentRotation = 0;
-    this._rotationRandomEnabled = false;
-    this._rotationRandomStrength = 45;
+    this.currentRotation = this._readPlacementRotation();
+    this._rotationRandomEnabled = this._readPlacementRotationRandomEnabled();
+    this._rotationRandomStrength = this._readPlacementRotationRandomStrength();
     this._currentRandomOffset = 0;
     this._pendingRotation = this.currentRotation;
-    this._updateRotationPreview();
-    this._scaleRandomEnabled = false;
-    this._scaleRandomStrength = 0;
+    this._updateRotationPreview({ regenerateOffset: this._rotationRandomEnabled, clampOffset: true });
+    this._scaleRandomEnabled = this._readPlacementScaleRandomEnabled();
+    this._scaleRandomStrength = this._readPlacementScaleRandomStrength();
     this._currentScaleOffset = 0;
-    this.currentScale = 1;
+    this.currentScale = this._readPlacementScale();
     this._pendingScale = this.currentScale;
-    this._updateScalePreview();
-    this._flipHorizontal = false;
-    this._flipVertical = false;
-    this._flipRandomHorizontalEnabled = false;
-    this._flipRandomVerticalEnabled = false;
-    this._flipRandomHorizontalOffset = false;
-    this._flipRandomVerticalOffset = false;
+    this._updateScalePreview({ regenerateOffset: this._scaleRandomEnabled, clampOffset: true });
+    this._flipHorizontal = this._readPlacementFlipHorizontal();
+    this._flipVertical = this._readPlacementFlipVertical();
+    this._flipRandomHorizontalEnabled = this._readPlacementFlipRandomHorizontalEnabled();
+    this._flipRandomVerticalEnabled = this._readPlacementFlipRandomVerticalEnabled();
+    this._flipRandomHorizontalOffset = this._flipRandomHorizontalEnabled ? null : false;
+    this._flipRandomVerticalOffset = this._flipRandomVerticalEnabled ? null : false;
     this._pendingFlipHorizontal = this._flipHorizontal;
     this._pendingFlipVertical = this._flipVertical;
-    this._updateFlipPreview();
+    this._updateFlipPreview({ regenerateOffsets: this._hasRandomFlipEnabled() });
+    this._setScatterMode(this._readStoredScatterMode());
+    this._updateRandomPrefetchCount();
     this._activateToolOptions();
     try { Logger.info('Placement.start', { sticky: !!stickyMode, kind: 'single', asset: assetData?.filename || assetData?.path }); } catch (_) {}
-    const initialElevation = Number.isFinite(this._lastElevationUsed) ? this._lastElevationUsed : 0;
+    const initialElevation = Number.isFinite(selectedElevation)
+      ? selectedElevation
+      : (Number.isFinite(this._lastElevationUsed) ? this._lastElevationUsed : 0);
     this._previewElevation = initialElevation;
     this._previewSort = this._interactionController.computeNextSortAtElevation?.(initialElevation) ?? 0;
     this._lastElevationUsed = this._previewElevation;
@@ -264,11 +467,17 @@ export class AssetPlacementManager {
       if (!tileDocument) throw new Error('Tile document required');
       const doc = tileDocument.document ?? tileDocument;
       if (!doc) throw new Error('Tile document unavailable');
+      const scatterPayload = this._readScatterTileData(doc);
+      if (scatterPayload) {
+        await this._editScatterTile(doc, scatterPayload, options);
+        return;
+      }
       if (!doc.texture || !doc.texture.src) throw new Error('Tile is missing a texture source');
 
       const assetData = this._buildAssetDataFromTile(doc);
       if (!assetData) throw new Error('Unable to derive asset data from tile');
 
+      try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
       this.cancelPlacement('replace');
 
       this.currentAsset = assetData;
@@ -279,6 +488,9 @@ export class AssetPlacementManager {
       this._editingTile = doc;
       this._replaceOriginalOnPlace = true;
       this._isEditingExistingTile = true;
+      this._scatterMode = ASSET_SCATTER_MODE_SINGLE;
+      this._stopScatterStroke();
+      this._clearScatterOverlay();
       this._pendingEditState = null;
 
       const tileObj = doc?.object || null;
@@ -369,10 +581,12 @@ export class AssetPlacementManager {
   startPlacementRandom(assetList, stickyMode = true, options = {}) {
     try {
       if (!Array.isArray(assetList) || !assetList.length) { this.startPlacement(assetList?.[0], stickyMode, options); return; }
-      const previousPreference = this.isDropShadowEnabled();
+      const selectedElevation = this._getHighestControlledTileElevation();
+      try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
+      const storedPreference = this._readDropShadowPreference();
       this.cancelPlacement('replace');
       this._ensurePointerSnapshot(options);
-      this._dropShadowPreference = previousPreference;
+      this._dropShadowPreference = storedPreference;
       this._notifyDropShadowChanged();
       this.isPlacementActive = true;
       this.isStickyMode = stickyMode;
@@ -380,39 +594,43 @@ export class AssetPlacementManager {
       this.randomAssets = assetList.slice();
       this.currentAsset = null;
       try { this._randomPrefetch?.setPool?.(this.randomAssets); } catch (_) {}
-      this.currentRotation = 0;
-      this._rotationRandomEnabled = false;
-      this._rotationRandomStrength = 45;
+      this.currentRotation = this._readPlacementRotation();
+      this._rotationRandomEnabled = this._readPlacementRotationRandomEnabled();
+      this._rotationRandomStrength = this._readPlacementRotationRandomStrength();
       this._currentRandomOffset = 0;
       this._pendingRotation = this.currentRotation;
-      this._updateRotationPreview();
-      this._scaleRandomEnabled = false;
-      this._scaleRandomStrength = 0;
+      this._updateRotationPreview({ regenerateOffset: this._rotationRandomEnabled, clampOffset: true });
+      this._scaleRandomEnabled = this._readPlacementScaleRandomEnabled();
+      this._scaleRandomStrength = this._readPlacementScaleRandomStrength();
       this._currentScaleOffset = 0;
-      this.currentScale = 1;
+      this.currentScale = this._readPlacementScale();
       this._pendingScale = this.currentScale;
-      this._updateScalePreview();
-      this._flipHorizontal = false;
-      this._flipVertical = false;
-      this._flipRandomHorizontalEnabled = false;
-      this._flipRandomVerticalEnabled = false;
-      this._flipRandomHorizontalOffset = false;
-      this._flipRandomVerticalOffset = false;
+      this._updateScalePreview({ regenerateOffset: this._scaleRandomEnabled, clampOffset: true });
+      this._flipHorizontal = this._readPlacementFlipHorizontal();
+      this._flipVertical = this._readPlacementFlipVertical();
+      this._flipRandomHorizontalEnabled = this._readPlacementFlipRandomHorizontalEnabled();
+      this._flipRandomVerticalEnabled = this._readPlacementFlipRandomVerticalEnabled();
+      this._flipRandomHorizontalOffset = this._flipRandomHorizontalEnabled ? null : false;
+      this._flipRandomVerticalOffset = this._flipRandomVerticalEnabled ? null : false;
       this._pendingFlipHorizontal = this._flipHorizontal;
       this._pendingFlipVertical = this._flipVertical;
-      this._updateFlipPreview();
+      this._updateFlipPreview({ regenerateOffsets: this._hasRandomFlipEnabled() });
+      this._setScatterMode(this._readStoredScatterMode());
       this._activateToolOptions();
-    const initialElevation = Number.isFinite(this._lastElevationUsed) ? this._lastElevationUsed : 0;
-    this._previewElevation = initialElevation;
-    this._previewSort = this._interactionController.computeNextSortAtElevation?.(initialElevation) ?? 0;
-    this._lastElevationUsed = this._previewElevation;
-    this._lastElevationAnnounce = 0;
-    this._clearElevationAnnounceTimer();
-    Logger.info('Placement.startRandom', { sticky: !!stickyMode, count: this.randomAssets.length });
-    this._activateTilesLayer();
-    this._refreshShadowElevationContext({ adopt: true });
+      const initialElevation = Number.isFinite(selectedElevation)
+        ? selectedElevation
+        : (Number.isFinite(this._lastElevationUsed) ? this._lastElevationUsed : 0);
+      this._previewElevation = initialElevation;
+      this._previewSort = this._interactionController.computeNextSortAtElevation?.(initialElevation) ?? 0;
+      this._lastElevationUsed = this._previewElevation;
+      this._lastElevationAnnounce = 0;
+      this._clearElevationAnnounceTimer();
+      Logger.info('Placement.startRandom', { sticky: !!stickyMode, count: this.randomAssets.length });
+      this._activateTilesLayer();
+      this._refreshShadowElevationContext({ adopt: true });
       this._startInteractionSession();
       this._addPlacementFeedback();
+      this._updateRandomPrefetchCount();
       try { this._randomPrefetch?.prime?.(); } catch (_) {}
       this._switchToNextRandomAsset(true);
     } catch (_) {
@@ -420,11 +638,39 @@ export class AssetPlacementManager {
     }
   }
 
+  async updatePlacementAssets(assetList, options = {}) {
+    const list = Array.isArray(assetList)
+      ? assetList.filter(Boolean)
+      : (assetList ? [assetList] : []);
+    if (!list.length) return false;
+    if (!this.isPlacementActive || this._isEditingExistingTile || this._scatterEditing) return false;
+    this._ensurePointerSnapshot(options);
+    const useRandom = list.length > 1;
+    this.isRandomMode = useRandom;
+    if (useRandom) {
+      this.randomAssets = list.slice();
+      this.currentAsset = null;
+      try { this._randomPrefetch?.setPool?.(this.randomAssets); } catch (_) {}
+      this._updateRandomPrefetchCount();
+      try { this._randomPrefetch?.prime?.(); } catch (_) {}
+      await this._switchToNextRandomAsset(true);
+    } else {
+      this.randomAssets = [];
+      this.currentAsset = list[0] || null;
+      try { this._randomPrefetch?.reset?.(); } catch (_) {}
+      this._updateRandomPrefetchCount();
+      await this._prepareCurrentAssetPreview();
+    }
+    this._syncToolOptionsState({ suppressRender: false });
+    return true;
+  }
+
   cancelPlacement(reason = 'user') {
     if (!this.isPlacementActive) {
       this._setPlacementFreeze(false, { announce: false, sync: false });
       return;
     }
+    this._autoCommitScatterSession(reason);
     this.isPlacementActive = false;
     this.isStickyMode = false;
     this.currentAsset = null;
@@ -445,6 +691,26 @@ export class AssetPlacementManager {
     this._pendingEditState = null;
     this.isRandomMode = false;
     this.randomAssets = [];
+    this._scatterPainting = false;
+    this._scatterLastPointerWorld = null;
+    this._scatterStrokeDistance = 0;
+    void this._endScatterPreviewShadowBatch({ awaitQueue: true });
+    void this._endScatterShadowBatch({ awaitQueue: true });
+    this._resetScatterMergeSession();
+    this._resetScatterHistory();
+    this._syncToolOptionsState({ suppressRender: false });
+    this._resetScatterHistory();
+    this._scatterQueue = [];
+    this._scatterQueueRunning = false;
+    this._scatterQueuePromise = null;
+    this._clearScatterOverlay();
+    this._scatterEditing = false;
+    this._scatterEditTile = null;
+    this._scatterEraseEnabled = false;
+    if (this._scatterMergeBeforeEdit !== null) {
+      this._scatterMergeEnabled = !!this._scatterMergeBeforeEdit;
+      this._scatterMergeBeforeEdit = null;
+    }
     this._rotationRandomEnabled = false;
     this._scaleRandomEnabled = false;
     const maintainToolUI = reason === 'replace' || reason === 'restart';
@@ -486,12 +752,26 @@ export class AssetPlacementManager {
     } catch (_) {}
     // Reset prefetch state
     try { this._randomPrefetch?.reset?.(); Logger.info('Placement.queue.reset', { reason }); } catch (_) {}
-    // Revert drop shadow preference so the next placement defaults to global setting
-    this._dropShadowPreference = null;
+    this._dropShadowPreference = this._readDropShadowPreference();
     this._notifyDropShadowChanged();
   }
 
   _getAssetBasePxPerSquare() { return 200; }
+
+  _getHighestControlledTileElevation() {
+    try {
+      const controlled = Array.isArray(canvas?.tiles?.controlled) ? canvas.tiles.controlled : [];
+      let highest = null;
+      for (const tile of controlled) {
+        const elevation = Number(tile?.document?.elevation ?? tile?.elevation);
+        if (!Number.isFinite(elevation)) continue;
+        if (highest === null || elevation > highest) highest = elevation;
+      }
+      return highest;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /**
    * Apply grid snapping to world coordinates for asset placement
@@ -521,6 +801,70 @@ export class AssetPlacementManager {
       console.warn('fa-nexus | Asset grid snapping failed, using raw coordinates:', error);
       return worldCoords;
     }
+  }
+
+  _getScatterBrushSize() {
+    let size = Number(this._scatterBrushSize);
+    if (!Number.isFinite(size)) size = SCATTER_BRUSH_SIZE_DEFAULT;
+    const clamped = Math.min(SCATTER_BRUSH_SIZE_MAX, Math.max(SCATTER_BRUSH_SIZE_MIN, size));
+    if (clamped !== this._scatterBrushSize) this._scatterBrushSize = clamped;
+    return clamped;
+  }
+
+  _getScatterBrushRadius() {
+    return this._getScatterBrushSize() / 2;
+  }
+
+  _getScatterDensity() {
+    let density = Math.round(Number(this._scatterDensity));
+    if (!Number.isFinite(density)) density = SCATTER_DENSITY_DEFAULT;
+    const clamped = Math.min(SCATTER_DENSITY_MAX, Math.max(SCATTER_DENSITY_MIN, density));
+    if (clamped !== this._scatterDensity) this._scatterDensity = clamped;
+    return clamped;
+  }
+
+  _getScatterSprayDeviation() {
+    let deviation = Number(this._scatterSprayDeviation);
+    if (!Number.isFinite(deviation)) deviation = SCATTER_SPRAY_DEVIATION_DEFAULT;
+    const clamped = Math.min(SCATTER_SPRAY_DEVIATION_MAX, Math.max(SCATTER_SPRAY_DEVIATION_MIN, deviation));
+    if (clamped !== this._scatterSprayDeviation) this._scatterSprayDeviation = clamped;
+    return clamped;
+  }
+
+  _getScatterSpacingPercent() {
+    let spacing = Number(this._scatterSpacing);
+    if (!Number.isFinite(spacing)) spacing = SCATTER_SPACING_DEFAULT;
+    const clamped = Math.min(SCATTER_SPACING_MAX, Math.max(SCATTER_SPACING_MIN, spacing));
+    if (clamped !== this._scatterSpacing) this._scatterSpacing = clamped;
+    return clamped;
+  }
+
+  _getScatterSpacingWorld() {
+    const spacingPercent = this._getScatterSpacingPercent();
+    if (spacingPercent <= 0) return 0;
+    const diameter = this._getScatterBrushRadius() * 2;
+    return (spacingPercent / 100) * diameter;
+  }
+
+  _sampleScatterOffset(radiusX, radiusY) {
+    const deviation = this._getScatterSprayDeviation();
+    const theta = Math.random() * Math.PI * 2;
+    let distance = 0;
+    if (deviation <= 0.5) {
+      const blend = deviation / 0.5;
+      const ring = 1 - SCATTER_RING_WIDTH * Math.random();
+      const uniform = Math.sqrt(Math.random());
+      distance = ring * (1 - blend) + uniform * blend;
+    } else {
+      const blend = (deviation - 0.5) / 0.5;
+      const uniform = Math.sqrt(Math.random());
+      const center = Math.pow(Math.random(), SCATTER_CENTER_POWER);
+      distance = uniform * (1 - blend) + center * blend;
+    }
+    return {
+      x: Math.cos(theta) * radiusX * distance,
+      y: Math.sin(theta) * radiusY * distance
+    };
   }
 
   _normalizeRotation(value) {
@@ -770,6 +1114,14 @@ export class AssetPlacementManager {
       'Alt+Wheel adjusts elevation (Shift=coarse, Ctrl/Cmd=fine).',
       freezeHint
     ];
+    const subtoolToggles = this._buildScatterSubtoolToggles();
+    const assetScatter = this._buildScatterBrushState();
+    const customToggles = this._buildScatterCustomToggles();
+    const editorActions = this._buildScatterEditorActions();
+    if (assetScatter.available) {
+      hints.unshift('Scatter mode: drag to paint asset stamps.');
+      if (this._scatterEditing) hints.unshift('Editing scatter tile: drag to add, toggle eraser to remove.');
+    }
     return {
       dropShadow: {
         available: true,
@@ -782,11 +1134,151 @@ export class AssetPlacementManager {
         available: true,
         enabled: dropShadowEnabled
       }),
+      subtoolToggles,
+      customToggles,
+      editorActions,
       flip: this._buildFlipToolState(),
       scale: this._buildScaleToolState(),
       rotation: this._buildRotationToolState(),
+      assetScatter,
       hints
     };
+  }
+
+  _buildScatterSubtoolToggles() {
+    if (!this.isPlacementActive) return [];
+    const scatterActive = this._scatterMode === ASSET_SCATTER_MODE_BRUSH;
+    const disabled = !!this._isEditingExistingTile || this._scatterEditing;
+    return [
+      {
+        id: 'asset-placement-single',
+        group: 'subtool',
+        label: 'Single',
+        tooltip: 'Place one asset at a time.',
+        enabled: !scatterActive,
+        disabled
+      },
+      {
+        id: 'asset-placement-scatter',
+        group: 'subtool',
+        label: 'Scatter',
+        tooltip: 'Paint to scatter multiple assets per stamp.',
+        enabled: scatterActive,
+        disabled
+      }
+    ];
+  }
+
+  _buildScatterBrushState() {
+    if (!this.isPlacementActive || this._isEditingExistingTile || this._scatterMode !== ASSET_SCATTER_MODE_BRUSH) {
+      return { available: false };
+    }
+    const brushSize = Math.round(this._getScatterBrushSize());
+    const density = Math.round(this._getScatterDensity());
+    const sprayPercent = Math.round(this._getScatterSprayDeviation() * 100);
+    const spacingPercent = Math.round(this._getScatterSpacingPercent());
+    return {
+      available: true,
+      brushSize: {
+        min: SCATTER_BRUSH_SIZE_MIN,
+        max: SCATTER_BRUSH_SIZE_MAX,
+        step: 1,
+        value: brushSize,
+        defaultValue: SCATTER_BRUSH_SIZE_DEFAULT,
+        display: `${brushSize}px`
+      },
+      density: {
+        min: SCATTER_DENSITY_MIN,
+        max: SCATTER_DENSITY_MAX,
+        step: 1,
+        value: density,
+        defaultValue: SCATTER_DENSITY_DEFAULT,
+        display: density === 1 ? '1' : `${density}x`
+      },
+      sprayDeviation: {
+        min: 0,
+        max: 100,
+        step: 1,
+        value: sprayPercent,
+        defaultValue: Math.round(SCATTER_SPRAY_DEVIATION_DEFAULT * 100),
+        display: `${sprayPercent}%`
+      },
+      spacing: {
+        min: SCATTER_SPACING_MIN,
+        max: SCATTER_SPACING_MAX,
+        step: 1,
+        value: spacingPercent,
+        defaultValue: SCATTER_SPACING_DEFAULT,
+        display: `${spacingPercent}%`
+      },
+      hint: 'Tip size controls particle diameter as a percent of the brush. Density adds more particles per stamp. Spray deviation biases toward edge or center. Spacing controls distance between stamps.'
+    };
+  }
+
+  _buildScatterCustomToggles() {
+    if (!this.isPlacementActive || this._scatterMode !== ASSET_SCATTER_MODE_BRUSH) return [];
+    const toggles = [];
+    if (this._scatterMergeEnabled) {
+      toggles.push({
+        id: 'asset-scatter-eraser',
+        group: 'subtool-option',
+        label: 'Scatter Eraser',
+        tooltip: 'Remove scattered assets with the brush during merge sessions.',
+        enabled: !!this._scatterEraseEnabled,
+        disabled: false
+      });
+    }
+    return toggles;
+  }
+
+  _buildScatterEditorActions() {
+    if (!this.isPlacementActive || this._scatterMode !== ASSET_SCATTER_MODE_BRUSH || !this._scatterMergeEnabled) {
+      return [];
+    }
+    const hasInstances = Array.isArray(this._scatterPreviewInstances) && this._scatterPreviewInstances.length > 0;
+    const canUndo = this._canUndoScatterHistory();
+    const canRedo = this._canRedoScatterHistory();
+    const canCommit = this._scatterEditing
+      ? hasInstances
+      : (this._scatterSessionActive && hasInstances);
+    const commitLabel = this._scatterEditing ? 'Apply' : 'Commit';
+    const commitTooltip = this._scatterEditing
+      ? 'Apply the scatter edits to the tile.'
+      : 'Commit the scattered stamps to a tile.';
+    const discardLabel = 'Cancel';
+    const discardTooltip = this._scatterEditing
+      ? 'Cancel the scatter edits.'
+      : 'Cancel the current scatter session.';
+    return [
+      {
+        id: 'scatter-undo',
+        label: 'Undo',
+        tooltip: 'Undo the last scatter stroke.',
+        primary: false,
+        disabled: !canUndo
+      },
+      {
+        id: 'scatter-redo',
+        label: 'Redo',
+        tooltip: 'Redo the last undone scatter stroke.',
+        primary: false,
+        disabled: !canRedo
+      },
+      {
+        id: 'scatter-commit',
+        label: commitLabel,
+        tooltip: commitTooltip,
+        primary: true,
+        disabled: !canCommit
+      },
+      {
+        id: 'scatter-discard',
+        label: discardLabel,
+        tooltip: discardTooltip,
+        primary: false,
+        disabled: !hasInstances && !this._scatterSessionActive
+      }
+    ];
   }
 
   _togglePlacementFreeze() {
@@ -887,6 +1379,29 @@ export class AssetPlacementManager {
     }
   }
 
+  _shouldIgnorePlacementHotkey(event, key = '') {
+    try {
+      const target = event?.target ?? document?.activeElement ?? null;
+      if (!target || target === document.body) return false;
+      if (target.dataset?.faNexusHotkeys === 'allow') return false;
+      if (typeof target.isContentEditable === 'boolean' && target.isContentEditable) {
+        return key !== 'Escape';
+      }
+      const tag = target.tagName ? String(target.tagName).toLowerCase() : '';
+      if (!tag) return false;
+      if (tag === 'input') {
+        const type = typeof target.type === 'string' ? target.type.toLowerCase() : '';
+        const allowTypes = ['button', 'checkbox', 'radio', 'range', 'color', 'file', 'submit', 'reset', 'image', 'hidden'];
+        if (!type) return true;
+        return !allowTypes.includes(type);
+      }
+      if (tag === 'textarea' || tag === 'select') return true;
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   _formatFlipSummary(state) {
     const horizontal = !!state?.horizontal;
     const vertical = !!state?.vertical;
@@ -963,9 +1478,11 @@ export class AssetPlacementManager {
       max: 250,
       step: 1,
       value: basePercent,
+      defaultValue: Math.round(DEFAULT_SCALE * 100),
       display: randomActive ? `${previewPercent}% preview` : `${basePercent}%`,
       randomEnabled: randomToggleOn,
       strength: strengthPercent,
+      strengthDefault: DEFAULT_SCALE_RANDOM_STRENGTH,
       strengthMin: 0,
       strengthMax: 100,
       strengthStep: 1,
@@ -990,9 +1507,11 @@ export class AssetPlacementManager {
       max: 359,
       step: 1,
       value: base,
+      defaultValue: DEFAULT_ROTATION,
       display: randomActive ? `${previewDisplay} preview` : baseDisplay,
       randomEnabled: randomToggleOn,
       strength,
+      strengthDefault: DEFAULT_ROTATION_RANDOM_STRENGTH,
       strengthMin: 0,
       strengthMax: 180,
       strengthStep: 1,
@@ -1175,6 +1694,7 @@ export class AssetPlacementManager {
       if (persist) this._persistCurrentShadowSettings();
       if (propagate) this._propagateShadowSettingsToElevation();
       this._updatePreviewShadow({ force: true });
+      this._syncScatterPreviewShadowSettingsForActiveElevation({ force: true });
       if (notify) {
         this._notifyDropShadowChanged();
       } else if (sync) {
@@ -1199,12 +1719,27 @@ export class AssetPlacementManager {
       const hasTiles = !!snapshot?.hasTiles && tileCount > 0;
       const mixedOffsets = !!snapshot?.mixedOffset || !!snapshot?.mixedOffsetDistance || !!snapshot?.mixedOffsetAngle;
       const mixedSpread = !!snapshot?.mixedDilation;
+      const key = this._getScatterPreviewGroupKey(elevation);
+      const cachedSettings = this._scatterPreviewShadowSettings?.get?.(key) || null;
       let source = this._shadowElevationContext?.source || (hasTiles ? 'existing' : 'default');
       if (adopt && hasTiles) {
-        this._applyShadowSettingsSnapshot(snapshot, { persist: false, notify: false, propagate: false, sync: false, force: true });
+        const fallback = cachedSettings || this._snapshotScatterPreviewShadowSettings();
+        const mergedSnapshot = {
+          alpha: snapshot?.alpha ?? fallback.alpha,
+          blur: snapshot?.blur ?? fallback.blur,
+          dilation: fallback.dilation,
+          offsetDistance: fallback.offsetDistance,
+          offsetAngle: fallback.offsetAngle
+        };
+        this._applyShadowSettingsSnapshot(mergedSnapshot, { persist: false, notify: false, propagate: false, sync: false, force: true });
         source = 'existing';
-      } else if (!hasTiles) {
-        source = 'default';
+      } else {
+        if (adopt && cachedSettings) {
+          this._applyShadowSettingsSnapshot(cachedSettings, { persist: false, notify: false, propagate: false, sync: false, force: true });
+        }
+        if (!hasTiles) {
+          source = 'default';
+        }
       }
       this._shadowElevationContext = { elevation, tileCount, hasTiles, source, mixedOffsets, mixedDilation: mixedSpread };
       if (sync) {
@@ -1257,6 +1792,17 @@ export class AssetPlacementManager {
       toolOptionsController.setToolOptions('asset.placement', {
         state,
         handlers: {
+          customToggles: {
+            'asset-placement-single': (enabled) => {
+              if (!enabled) return true;
+              return this._setScatterMode(ASSET_SCATTER_MODE_SINGLE);
+            },
+            'asset-placement-scatter': (enabled) => {
+              if (!enabled) return true;
+              return this._setScatterMode(ASSET_SCATTER_MODE_BRUSH);
+            },
+            'asset-scatter-eraser': (enabled) => this.setScatterEraserEnabled(enabled)
+          },
           setDropShadowEnabled: (value) => this._handleDropShadowToggleRequest(value),
           setDropShadowAlpha: (value, commit) => this._handleDropShadowAlphaChange(value, commit),
           setDropShadowDilation: (value, commit) => this._handleDropShadowDilationChange(value, commit),
@@ -1268,6 +1814,7 @@ export class AssetPlacementManager {
           handleDropShadowPreset: (index, save) => this._handleDropShadowPresetAction(index, { save: !!save }),
           resetDropShadowOffset: () => this._handleDropShadowOffsetReset(),
           resetDropShadow: () => this._handleDropShadowReset(),
+          handleEditorAction: (actionId) => this._handleEditorAction(actionId),
           toggleFlipHorizontal: () => this._handleFlipHorizontalToggle(),
           toggleFlipVertical: () => this._handleFlipVerticalToggle(),
           toggleFlipHorizontalRandom: () => this._handleFlipRandomHorizontalToggle(),
@@ -1277,7 +1824,11 @@ export class AssetPlacementManager {
           setScaleRandomStrength: (value) => this._handleScaleRandomStrength(value),
           setRotation: (value) => this._handleRotationSliderInput(value),
           toggleRotationRandom: () => this._handleRotationRandomToggle(),
-          setRotationRandomStrength: (value) => this._handleRotationRandomStrength(value)
+          setRotationRandomStrength: (value) => this._handleRotationRandomStrength(value),
+          setScatterBrushSize: (value, commit) => this.setScatterBrushSize(value, commit),
+          setScatterDensity: (value, commit) => this.setScatterDensity(value, commit),
+          setScatterSprayDeviation: (value, commit) => this.setScatterSprayDeviation(value, commit),
+          setScatterSpacing: (value, commit) => this.setScatterSpacing(value, commit)
         },
         suppressRender
       });
@@ -1292,7 +1843,9 @@ export class AssetPlacementManager {
         return true;
       }
       this._dropShadowPreference = null;
+      this._persistDropShadowPreference(null);
       this._updatePreviewShadow({ force: true });
+      this._scheduleScatterPreviewShadowUpdate({ force: true });
       this._notifyDropShadowChanged();
       if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
       return true;
@@ -1307,7 +1860,9 @@ export class AssetPlacementManager {
       return true;
     }
     this._dropShadowPreference = next;
+    this._persistDropShadowPreference(next);
     this._updatePreviewShadow({ force: true });
+    this._scheduleScatterPreviewShadowUpdate({ force: true });
     this._notifyDropShadowChanged();
     if (this._isEditingExistingTile) this._scheduleEditingCommit(true);
     return true;
@@ -1327,6 +1882,7 @@ export class AssetPlacementManager {
     }
     this._dropShadowAlpha = normalized;
     this._updatePreviewShadow();
+    this._syncScatterPreviewShadowSettingsForActiveElevation({ force: commit });
     if (commit) this._persistShadowSetting('assetDropShadowAlpha', normalized);
     this._syncToolOptionsState();
     if (commit) {
@@ -1350,6 +1906,7 @@ export class AssetPlacementManager {
     }
     this._dropShadowDilation = clamped;
     this._updatePreviewShadow();
+    this._syncScatterPreviewShadowSettingsForActiveElevation({ force: commit });
     if (commit) this._persistShadowSetting('assetDropShadowDilation', clamped);
     this._syncToolOptionsState();
     if (commit) {
@@ -1373,6 +1930,7 @@ export class AssetPlacementManager {
     }
     this._dropShadowBlur = clamped;
     this._updatePreviewShadow({ force: commit });
+    this._syncScatterPreviewShadowSettingsForActiveElevation({ force: commit });
     if (commit) this._persistShadowSetting('assetDropShadowBlur', clamped);
     this._syncToolOptionsState();
     if (commit) {
@@ -1396,6 +1954,7 @@ export class AssetPlacementManager {
     }
     this._dropShadowOffsetDistance = clamped;
     this._updatePreviewShadow();
+    this._syncScatterPreviewShadowSettingsForActiveElevation({ force: commit });
     if (commit) this._persistShadowSetting('assetDropShadowOffsetDistance', clamped);
     this._syncToolOptionsState();
     if (commit) {
@@ -1419,6 +1978,7 @@ export class AssetPlacementManager {
     }
     this._dropShadowOffsetAngle = normalized;
     this._updatePreviewShadow();
+    this._syncScatterPreviewShadowSettingsForActiveElevation({ force: commit });
     if (commit) this._persistShadowSetting('assetDropShadowOffsetAngle', normalized);
     this._syncToolOptionsState();
     if (commit) {
@@ -1437,6 +1997,7 @@ export class AssetPlacementManager {
     }
     const normalized = this._clampScale(numeric / 100);
     this.currentScale = normalized;
+    this._persistPlacementSetting('assetPlacementScale', normalized);
     this._updateScalePreview({ clampOffset: true });
     this._syncToolOptionsState();
     if (this._isEditingExistingTile) this._scheduleEditingCommit();
@@ -1447,8 +2008,10 @@ export class AssetPlacementManager {
     const next = !this._scaleRandomEnabled;
     this._scaleRandomEnabled = next;
     if (next && (!Number.isFinite(this._scaleRandomStrength) || this._scaleRandomStrength <= 0)) {
-      this._scaleRandomStrength = 15;
+      this._scaleRandomStrength = DEFAULT_SCALE_RANDOM_STRENGTH;
     }
+    this._persistPlacementSetting('assetPlacementScaleRandomEnabled', next);
+    this._persistPlacementSetting('assetPlacementScaleRandomStrength', this._scaleRandomStrength);
     this._updateScalePreview({ regenerateOffset: next, clampOffset: true });
     this._syncToolOptionsState({ suppressRender: false });
     return true;
@@ -1458,6 +2021,7 @@ export class AssetPlacementManager {
     const numeric = Number(value);
     const clamped = Number.isFinite(numeric) ? Math.min(100, Math.max(0, numeric)) : 0;
     this._scaleRandomStrength = clamped;
+    this._persistPlacementSetting('assetPlacementScaleRandomStrength', clamped);
     this._updateScalePreview({ clampOffset: true });
     this._syncToolOptionsState();
     return true;
@@ -1471,6 +2035,7 @@ export class AssetPlacementManager {
     }
     const normalized = this._normalizeRotation(numeric);
     this.currentRotation = normalized;
+    this._persistPlacementSetting('assetPlacementRotation', normalized);
     this._updateRotationPreview({ clampOffset: true });
     this._syncToolOptionsState();
     if (this._isEditingExistingTile) this._scheduleEditingCommit();
@@ -1481,8 +2046,10 @@ export class AssetPlacementManager {
     const next = !this._rotationRandomEnabled;
     this._rotationRandomEnabled = next;
     if (next && (!Number.isFinite(this._rotationRandomStrength) || this._rotationRandomStrength <= 0)) {
-      this._rotationRandomStrength = 45;
+      this._rotationRandomStrength = DEFAULT_ROTATION_RANDOM_STRENGTH;
     }
+    this._persistPlacementSetting('assetPlacementRotationRandomEnabled', next);
+    this._persistPlacementSetting('assetPlacementRotationRandomStrength', this._rotationRandomStrength);
     this._updateRotationPreview({ regenerateOffset: next, clampOffset: true });
     this._syncToolOptionsState({ suppressRender: false });
     return true;
@@ -1492,13 +2059,127 @@ export class AssetPlacementManager {
     const numeric = Number(value);
     const clamped = Number.isFinite(numeric) ? Math.min(180, Math.max(0, numeric)) : 0;
     this._rotationRandomStrength = clamped;
+    this._persistPlacementSetting('assetPlacementRotationRandomStrength', clamped);
     this._updateRotationPreview({ clampOffset: true });
+    this._syncToolOptionsState();
+    return true;
+  }
+
+  _setScatterMode(mode) {
+    const next = mode === ASSET_SCATTER_MODE_BRUSH ? ASSET_SCATTER_MODE_BRUSH : ASSET_SCATTER_MODE_SINGLE;
+    if (this._scatterMode === next) {
+      if (
+        next === ASSET_SCATTER_MODE_BRUSH
+        && this.isPlacementActive
+        && !this._isEditingExistingTile
+        && !this._scatterEditing
+      ) {
+        this._ensureScatterOverlay();
+        if (this._scatterMergeEnabled) this._ensureScatterPreviewOverlay();
+      }
+      return true;
+    }
+    if (this._isEditingExistingTile || this._scatterEditing) {
+      this._syncToolOptionsState();
+      return false;
+    }
+    this._scatterMode = next;
+    this._persistPlacementSetting('assetPlacementScatterMode', next);
+    if (next === ASSET_SCATTER_MODE_BRUSH) {
+      if (!this._scatterMergeEnabled) {
+        this._scatterMergeEnabled = true;
+        this._persistScatterSetting('assetScatterMerge', true);
+      }
+      this._ensureScatterOverlay();
+      if (this._scatterMergeEnabled) this._ensureScatterPreviewOverlay();
+      this._scatterPainting = false;
+      this._scatterLastPointerWorld = null;
+      this._scatterStrokeDistance = 0;
+    } else {
+      this._autoCommitScatterSession('switch-mode');
+      this._resetScatterMergeSession();
+      this._resetScatterHistory();
+      void this._endScatterShadowBatch({ awaitQueue: true });
+      this._stopScatterStroke();
+      this._clearScatterOverlay();
+    }
+    this._updateRandomPrefetchCount();
+    this._syncToolOptionsState({ suppressRender: false });
+    return true;
+  }
+
+  setScatterBrushSize(value, commit = false) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return false;
+    const clamped = Math.min(SCATTER_BRUSH_SIZE_MAX, Math.max(SCATTER_BRUSH_SIZE_MIN, numeric));
+    if (Math.abs(clamped - (this._scatterBrushSize ?? 0)) < 0.0005) return true;
+    this._scatterBrushSize = clamped;
+    if (commit) this._persistScatterSetting('assetScatterBrushSize', Math.round(clamped));
+    this._updateScatterCursor();
+    this._syncToolOptionsState({ suppressRender: !commit });
+    return true;
+  }
+
+  setScatterDensity(value, commit = false) {
+    const numeric = Math.round(Number(value));
+    if (!Number.isFinite(numeric)) return false;
+    const clamped = Math.min(SCATTER_DENSITY_MAX, Math.max(SCATTER_DENSITY_MIN, numeric));
+    if (clamped === this._scatterDensity) return true;
+    this._scatterDensity = clamped;
+    if (commit) this._persistScatterSetting('assetScatterDensity', clamped);
+    this._syncToolOptionsState({ suppressRender: !commit });
+    return true;
+  }
+
+  setScatterSprayDeviation(value, commit = false) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return false;
+    const clamped = Math.min(100, Math.max(0, numeric));
+    const normalized = clamped / 100;
+    if (Math.abs(normalized - (this._scatterSprayDeviation ?? 0)) < 0.0005) return true;
+    this._scatterSprayDeviation = normalized;
+    if (commit) this._persistScatterSetting('assetScatterSprayDeviation', Math.round(clamped));
+    this._syncToolOptionsState({ suppressRender: !commit });
+    return true;
+  }
+
+  setScatterSpacing(value, commit = false) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return false;
+    const clamped = Math.min(SCATTER_SPACING_MAX, Math.max(SCATTER_SPACING_MIN, numeric));
+    if (Math.abs(clamped - (this._scatterSpacing ?? 0)) < 0.0005) return true;
+    this._scatterSpacing = clamped;
+    if (commit) this._persistScatterSetting('assetScatterSpacing', Math.round(clamped));
+    this._syncToolOptionsState({ suppressRender: !commit });
+    return true;
+  }
+
+  setScatterMergeEnabled(_enabled, commit = false) {
+    const next = true;
+    if (next === this._scatterMergeEnabled) {
+      this._syncToolOptionsState();
+      return true;
+    }
+    this._scatterMergeEnabled = next;
+    if (commit) this._persistScatterSetting('assetScatterMerge', true);
+    this._syncToolOptionsState({ suppressRender: !commit });
+    return true;
+  }
+
+  setScatterEraserEnabled(enabled) {
+    if (!this.isPlacementActive || this._isEditingExistingTile || this._scatterMode !== ASSET_SCATTER_MODE_BRUSH || !this._scatterMergeEnabled) {
+      this._scatterEraseEnabled = false;
+      this._syncToolOptionsState();
+      return false;
+    }
+    this._scatterEraseEnabled = !!enabled;
     this._syncToolOptionsState();
     return true;
   }
 
   _handleFlipHorizontalToggle() {
     this._flipHorizontal = !this._flipHorizontal;
+    this._persistPlacementSetting('assetPlacementFlipHorizontal', this._flipHorizontal);
     this._updateFlipPreview();
     this._syncToolOptionsState({ suppressRender: false });
     if (this._isEditingExistingTile) this._scheduleEditingCommit();
@@ -1507,6 +2188,7 @@ export class AssetPlacementManager {
 
   _handleFlipVerticalToggle() {
     this._flipVertical = !this._flipVertical;
+    this._persistPlacementSetting('assetPlacementFlipVertical', this._flipVertical);
     this._updateFlipPreview();
     this._syncToolOptionsState({ suppressRender: false });
     if (this._isEditingExistingTile) this._scheduleEditingCommit();
@@ -1517,6 +2199,7 @@ export class AssetPlacementManager {
     const next = !this._flipRandomHorizontalEnabled;
     this._flipRandomHorizontalEnabled = next;
     this._flipRandomHorizontalOffset = next ? null : false;
+    this._persistPlacementSetting('assetPlacementFlipRandomHorizontal', next);
     this._updateFlipPreview({ regenerateOffsets: next });
     this._syncToolOptionsState({ suppressRender: false });
     return true;
@@ -1526,6 +2209,7 @@ export class AssetPlacementManager {
     const next = !this._flipRandomVerticalEnabled;
     this._flipRandomVerticalEnabled = next;
     this._flipRandomVerticalOffset = next ? null : false;
+    this._persistPlacementSetting('assetPlacementFlipRandomVertical', next);
     this._updateFlipPreview({ regenerateOffsets: next });
     this._syncToolOptionsState({ suppressRender: false });
     return true;
@@ -1538,6 +2222,7 @@ export class AssetPlacementManager {
       if (!setting || setting.namespace !== 'fa-nexus') return;
       if (setting.key === 'assetDropShadow') {
         this._syncToolOptionsState();
+        this._scheduleScatterPreviewShadowUpdate({ force: true });
         return;
       }
       switch (setting.key) {
@@ -1545,26 +2230,31 @@ export class AssetPlacementManager {
           this._dropShadowAlpha = this._coerceShadowNumeric(setting.value, 0, 1, this._dropShadowAlpha);
           this._syncToolOptionsState();
           this._updatePreviewShadow({ force: true });
+          this._syncScatterPreviewShadowSettingsForActiveElevation({ force: true });
           break;
         case 'assetDropShadowDilation':
           this._dropShadowDilation = this._coerceShadowNumeric(setting.value, 0, MAX_SHADOW_DILATION, this._dropShadowDilation);
           this._syncToolOptionsState();
           this._updatePreviewShadow({ force: true });
+          this._syncScatterPreviewShadowSettingsForActiveElevation({ force: true });
           break;
         case 'assetDropShadowBlur':
-      this._dropShadowBlur = this._coerceShadowNumeric(setting.value, 0, MAX_SHADOW_BLUR, this._dropShadowBlur);
+          this._dropShadowBlur = this._coerceShadowNumeric(setting.value, 0, MAX_SHADOW_BLUR, this._dropShadowBlur);
           this._syncToolOptionsState();
           this._updatePreviewShadow({ force: true });
+          this._syncScatterPreviewShadowSettingsForActiveElevation({ force: true });
           break;
         case 'assetDropShadowOffsetDistance':
           this._dropShadowOffsetDistance = this._coerceShadowNumeric(setting.value, 0, MAX_SHADOW_OFFSET, this._dropShadowOffsetDistance);
           this._syncToolOptionsState();
           this._updatePreviewShadow({ force: true });
+          this._syncScatterPreviewShadowSettingsForActiveElevation({ force: true });
           break;
         case 'assetDropShadowOffsetAngle':
           this._dropShadowOffsetAngle = this._normalizeShadowAngle(setting.value);
           this._syncToolOptionsState();
           this._updatePreviewShadow({ force: true });
+          this._syncScatterPreviewShadowSettingsForActiveElevation({ force: true });
           break;
         case 'assetDropShadowCollapsed':
           this._shadowSettingsCollapsed = !!setting.value;
@@ -1798,6 +2488,309 @@ export class AssetPlacementManager {
       try { container._shadowContainer.visible = false; } catch (_) {}
     }
     container._shadowState = null;
+  }
+
+  _isScatterPreviewShadowActive() {
+    return this._isGlobalDropShadowEnabled() && this.isDropShadowEnabled() && !!this._scatterPreviewGroups?.size;
+  }
+
+  _snapshotScatterPreviewShadowSettings() {
+    return {
+      alpha: Math.min(1, Math.max(0, Number(this._dropShadowAlpha || 0))),
+      dilation: Math.max(0, Number(this._dropShadowDilation || 0)),
+      blur: Math.max(0, Number(this._dropShadowBlur || 0)),
+      offsetDistance: Math.min(MAX_SHADOW_OFFSET, Math.max(0, Number(this._dropShadowOffsetDistance || 0))),
+      offsetAngle: this._normalizeShadowAngle(this._dropShadowOffsetAngle ?? 0)
+    };
+  }
+
+  _syncScatterPreviewShadowSettingsForActiveElevation({ force = false } = {}) {
+    try {
+      const key = this._getScatterPreviewGroupKey(this._previewElevation);
+      const settings = this._snapshotScatterPreviewShadowSettings();
+      this._scatterPreviewShadowSettings.set(key, settings);
+      const group = this._scatterPreviewGroups.get(key);
+      if (group) group.shadow = { ...settings };
+      const sessionGroup = this._scatterSessionGroups.get(key);
+      if (sessionGroup) sessionGroup.shadowSettings = { ...settings };
+      if (group) this._scheduleScatterPreviewShadowUpdate({ force, key: group.key });
+    } catch (_) {}
+  }
+
+  _ensureScatterPreviewShadowContainer(container) {
+    const target = container || this._scatterPreviewContainer;
+    if (!target) return null;
+    const containerRef = target;
+    let shadow = containerRef._shadowContainer || null;
+    if (!shadow || shadow.destroyed) {
+      shadow = new PIXI.Container();
+      shadow.sortableChildren = false;
+      shadow.eventMode = 'none';
+      shadow.visible = false;
+      shadow.name = 'fa-nexus-scatter-shadow-preview';
+      const sprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
+      sprite.anchor.set(0, 0);
+      sprite.visible = false;
+      sprite.eventMode = 'none';
+      shadow.addChild(sprite);
+      shadow._sprite = sprite;
+      containerRef.addChildAt(shadow, 0);
+      containerRef._shadowContainer = shadow;
+      containerRef._shadowSprite = sprite;
+      containerRef._shadowRenderTexture = null;
+      containerRef._shadowState = null;
+    } else if (typeof containerRef.getChildIndex === 'function' && containerRef.getChildIndex(shadow) !== 0) {
+      try { containerRef.setChildIndex(shadow, 0); } catch (_) {}
+    }
+    return shadow;
+  }
+
+  _scheduleScatterPreviewShadowUpdate({ force = false, key = null } = {}) {
+    try {
+      if (typeof window === 'undefined') return;
+      if (!this._scatterPreviewGroups?.size) return;
+      if (this._scatterPreviewShadowBatchActive) {
+        if (force) this._scatterPreviewShadowBatchForce = true;
+        if (!key) this._scatterPreviewShadowBatchNeedsAll = true;
+        if (key) this._scatterPreviewShadowBatchDirty.add(key);
+        return;
+      }
+      if (force) this._scatterPreviewShadowForce = true;
+      if (key) this._scatterPreviewShadowDirty.add(key);
+      if (this._scatterPreviewShadowFrame) return;
+      this._scatterPreviewShadowFrame = window.requestAnimationFrame(() => {
+        this._scatterPreviewShadowFrame = null;
+        const shouldForce = this._scatterPreviewShadowForce;
+        this._scatterPreviewShadowForce = false;
+        const keys = shouldForce
+          ? Array.from(this._scatterPreviewGroups.keys())
+          : Array.from(this._scatterPreviewShadowDirty);
+        this._scatterPreviewShadowDirty.clear();
+        if (!keys.length) {
+          if (this._scatterPreviewActiveKey) {
+            keys.push(this._scatterPreviewActiveKey);
+          } else if (this._scatterPreviewGroups?.size) {
+            keys.push(...this._scatterPreviewGroups.keys());
+          }
+        }
+        if (!keys.length) return;
+        for (const groupKey of keys) {
+          const group = this._scatterPreviewGroups.get(groupKey);
+          if (!group) continue;
+          this._updateScatterPreviewShadowForGroup(group, { force: shouldForce });
+        }
+      });
+    } catch (_) {}
+  }
+
+  _registerScatterPreviewShadowTextureListener(baseTexture) {
+    try {
+      if (!baseTexture || typeof baseTexture.once !== 'function') return;
+      if (this._scatterPreviewShadowTextureListeners.has(baseTexture)) return;
+      const handler = () => {
+        if (this._scatterPreviewShadowTextureListeners.get(baseTexture) === handler) {
+          this._scatterPreviewShadowTextureListeners.delete(baseTexture);
+        }
+        this._scheduleScatterPreviewShadowUpdate({ force: true });
+      };
+      this._scatterPreviewShadowTextureListeners.set(baseTexture, handler);
+      baseTexture.once('loaded', handler);
+      baseTexture.once('update', handler);
+    } catch (_) {}
+  }
+
+  _computeScatterPreviewInstanceBounds(instance) {
+    const cx = Number(instance?.x) || 0;
+    const cy = Number(instance?.y) || 0;
+    const hw = Math.max(1, Number(instance?.w) || 0) / 2;
+    const hh = Math.max(1, Number(instance?.h) || 0) / 2;
+    const rot = ((Number(instance?.r) || 0) * Math.PI) / 180;
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const corners = [
+      { x: -hw, y: -hh },
+      { x: hw, y: -hh },
+      { x: hw, y: hh },
+      { x: -hw, y: hh }
+    ];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const corner of corners) {
+      const x = cx + corner.x * cos - corner.y * sin;
+      const y = cy + corner.x * sin + corner.y * cos;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  _computeScatterPreviewBounds(instances) {
+    if (!Array.isArray(instances) || !instances.length) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const instance of instances) {
+      if (!instance) continue;
+      const bounds = this._computeScatterPreviewInstanceBounds(instance);
+      if (!bounds) continue;
+      if (bounds.minX < minX) minX = bounds.minX;
+      if (bounds.minY < minY) minY = bounds.minY;
+      if (bounds.maxX > maxX) maxX = bounds.maxX;
+      if (bounds.maxY > maxY) maxY = bounds.maxY;
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: Math.max(1, maxX - minX),
+      height: Math.max(1, maxY - minY)
+    };
+  }
+
+  _updateScatterPreviewShadowForGroup(group, { force = false } = {}) {
+    try {
+      const container = group?.container;
+      if (!container) return;
+      if (!this._isScatterPreviewShadowActive()) {
+        if (container._shadowContainer) container._shadowContainer.visible = false;
+        return;
+      }
+      const instances = Array.isArray(group?.instances) ? group.instances : [];
+      if (!instances.length) {
+        if (container._shadowContainer) container._shadowContainer.visible = false;
+        return;
+      }
+      const renderer = canvas?.app?.renderer;
+      if (!renderer) return;
+
+      const bounds = this._computeScatterPreviewBounds(instances);
+      if (!bounds) return;
+
+      const shadowSettings = group?.shadow
+        || this._scatterPreviewShadowSettings.get(group?.key)
+        || this._snapshotScatterPreviewShadowSettings();
+      const alpha = Math.min(1, Math.max(0, Number(shadowSettings?.alpha ?? this._dropShadowAlpha ?? 0)));
+      const dilation = Math.max(0, Number(shadowSettings?.dilation ?? this._dropShadowDilation ?? 0));
+      const blur = Math.max(0, Number(shadowSettings?.blur ?? this._dropShadowBlur ?? 0));
+      const offsetDistance = Number(shadowSettings?.offsetDistance ?? this._dropShadowOffsetDistance ?? 0);
+      const offsetAngle = shadowSettings?.offsetAngle ?? this._dropShadowOffsetAngle ?? 0;
+      const offset = this._computeShadowOffsetVector(offsetDistance, offsetAngle);
+      const zoom = Math.max(0.1, Number(canvas?.stage?.scale?.x || 1));
+
+      const blurMargin = blur * 12;
+      const marginX = Math.abs(offset.x) + dilation + blurMargin;
+      const marginY = Math.abs(offset.y) + dilation + blurMargin;
+      const paddedWidth = Math.max(8, Math.ceil(bounds.width + marginX * 2));
+      const paddedHeight = Math.max(8, Math.ceil(bounds.height + marginY * 2));
+      const originX = bounds.minX - marginX;
+      const originY = bounds.minY - marginY;
+
+      const signature = (() => {
+        try {
+          return JSON.stringify({
+            a: Number(alpha.toFixed(3)),
+            d: Number(dilation.toFixed(3)),
+            b: Number(blur.toFixed(3)),
+            ox: Number((offset.x || 0).toFixed(3)),
+            oy: Number((offset.y || 0).toFixed(3)),
+            w: paddedWidth,
+            h: paddedHeight,
+            i: instances
+          });
+        } catch (_) {
+          return '';
+        }
+      })();
+      const previousSignature = container._shadowState?.signature || null;
+      if (!force && previousSignature === signature) return;
+
+      const shadow = this._ensureScatterPreviewShadowContainer(container);
+      if (!shadow) return;
+      shadow.visible = true;
+      shadow.alpha = 1;
+
+      const shadowSprite = container._shadowSprite || shadow._sprite;
+      if (!shadowSprite) return;
+
+      let renderTexture = container._shadowRenderTexture || null;
+      if (!renderTexture || renderTexture.width !== paddedWidth || renderTexture.height !== paddedHeight) {
+        if (renderTexture && !renderTexture.destroyed) {
+          try { renderTexture.destroy(true); } catch (_) {}
+        }
+        renderTexture = PIXI.RenderTexture.create({ width: paddedWidth, height: paddedHeight, scaleMode: PIXI.SCALE_MODES.LINEAR });
+        container._shadowRenderTexture = renderTexture;
+      }
+
+      const drawContainer = new PIXI.Container();
+      const offsets = this._buildPreviewDilationOffsets(dilation);
+      let drawCount = 0;
+      for (const instance of instances) {
+        const texture = this._getScatterPreviewTexture(instance?.src);
+        if (!texture) continue;
+        const baseTexture = texture.baseTexture;
+        if (baseTexture && !baseTexture.valid) {
+          this._registerScatterPreviewShadowTextureListener(baseTexture);
+          continue;
+        }
+        const baseWidth = Math.max(1, Number(instance?.w) || 0);
+        const baseHeight = Math.max(1, Number(instance?.h) || 0);
+        const baseX = (Number(instance?.x) || 0) - originX + offset.x;
+        const baseY = (Number(instance?.y) || 0) - originY + offset.y;
+        const rotation = ((Number(instance?.r) || 0) * Math.PI) / 180;
+        for (const sample of offsets) {
+          const clone = new PIXI.Sprite(texture);
+          clone.anchor.set(0.5, 0.5);
+          clone.width = baseWidth;
+          clone.height = baseHeight;
+          if (instance?.flipH) clone.scale.x *= -1;
+          if (instance?.flipV) clone.scale.y *= -1;
+          clone.rotation = rotation;
+          clone.position.set(baseX + sample.x, baseY + sample.y);
+          clone.alpha = 1;
+          drawContainer.addChild(clone);
+          drawCount += 1;
+        }
+      }
+
+      if (!drawCount) {
+        if (container._shadowContainer) container._shadowContainer.visible = false;
+        try { drawContainer.destroy({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+        return;
+      }
+
+      renderer.render(drawContainer, { renderTexture, clear: true });
+      try { drawContainer.destroy({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+
+      shadowSprite.texture = renderTexture;
+      shadowSprite.tint = 0x000000;
+      shadowSprite.alpha = alpha;
+      shadowSprite.position.set(originX, originY);
+      shadowSprite.anchor.set(0, 0);
+      shadowSprite.visible = true;
+
+      if (blur > 0) {
+        let filter = container._shadowBlurFilter || null;
+        if (!filter || filter.destroyed) {
+          filter = new PIXI.BlurFilter();
+          filter.quality = 4;
+          filter.repeatEdgePixels = true;
+          container._shadowBlurFilter = filter;
+        }
+        filter.blur = blur * zoom;
+        shadowSprite.filters = [filter];
+      } else if (shadowSprite.filters) {
+        shadowSprite.filters = null;
+      }
+
+      container._shadowState = { signature };
+    } catch (_) {}
   }
 
   _computeShadowPreviewSignature() {
@@ -2080,10 +3073,11 @@ export class AssetPlacementManager {
     const scaleMul = this._getPendingScale();
 
      // Create PIXI container for preview
-     const container = new PIXI.Container();
-     container.sortableChildren = true;
-     container.eventMode = 'none';
-     this._previewContainer = container;
+    const container = new PIXI.Container();
+    container.sortableChildren = true;
+    container.eventMode = 'none';
+    container.name = 'fa-nexus-asset-preview';
+    this._previewContainer = container;
 
      // Create sprite
      const textureUrl = this._encodeAssetPath(this.currentAsset.url);
@@ -2375,6 +3369,123 @@ export class AssetPlacementManager {
     } catch (error) {
       Logger.warn('Placement.assetDataFromTile.failed', String(error?.message || error));
       return null;
+    }
+  }
+
+  _readScatterTileData(tileDocument) {
+    try {
+      const doc = tileDocument?.document ?? tileDocument;
+      if (!doc) return null;
+      const direct = doc?.getFlag?.('fa-nexus', SCATTER_FLAG_KEY);
+      const payload = direct !== undefined ? direct : (doc?.flags?.['fa-nexus']?.[SCATTER_FLAG_KEY] || doc?._source?.flags?.['fa-nexus']?.[SCATTER_FLAG_KEY]);
+      if (!payload || typeof payload !== 'object') return null;
+      const version = Number(payload.version || SCATTER_VERSION);
+      if (version !== SCATTER_VERSION) return null;
+      if (!Array.isArray(payload.instances) || !payload.instances.length) return null;
+      return payload;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _normalizeScatterInstances(raw = []) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((entry) => entry && typeof entry === 'object')
+      .map((entry) => ({
+        id: typeof entry.id === 'string' ? entry.id : this._createScatterInstanceId(),
+        src: typeof entry.src === 'string' ? entry.src : '',
+        x: Number(entry.x) || 0,
+        y: Number(entry.y) || 0,
+        w: Math.max(1, Number(entry.w) || 0),
+        h: Math.max(1, Number(entry.h) || 0),
+        r: Number(entry.r) || 0,
+        flipH: !!entry.flipH,
+        flipV: !!entry.flipV
+      }))
+      .filter((entry) => entry.src);
+  }
+
+  async _editScatterTile(doc, payload, options = {}) {
+    try {
+      this.cancelPlacement('replace');
+      this.isPlacementActive = true;
+      this.isStickyMode = false;
+      this._scatterMode = ASSET_SCATTER_MODE_BRUSH;
+      this._scatterPainting = false;
+      this._scatterLastPointerWorld = null;
+      this._scatterStrokeDistance = 0;
+      this._scatterMergeBeforeEdit = this._scatterMergeEnabled;
+      this._scatterMergeEnabled = true;
+      this._scatterEditing = true;
+      this._scatterEraseEnabled = false;
+      this._scatterEditTile = doc;
+      this._previewFrozen = false;
+
+      const tileObj = doc?.object || null;
+      this._editingTileObject = tileObj || null;
+      this._editingTileVisibilitySnapshot = tileObj ? this._captureTileVisibility(tileObj) : null;
+      if (tileObj) {
+        this._releaseTileSelection(tileObj);
+        this._hideTileForEditing(tileObj);
+      }
+
+      const instances = this._normalizeScatterInstances(payload.instances || []);
+      const originX = Number(doc.x || 0);
+      const originY = Number(doc.y || 0);
+      const worldInstances = instances.map((instance) => ({
+        ...instance,
+        x: instance.x + originX,
+        y: instance.y + originY
+      }));
+
+      const initialElevation = Number.isFinite(doc.elevation) ? Number(doc.elevation) : (Number.isFinite(this._lastElevationUsed) ? this._lastElevationUsed : 0);
+      this._previewElevation = initialElevation;
+      this._lastElevationUsed = this._previewElevation;
+      this._previewSort = Number(doc.sort ?? 0) || 0;
+      this._beginScatterPreviewSession(worldInstances, { elevation: this._previewElevation });
+      this._resetScatterHistory();
+      this._recordScatterHistorySnapshot({ force: true });
+
+      const centerWorld = (() => {
+        if (options.pointerWorld && Number.isFinite(options.pointerWorld.x) && Number.isFinite(options.pointerWorld.y)) {
+          return { x: Number(options.pointerWorld.x), y: Number(options.pointerWorld.y) };
+        }
+        const w = Number(doc.width || 0);
+        const h = Number(doc.height || 0);
+        return { x: originX + w / 2, y: originY + h / 2 };
+      })();
+
+      const pointerOption = (() => {
+        if (options.pointer && Number.isFinite(options.pointer.x) && Number.isFinite(options.pointer.y)) {
+          return { x: Number(options.pointer.x), y: Number(options.pointer.y) };
+        }
+        if (canvas?.stage && centerWorld) {
+          try {
+            const stagePoint = canvas.stage.worldTransform.apply(new PIXI.Point(centerWorld.x, centerWorld.y));
+            const canvasEl = canvas.app?.view || document.querySelector('canvas#board');
+            if (canvasEl) {
+              const rect = canvasEl.getBoundingClientRect();
+              return { x: rect.left + stagePoint.x, y: rect.top + stagePoint.y };
+            }
+          } catch (_) {}
+        }
+        return null;
+      })();
+
+      this._ensurePointerSnapshot({
+        pointer: pointerOption || options.pointer || null,
+        pointerWorld: options.pointerWorld || centerWorld
+      });
+      this._syncScatterPreviewOrdering();
+      this._activateToolOptions();
+      this._activateTilesLayer();
+      this._ensureScatterOverlay();
+      this._startInteractionSession();
+      this._addPlacementFeedback();
+    } catch (error) {
+      Logger.warn('Placement.editScatter.failed', String(error?.message || error));
+      this.cancelPlacement('error');
     }
   }
 
@@ -2825,8 +3936,1139 @@ export class AssetPlacementManager {
     this._clearShadowOffsetPreview();
   }
 
+  _ensureScatterOverlay() {
+    if (this._scatterOverlay && !this._scatterOverlay.destroyed && this._scatterGfx) return;
+    try {
+      const overlay = new PIXI.Container();
+      overlay.eventMode = 'none';
+      overlay.zIndex = 999999;
+      const gfx = new PIXI.Graphics();
+      gfx.eventMode = 'none';
+      overlay.addChild(gfx);
+      const parent = canvas?.stage || canvas?.primary;
+      parent?.addChild?.(overlay);
+      if (parent && 'sortDirty' in parent) parent.sortDirty = true;
+      parent?.sortChildren?.();
+      this._scatterOverlay = overlay;
+      this._scatterGfx = gfx;
+    } catch (_) {
+      this._scatterOverlay = null;
+      this._scatterGfx = null;
+    }
+  }
+
+  _clearScatterOverlay() {
+    if (this._scatterGfx) {
+      try { this._scatterGfx.clear(); } catch (_) {}
+    }
+    if (this._scatterOverlay) {
+      try { this._scatterOverlay.parent?.removeChild?.(this._scatterOverlay); } catch (_) {}
+      try { this._scatterOverlay.destroy?.({ children: true }); } catch (_) {}
+    }
+    this._scatterOverlay = null;
+    this._scatterGfx = null;
+  }
+
+  _updateScatterCursor(worldX = null, worldY = null) {
+    if (this._scatterMode !== ASSET_SCATTER_MODE_BRUSH) return;
+    if (!this._scatterGfx) return;
+    const gfx = this._scatterGfx;
+    const pos = (() => {
+      if (Number.isFinite(worldX) && Number.isFinite(worldY)) return { x: worldX, y: worldY };
+      if (this._previewFrozen && this._frozenPreviewWorld) return this._frozenPreviewWorld;
+      if (this._lastPointerWorld) return this._lastPointerWorld;
+      return null;
+    })();
+    gfx.clear();
+    if (!pos) return;
+    const radius = this._getScatterBrushRadius();
+    gfx.lineStyle(2, 0x66ccff, 0.85);
+    gfx.drawCircle(pos.x, pos.y, Math.max(1, radius));
+  }
+
+  _ensureScatterPreviewOverlay() {
+    const elevation = Number.isFinite(this._previewElevation) ? this._previewElevation : 0;
+    const group = this._ensureScatterPreviewGroup(elevation, { setActive: true });
+    if (group) {
+      this._scheduleScatterPreviewShadowUpdate({ force: true, key: group.key });
+    }
+  }
+
+  _clearScatterPreviewOverlay() {
+    if (this._scatterPreviewGroups?.size) {
+      for (const group of this._scatterPreviewGroups.values()) {
+        this._destroyScatterPreviewGroup(group);
+      }
+    }
+    if (this._scatterPreviewShadowFrame && typeof window !== 'undefined') {
+      try { window.cancelAnimationFrame(this._scatterPreviewShadowFrame); } catch (_) {}
+    }
+    this._scatterPreviewShadowFrame = null;
+    this._scatterPreviewShadowForce = false;
+    this._scatterPreviewShadowDirty = new Set();
+    this._scatterPreviewShadowSettings = new Map();
+    this._scatterPreviewShadowTextureListeners = new WeakMap();
+    this._scatterPreviewShadowBatchActive = false;
+    this._scatterPreviewShadowBatchForce = false;
+    this._scatterPreviewShadowBatchNeedsAll = false;
+    this._scatterPreviewShadowBatchDirty.clear();
+    this._scatterPreviewGroups = new Map();
+    this._scatterPreviewContainer = null;
+    this._scatterPreviewActiveKey = null;
+    this._scatterPreviewInstances = [];
+    this._scatterPreviewSprites.clear();
+    this._notifyPreviewLayerChange();
+  }
+
+  _resetScatterPreviewSession() {
+    this._clearScatterPreviewOverlay();
+  }
+
+  _beginScatterPreviewSession(instances = [], { elevation = null, shadowSettings = null } = {}) {
+    this._resetScatterPreviewSession();
+    if (shadowSettings) {
+      const entries = shadowSettings instanceof Map
+        ? Array.from(shadowSettings.entries())
+        : (Array.isArray(shadowSettings) ? shadowSettings : null);
+      if (entries) {
+        this._scatterPreviewShadowSettings = new Map(entries.map(([key, settings]) => [
+          key,
+          settings && typeof settings === 'object' ? { ...settings } : settings
+        ]));
+      }
+    }
+    const targetElevation = Number.isFinite(elevation) ? elevation : this._previewElevation;
+    if (Array.isArray(instances) && instances.length) {
+      const key = this._getScatterPreviewGroupKey(targetElevation);
+      for (const instance of instances) {
+        if (!instance) continue;
+        instance._scatterGroupKey = instance._scatterGroupKey || key;
+        instance._scatterElevation = Number.isFinite(instance._scatterElevation)
+          ? instance._scatterElevation
+          : quantizeElevation(Number(targetElevation) || 0);
+        this._scatterPreviewInstances.push(instance);
+        this._addScatterPreviewInstance(instance);
+      }
+      this._scheduleScatterPreviewShadowUpdate({ force: true });
+    }
+  }
+
+  _getScatterPreviewTexture(src) {
+    if (!src) return null;
+    if (this._scatterPreviewTextures.has(src)) return this._scatterPreviewTextures.get(src);
+    const texture = PIXI.Texture.from(src);
+    this._scatterPreviewTextures.set(src, texture);
+    return texture;
+  }
+
+  _addScatterPreviewInstance(instance) {
+    if (!instance) return;
+    const src = instance.src;
+    if (!src) return;
+    const elevation = Number.isFinite(instance._scatterElevation) ? instance._scatterElevation : this._previewElevation;
+    const group = this._ensureScatterPreviewGroup(elevation, { setActive: this._getScatterPreviewGroupKey(elevation) === this._getScatterPreviewGroupKey(this._previewElevation) });
+    if (!group?.container) return;
+    instance._scatterGroupKey = instance._scatterGroupKey || group.key;
+    instance._scatterElevation = group.elevation;
+    if (!group.instances.includes(instance)) group.instances.push(instance);
+    const texture = this._getScatterPreviewTexture(src);
+    if (!texture) return;
+    const sprite = new PIXI.Sprite(texture);
+    sprite.anchor.set(0.5);
+    sprite.position.set(instance.x, instance.y);
+    sprite.rotation = ((instance.r || 0) * Math.PI) / 180;
+    sprite.width = instance.w;
+    sprite.height = instance.h;
+    if (instance.flipH) sprite.scale.x *= -1;
+    if (instance.flipV) sprite.scale.y *= -1;
+    sprite.eventMode = 'none';
+    group.container.addChild(sprite);
+    if (instance.id) {
+      this._scatterPreviewSprites.set(instance.id, sprite);
+    }
+    this._syncScatterPreviewFlags();
+    this._scheduleScatterPreviewShadowUpdate({ key: group.key });
+  }
+
+  _removeScatterPreviewInstance(instanceId) {
+    if (!instanceId) return;
+    const sprite = this._scatterPreviewSprites.get(instanceId);
+    if (!sprite) return;
+    const instance = this._scatterPreviewInstances.find((entry) => entry?.id === instanceId) || null;
+    const groupKey = instance?._scatterGroupKey;
+    try { sprite.parent?.removeChild?.(sprite); } catch (_) {}
+    try { sprite.destroy?.({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+    this._scatterPreviewSprites.delete(instanceId);
+    if (groupKey && this._scatterPreviewGroups?.size) {
+      const group = this._scatterPreviewGroups.get(groupKey);
+      if (group) {
+        group.instances = (group.instances || []).filter((entry) => entry?.id !== instanceId);
+        if (!group.instances.length) {
+          this._scatterPreviewGroups.delete(groupKey);
+          this._destroyScatterPreviewGroup(group);
+          if (this._scatterPreviewActiveKey === groupKey) {
+            this._scatterPreviewActiveKey = null;
+            this._scatterPreviewContainer = null;
+          }
+          this._scatterPreviewShadowDirty.delete(groupKey);
+        }
+      }
+    }
+    this._syncScatterPreviewFlags();
+    this._scheduleScatterPreviewShadowUpdate({ key: groupKey || null });
+  }
+
+  _rebuildScatterPreviewSprites() {
+    const instances = Array.isArray(this._scatterPreviewInstances) ? this._scatterPreviewInstances : [];
+    this._resetScatterPreviewSession();
+    this._scatterPreviewInstances = [];
+    for (const instance of instances) {
+      this._scatterPreviewInstances.push(instance);
+      this._addScatterPreviewInstance(instance);
+    }
+    this._scheduleScatterPreviewShadowUpdate({ force: true });
+  }
+
+  _createScatterInstanceId() {
+    return `scatter-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  async _collectScatterStampInstances(worldX, worldY) {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return [];
+    if (!this.currentAsset && (!this.isRandomMode || !Array.isArray(this.randomAssets) || !this.randomAssets.length)) {
+      return [];
+    }
+    const center = this._applyGridSnapping({ x: worldX, y: worldY });
+    const brushRadius = this._getScatterBrushRadius();
+    const density = this._getScatterDensity();
+    const instances = [];
+    for (let i = 0; i < density; i += 1) {
+      const asset = this._pickScatterAsset();
+      if (!asset) continue;
+      if (this._assetRequiresDownload(asset)) {
+        try { await this._ensureAssetLocal(asset); } catch (_) { continue; }
+      }
+      const offset = this._sampleScatterOffset(brushRadius, brushRadius);
+      const pos = { x: center.x + offset.x, y: center.y + offset.y };
+      const snapped = this._applyGridSnapping(pos);
+      const rotation = this._getScatterRotation();
+      const scale = this._getScatterScale();
+      const flip = this._getScatterFlipState();
+      const instance = this._buildScatterInstanceData(asset, snapped, { rotation, scale, flip });
+      if (instance) instances.push(instance);
+    }
+    return instances;
+  }
+
+  async _scatterPreviewStampAtWorld(worldX, worldY) {
+    try {
+      if (this._scatterMergeEnabled && !this._scatterEditing && !this._scatterSessionActive) {
+        this._startScatterMergeSession();
+      }
+      const instances = await this._collectScatterStampInstances(worldX, worldY);
+      if (!instances.length) return;
+      if (this._scatterMergeEnabled && this._scatterSessionActive && !this._scatterEditing) {
+        this._registerScatterSessionInstances(instances, this._previewElevation);
+      } else {
+        const key = this._getScatterPreviewGroupKey(this._previewElevation);
+        const elevation = quantizeElevation(Number(this._previewElevation) || 0);
+        for (const instance of instances) {
+          if (!instance) continue;
+          instance._scatterGroupKey = instance._scatterGroupKey || key;
+          instance._scatterElevation = Number.isFinite(instance._scatterElevation) ? instance._scatterElevation : elevation;
+        }
+      }
+      for (const instance of instances) {
+        this._scatterPreviewInstances.push(instance);
+        this._addScatterPreviewInstance(instance);
+      }
+      this._scatterHistoryDirty = true;
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  _scatterEraseAtWorld(worldX, worldY) {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return;
+    if (!this._scatterMergeEnabled || !this._scatterEraseEnabled) return;
+    const radius = this._getScatterBrushRadius();
+    if (!radius || radius <= 0) return;
+    const radiusSq = radius * radius;
+    const nextInstances = [];
+    const removedIds = new Set();
+    for (const instance of this._scatterPreviewInstances) {
+      const dx = instance.x - worldX;
+      const dy = instance.y - worldY;
+      if ((dx * dx + dy * dy) <= radiusSq) {
+        if (instance.id) this._removeScatterPreviewInstance(instance.id);
+        if (instance.id) removedIds.add(instance.id);
+      } else {
+        nextInstances.push(instance);
+      }
+    }
+    this._scatterPreviewInstances = nextInstances;
+    if (this._scatterSessionActive && removedIds.size) {
+      for (const [key, group] of this._scatterSessionGroups) {
+        const filtered = (group.instances || []).filter((instance) => !removedIds.has(instance.id));
+        if (filtered.length) {
+          group.instances = filtered;
+        } else {
+          this._scatterSessionGroups.delete(key);
+        }
+      }
+    }
+    if (removedIds.size) this._scatterHistoryDirty = true;
+  }
+
+  _computeScatterInstanceBounds(instance) {
+    const cx = Number(instance.x) || 0;
+    const cy = Number(instance.y) || 0;
+    const hw = Math.max(1, Number(instance.w) || 0) / 2;
+    const hh = Math.max(1, Number(instance.h) || 0) / 2;
+    const rot = ((Number(instance.r) || 0) * Math.PI) / 180;
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const corners = [
+      { x: -hw, y: -hh },
+      { x: hw, y: -hh },
+      { x: hw, y: hh },
+      { x: -hw, y: hh }
+    ];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const corner of corners) {
+      const x = cx + corner.x * cos - corner.y * sin;
+      const y = cy + corner.x * sin + corner.y * cos;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  _computeScatterBounds(instances) {
+    if (!Array.isArray(instances) || !instances.length) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const instance of instances) {
+      const bounds = this._computeScatterInstanceBounds(instance);
+      if (!bounds) continue;
+      if (bounds.minX < minX) minX = bounds.minX;
+      if (bounds.minY < minY) minY = bounds.minY;
+      if (bounds.maxX > maxX) maxX = bounds.maxX;
+      if (bounds.maxY > maxY) maxY = bounds.maxY;
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+    return {
+      x: Math.floor(minX),
+      y: Math.floor(minY),
+      width: Math.max(1, Math.ceil(maxX - minX)),
+      height: Math.max(1, Math.ceil(maxY - minY))
+    };
+  }
+
+  _buildScatterInstanceData(asset, worldPoint, { rotation, scale, flip }) {
+    if (!asset || !worldPoint) return null;
+    const assetPx = this._getAssetBasePxPerSquare();
+    const dims = this._computeWorldSizeForAsset(asset, scale);
+    const placedWidth = Math.round(Number(dims.worldWidth || assetPx));
+    const placedHeight = Math.round(Number(dims.worldHeight || assetPx));
+    const src = this._encodeAssetPath(asset.path || asset.url || '');
+    if (!src) return null;
+    return {
+      id: this._createScatterInstanceId(),
+      src,
+      x: Math.round(worldPoint.x),
+      y: Math.round(worldPoint.y),
+      w: placedWidth,
+      h: placedHeight,
+      r: rotation ?? 0,
+      flipH: !!flip?.horizontal,
+      flipV: !!flip?.vertical
+    };
+  }
+
+  _getScatterSessionKey(elevation) {
+    const value = Number.isFinite(elevation) ? elevation : 0;
+    return String(quantizeElevation(value));
+  }
+
+  _getScatterPreviewGroupKey(elevation) {
+    return this._getScatterSessionKey(elevation);
+  }
+
+  _notifyPreviewLayerChange() {
+    try { Hooks?.callAll?.(PREVIEW_LAYER_HOOK, { source: 'scatter' }); } catch (_) {}
+  }
+
+  _syncScatterPreviewFlags() {
+    if (!this._scatterPreviewGroups?.size) return false;
+    const activeKey = this._scatterPreviewActiveKey;
+    let changed = false;
+    for (const group of this._scatterPreviewGroups.values()) {
+      const container = group?.container;
+      if (!container) continue;
+      const hasContent = Array.isArray(group.instances) && group.instances.length > 0;
+      const isActive = !!activeKey && group.key === activeKey;
+      if (container.faNexusPreviewHasContent !== hasContent) {
+        container.faNexusPreviewHasContent = hasContent;
+        changed = true;
+      }
+      if (container.faNexusPreviewActive !== isActive) {
+        container.faNexusPreviewActive = isActive;
+        changed = true;
+      }
+    }
+    if (changed) this._notifyPreviewLayerChange();
+    return changed;
+  }
+
+  _ensureScatterPreviewGroup(elevation, { setActive = true } = {}) {
+    const key = this._getScatterPreviewGroupKey(elevation);
+    let group = this._scatterPreviewGroups.get(key);
+    if (group?.container && !group.container.destroyed) {
+      if (setActive) {
+        this._scatterPreviewContainer = group.container;
+        this._scatterPreviewActiveKey = key;
+        this._syncScatterPreviewFlags();
+      }
+      return group;
+    }
+
+    try {
+      const overlay = new PIXI.Container();
+      overlay.eventMode = 'none';
+      overlay.sortableChildren = false;
+      overlay.name = `fa-nexus-scatter-preview-${key}`;
+      overlay.faNexusScatterPreview = true;
+      overlay.faNexusScatterPreviewKey = key;
+      overlay.faNexusPreviewHasContent = false;
+      overlay.faNexusPreviewActive = false;
+      const parent = canvas?.primary || canvas?.stage;
+      overlay.zIndex = parent === canvas?.stage ? SCATTER_PREVIEW_Z_INDEX : 0;
+      parent?.addChild?.(overlay);
+      if (parent && 'sortDirty' in parent) parent.sortDirty = true;
+      parent?.sortChildren?.();
+
+      const normalizedElevation = quantizeElevation(Number(elevation) || 0);
+      const currentKey = this._getScatterPreviewGroupKey(this._previewElevation);
+      let sort = 0;
+      if (currentKey === key && Number.isFinite(this._previewSort)) {
+        sort = this._previewSort;
+      } else {
+        const computed = this._interactionController.computeNextSortAtElevation?.(normalizedElevation);
+        sort = Number.isFinite(computed) ? computed : (Number.isFinite(this._previewSort) ? this._previewSort : 0);
+      }
+
+      const cachedShadow = this._scatterPreviewShadowSettings.get(key);
+      const shadowSettings = cachedShadow ? { ...cachedShadow } : this._snapshotScatterPreviewShadowSettings();
+      if (!cachedShadow) this._scatterPreviewShadowSettings.set(key, { ...shadowSettings });
+
+      group = {
+        key,
+        elevation: normalizedElevation,
+        sort,
+        container: overlay,
+        instances: [],
+        shadow: shadowSettings
+      };
+      this._scatterPreviewGroups.set(key, group);
+      this._applyScatterPreviewOrdering(group);
+
+      if (setActive) {
+        this._scatterPreviewContainer = overlay;
+        this._scatterPreviewActiveKey = key;
+      }
+      this._syncScatterPreviewFlags();
+      return group;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _destroyScatterPreviewGroup(group) {
+    if (!group?.container) return;
+    const container = group.container;
+    this._cleanupPreviewShadowResources(container);
+    const prevChildren = container.children?.slice() || [];
+    container.removeChildren();
+    for (const child of prevChildren) {
+      try { child.destroy?.({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+    }
+    try { container.parent?.removeChild?.(container); } catch (_) {}
+    try { container.destroy?.({ children: true }); } catch (_) {}
+  }
+
+  _startScatterMergeSession() {
+    if (this._scatterEditing) return;
+    if (this._scatterSessionActive) {
+      this._ensureScatterPreviewOverlay();
+      return;
+    }
+    this._scatterSessionActive = true;
+    this._scatterSessionGroups = new Map();
+    this._beginScatterPreviewSession();
+    this._resetScatterHistory();
+    this._recordScatterHistorySnapshot({ force: true });
+  }
+
+  _registerScatterSessionInstances(instances, elevation) {
+    if (!this._scatterSessionActive || this._scatterEditing) return;
+    if (!Array.isArray(instances) || !instances.length) return;
+    const key = this._getScatterSessionKey(elevation);
+    let group = this._scatterSessionGroups.get(key);
+    if (!group) {
+      const normalizedElevation = quantizeElevation(Number(elevation) || 0);
+      const cachedShadow = this._scatterPreviewShadowSettings.get(key);
+      const shadowSettings = cachedShadow ? { ...cachedShadow } : this._snapshotScatterPreviewShadowSettings();
+      if (!cachedShadow) this._scatterPreviewShadowSettings.set(key, { ...shadowSettings });
+      group = { elevation: normalizedElevation, instances: [], shadowSettings };
+      this._scatterSessionGroups.set(key, group);
+    }
+    for (const instance of instances) {
+      if (!instance) continue;
+      instance._scatterGroupKey = key;
+      instance._scatterElevation = group.elevation;
+      group.instances.push(instance);
+    }
+  }
+
+  _resetScatterMergeSession() {
+    this._scatterSessionActive = false;
+    this._scatterSessionGroups = new Map();
+    this._clearScatterPreviewOverlay();
+  }
+
+  _resetScatterHistory() {
+    this._scatterHistory = [];
+    this._scatterHistoryIndex = -1;
+    this._scatterHistoryDirty = false;
+  }
+
+  _canUndoScatterHistory() {
+    return this._scatterHistoryIndex > 0;
+  }
+
+  _canRedoScatterHistory() {
+    return this._scatterHistoryIndex >= 0 && this._scatterHistoryIndex < this._scatterHistory.length - 1;
+  }
+
+  _recordScatterHistorySnapshot({ force = false } = {}) {
+    if (!this._scatterMergeEnabled || this._scatterMode !== ASSET_SCATTER_MODE_BRUSH) return false;
+    if (!this._scatterSessionActive && !this._scatterEditing) return false;
+    if (!force && !this._scatterHistoryDirty) return false;
+    const instances = Array.isArray(this._scatterPreviewInstances) ? this._scatterPreviewInstances : [];
+    const snapshotInstances = instances.map((instance) => ({ ...instance }));
+    const groups = [];
+    for (const [key, group] of this._scatterSessionGroups.entries()) {
+      groups.push({
+        key,
+        elevation: Number.isFinite(group?.elevation) ? group.elevation : 0,
+        sort: Number.isFinite(group?.sort) ? group.sort : null,
+        shadowSettings: group?.shadowSettings ? { ...group.shadowSettings } : null
+      });
+    }
+    const shadowSettings = Array.from(this._scatterPreviewShadowSettings.entries()).map(([key, settings]) => [
+      key,
+      settings && typeof settings === 'object' ? { ...settings } : settings
+    ]);
+    const snapshot = {
+      instances: snapshotInstances,
+      groups,
+      shadowSettings,
+      previewElevation: this._previewElevation,
+      sessionActive: !!this._scatterSessionActive
+    };
+    if (this._scatterHistoryIndex < this._scatterHistory.length - 1) {
+      this._scatterHistory.splice(this._scatterHistoryIndex + 1);
+    }
+    this._scatterHistory.push(snapshot);
+    if (this._scatterHistory.length > SCATTER_HISTORY_LIMIT) {
+      const overflow = this._scatterHistory.length - SCATTER_HISTORY_LIMIT;
+      this._scatterHistory.splice(0, overflow);
+      this._scatterHistoryIndex = Math.max(-1, this._scatterHistoryIndex - overflow);
+    }
+    this._scatterHistoryIndex = this._scatterHistory.length - 1;
+    this._scatterHistoryDirty = false;
+    return true;
+  }
+
+  _applyScatterHistorySnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return false;
+    const instances = Array.isArray(snapshot.instances)
+      ? snapshot.instances.map((entry) => ({ ...entry }))
+      : [];
+    const groupMap = new Map();
+    if (Array.isArray(snapshot.groups)) {
+      for (const group of snapshot.groups) {
+        if (!group?.key) continue;
+        groupMap.set(group.key, { ...group });
+      }
+    }
+    const shadowMap = (() => {
+      if (snapshot.shadowSettings instanceof Map) return new Map(snapshot.shadowSettings);
+      if (Array.isArray(snapshot.shadowSettings)) {
+        return new Map(snapshot.shadowSettings.map(([key, settings]) => [
+          key,
+          settings && typeof settings === 'object' ? { ...settings } : settings
+        ]));
+      }
+      return new Map();
+    })();
+    const fallbackElevation = quantizeElevation(Number(this._previewElevation) || 0);
+    for (const instance of instances) {
+      const rawElevation = Number.isFinite(instance?._scatterElevation) ? instance._scatterElevation : null;
+      const keyCandidate = instance?._scatterGroupKey || (rawElevation != null ? this._getScatterSessionKey(rawElevation) : null);
+      const group = keyCandidate ? groupMap.get(keyCandidate) : null;
+      const elevation = Number.isFinite(rawElevation) ? rawElevation : (group?.elevation ?? fallbackElevation);
+      const key = keyCandidate || this._getScatterSessionKey(elevation);
+      instance._scatterGroupKey = key;
+      instance._scatterElevation = quantizeElevation(elevation);
+      if (!groupMap.has(key)) {
+        groupMap.set(key, { key, elevation: instance._scatterElevation });
+      }
+    }
+
+    this._scatterSessionActive = !!snapshot.sessionActive || !!instances.length;
+    this._scatterSessionGroups = new Map();
+    this._beginScatterPreviewSession(instances, { elevation: this._previewElevation, shadowSettings: shadowMap });
+    if (this._scatterSessionActive) {
+      const grouped = new Map();
+      for (const instance of instances) {
+        const key = instance?._scatterGroupKey || this._getScatterSessionKey(instance?._scatterElevation);
+        if (!key) continue;
+        let group = grouped.get(key);
+        if (!group) {
+          group = { elevation: instance._scatterElevation ?? fallbackElevation, instances: [] };
+          grouped.set(key, group);
+        }
+        group.instances.push(instance);
+      }
+      for (const group of grouped.values()) {
+        this._registerScatterSessionInstances(group.instances, group.elevation);
+      }
+    }
+    this._syncScatterPreviewOrdering();
+    this._scatterHistoryDirty = false;
+    this._syncToolOptionsState({ suppressRender: false });
+    return true;
+  }
+
+  _undoScatterHistory() {
+    if (!this._canUndoScatterHistory()) return false;
+    this._scatterHistoryIndex -= 1;
+    const snapshot = this._scatterHistory[this._scatterHistoryIndex];
+    return this._applyScatterHistorySnapshot(snapshot);
+  }
+
+  _redoScatterHistory() {
+    if (!this._canRedoScatterHistory()) return false;
+    this._scatterHistoryIndex += 1;
+    const snapshot = this._scatterHistory[this._scatterHistoryIndex];
+    return this._applyScatterHistorySnapshot(snapshot);
+  }
+
+  _resolveScatterTileTextureSrc(instances) {
+    if (!Array.isArray(instances)) return null;
+    for (const instance of instances) {
+      if (instance?.src) return instance.src;
+    }
+    return null;
+  }
+
+  _buildScatterGroupTileData(instances, elevationOverride = null, shadowSettings = null) {
+    const bounds = this._computeScatterBounds(instances);
+    if (!bounds) return null;
+    const localInstances = instances.map((instance) => ({
+      id: instance.id,
+      src: instance.src,
+      x: Number(instance.x) - bounds.x,
+      y: Number(instance.y) - bounds.y,
+      w: Math.max(1, Number(instance.w) || 0),
+      h: Math.max(1, Number(instance.h) || 0),
+      r: Number(instance.r) || 0,
+      flipH: !!instance.flipH,
+      flipV: !!instance.flipV
+    }));
+    const textureSrc = this._resolveScatterTileTextureSrc(instances);
+    if (!textureSrc) return null;
+    const elevation = Number.isFinite(elevationOverride) ? elevationOverride : this._previewElevation;
+    const nextSort = this._interactionController.computeNextSortAtElevation?.(elevation) ?? 0;
+    const moduleFlags = {
+      [SCATTER_FLAG_KEY]: {
+        version: SCATTER_VERSION,
+        instances: localInstances
+      }
+    };
+    const globalDropShadowEnabled = this._isGlobalDropShadowEnabled();
+    const dropShadowEnabled = globalDropShadowEnabled && this.isDropShadowEnabled();
+    if (dropShadowEnabled) {
+      const settings = shadowSettings || this._snapshotScatterPreviewShadowSettings();
+      const offsetVec = this._computeShadowOffsetVector(settings.offsetDistance, settings.offsetAngle);
+      moduleFlags.shadow = true;
+      moduleFlags.shadowAlpha = this._roundShadowValue(settings.alpha, 3);
+      moduleFlags.shadowDilation = this._roundShadowValue(settings.dilation, 3);
+      moduleFlags.shadowBlur = this._roundShadowValue(settings.blur, 3);
+      moduleFlags.shadowOffsetDistance = this._roundShadowValue(settings.offsetDistance, 2);
+      moduleFlags.shadowOffsetAngle = this._roundShadowValue(this._normalizeShadowAngle(settings.offsetAngle), 1);
+      moduleFlags.shadowOffsetX = this._roundShadowValue(offsetVec.x, 2);
+      moduleFlags.shadowOffsetY = this._roundShadowValue(offsetVec.y, 2);
+    }
+    return {
+      texture: { src: textureSrc },
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      rotation: 0,
+      hidden: false,
+      locked: false,
+      elevation,
+      sort: Number(nextSort) || 0,
+      overhead: false,
+      roof: false,
+      occlusion: { mode: 0, alpha: 0 },
+      flags: {
+        'fa-nexus': moduleFlags
+      }
+    };
+  }
+
+  _buildScatterGroupTileUpdate(instances, tileDoc) {
+    const bounds = this._computeScatterBounds(instances);
+    if (!bounds) return null;
+    const localInstances = instances.map((instance) => ({
+      id: instance.id,
+      src: instance.src,
+      x: Number(instance.x) - bounds.x,
+      y: Number(instance.y) - bounds.y,
+      w: Math.max(1, Number(instance.w) || 0),
+      h: Math.max(1, Number(instance.h) || 0),
+      r: Number(instance.r) || 0,
+      flipH: !!instance.flipH,
+      flipV: !!instance.flipV
+    }));
+    const textureSrc = this._resolveScatterTileTextureSrc(instances);
+    if (!textureSrc) return null;
+    const update = {
+      _id: tileDoc.id,
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      rotation: 0,
+      'texture.src': textureSrc,
+      [`flags.fa-nexus.${SCATTER_FLAG_KEY}`]: {
+        version: SCATTER_VERSION,
+        instances: localInstances
+      }
+    };
+    const globalDropShadowEnabled = this._isGlobalDropShadowEnabled();
+    const dropShadowEnabled = globalDropShadowEnabled && this.isDropShadowEnabled();
+    if (dropShadowEnabled) {
+      update['flags.fa-nexus.shadow'] = true;
+      update['flags.fa-nexus.shadowAlpha'] = this._roundShadowValue(this._dropShadowAlpha, 3);
+      update['flags.fa-nexus.shadowDilation'] = this._roundShadowValue(this._dropShadowDilation, 3);
+      update['flags.fa-nexus.shadowBlur'] = this._roundShadowValue(this._dropShadowBlur, 3);
+      update['flags.fa-nexus.shadowOffsetDistance'] = this._roundShadowValue(this._dropShadowOffsetDistance, 2);
+      update['flags.fa-nexus.shadowOffsetAngle'] = this._roundShadowValue(this._normalizeShadowAngle(this._dropShadowOffsetAngle), 1);
+      const offsetVec = this._computeShadowOffsetVector();
+      update['flags.fa-nexus.shadowOffsetX'] = this._roundShadowValue(offsetVec.x, 2);
+      update['flags.fa-nexus.shadowOffsetY'] = this._roundShadowValue(offsetVec.y, 2);
+    }
+    return update;
+  }
+
+  _collectScatterCommitGroups() {
+    const groups = [];
+    for (const group of this._scatterSessionGroups.values()) {
+      if (!group?.instances?.length) continue;
+      groups.push({
+        elevation: group.elevation,
+        instances: group.instances.slice(),
+        shadowSettings: group.shadowSettings ? { ...group.shadowSettings } : null
+      });
+    }
+    const fallbackInstances = Array.isArray(this._scatterPreviewInstances) ? this._scatterPreviewInstances : [];
+    if (!groups.length && fallbackInstances.length) {
+      const key = this._getScatterSessionKey(this._previewElevation);
+      const shadowSettings = this._scatterPreviewShadowSettings.get(key) || this._snapshotScatterPreviewShadowSettings();
+      groups.push({ elevation: this._previewElevation, instances: fallbackInstances.slice(), shadowSettings });
+    }
+    return groups;
+  }
+
+  async _commitScatterGroups(groups) {
+    if (!Array.isArray(groups) || !groups.length || !canvas?.scene) return;
+    const tileDataList = [];
+    for (const group of groups) {
+      const elevation = Number.isFinite(group.elevation) ? group.elevation : this._previewElevation;
+      const tileData = this._buildScatterGroupTileData(group.instances, elevation, group.shadowSettings || null);
+      if (tileData) tileDataList.push(tileData);
+    }
+    if (!tileDataList.length) return;
+    try {
+      await canvas.scene.createEmbeddedDocuments('Tile', tileDataList);
+      if (this.isPlacementActive) this._syncPreviewOrdering();
+    } catch (error) {
+      Logger.warn('Placement.scatter.merge.failed', String(error?.message || error));
+    }
+  }
+
+  async _commitScatterMergeSession() {
+    if (this._scatterEditing) {
+      this._resetScatterMergeSession();
+      return;
+    }
+    if (!this._scatterSessionActive) {
+      this._resetScatterMergeSession();
+      return;
+    }
+    try {
+      if (this._scatterQueuePromise) await this._scatterQueuePromise;
+    } catch (_) {}
+
+    const groups = this._collectScatterCommitGroups();
+    this._resetScatterMergeSession();
+    await this._commitScatterGroups(groups);
+  }
+
+  async _commitScatterEditChanges() {
+    if (!this._scatterEditing || !this._scatterEditTile || !canvas?.scene) return;
+    const instances = Array.isArray(this._scatterPreviewInstances) ? this._scatterPreviewInstances : [];
+    if (!instances.length) {
+      try { await canvas.scene.deleteEmbeddedDocuments('Tile', [this._scatterEditTile.id]); } catch (_) {}
+      this.cancelPlacement('scatter-empty');
+      return;
+    }
+    const update = this._buildScatterGroupTileUpdate(instances, this._scatterEditTile);
+    if (!update) return;
+    try {
+      const updated = await canvas.scene.updateEmbeddedDocuments('Tile', [update], { diff: false });
+      if (Array.isArray(updated) && updated[0]) {
+        this._scatterEditTile = updated[0];
+      }
+    } catch (error) {
+      Logger.warn('Placement.scatter.edit.failed', String(error?.message || error));
+    }
+  }
+
+  _stopScatterStroke() {
+    void this._endScatterPreviewShadowBatch({ awaitQueue: true });
+    this._scatterPainting = false;
+    this._scatterLastPointerWorld = null;
+    this._scatterStrokeDistance = 0;
+    this._scatterQueue = [];
+    this._scatterQueueRunning = false;
+    this._scatterQueuePromise = null;
+  }
+
+  _beginScatterPreviewShadowBatch() {
+    if (this._scatterPreviewShadowBatchActive) return;
+    if (this._scatterMode !== ASSET_SCATTER_MODE_BRUSH) return;
+    if (!this._scatterMergeEnabled) return;
+    if (!this._isGlobalDropShadowEnabled() || !this.isDropShadowEnabled()) return;
+    this._scatterPreviewShadowBatchActive = true;
+    this._scatterPreviewShadowBatchForce = false;
+    this._scatterPreviewShadowBatchNeedsAll = false;
+    this._scatterPreviewShadowBatchDirty.clear();
+  }
+
+  async _endScatterPreviewShadowBatch({ awaitQueue = false } = {}) {
+    if (!this._scatterPreviewShadowBatchActive) return;
+    const queuePromise = awaitQueue ? this._scatterQueuePromise : null;
+    if (queuePromise) {
+      try { await queuePromise; } catch (_) {}
+    }
+    this._scatterPreviewShadowBatchActive = false;
+    const force = this._scatterPreviewShadowBatchForce;
+    const needsAll = this._scatterPreviewShadowBatchNeedsAll;
+    const keys = Array.from(this._scatterPreviewShadowBatchDirty);
+    this._scatterPreviewShadowBatchForce = false;
+    this._scatterPreviewShadowBatchNeedsAll = false;
+    this._scatterPreviewShadowBatchDirty.clear();
+    if (!this._scatterPreviewGroups?.size) return;
+    if (force || needsAll || !keys.length) {
+      this._scheduleScatterPreviewShadowUpdate({ force: true });
+      return;
+    }
+    for (const key of keys) {
+      this._scheduleScatterPreviewShadowUpdate({ key });
+    }
+  }
+
+  _beginScatterShadowBatch() {
+    if (this._scatterShadowBatchActive) return;
+    if (this._scatterMode !== ASSET_SCATTER_MODE_BRUSH) return;
+    if (this._scatterMergeEnabled) return;
+    if (!this._isGlobalDropShadowEnabled() || !this.isDropShadowEnabled()) return;
+    const manager = getAssetShadowManager(this.app);
+    if (!manager?.suspendRebuilds) return;
+    manager.suspendRebuilds();
+    this._scatterShadowBatchManager = manager;
+    this._scatterShadowBatchActive = true;
+  }
+
+  async _endScatterShadowBatch({ awaitQueue = false } = {}) {
+    if (!this._scatterShadowBatchActive) return;
+    const manager = this._scatterShadowBatchManager || getAssetShadowManager(this.app);
+    this._scatterShadowBatchManager = null;
+    this._scatterShadowBatchActive = false;
+    const queuePromise = awaitQueue ? this._scatterQueuePromise : null;
+    if (queuePromise) {
+      try { await queuePromise; } catch (_) {}
+    }
+    manager?.resumeRebuilds?.({ immediate: false });
+    this._refreshShadowElevationContext({ adopt: false });
+  }
+
+  _resolveScatterQueueAction() {
+    if (this._scatterMergeEnabled) {
+      if (this._scatterEraseEnabled) return 'erase';
+      return 'preview';
+    }
+    return 'tile';
+  }
+
+  _queueScatterStamp(worldX, worldY) {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return;
+    const action = this._resolveScatterQueueAction();
+    this._scatterQueue.push({ x: worldX, y: worldY, action });
+    if (!this._scatterQueueRunning) {
+      this._processScatterQueue();
+    }
+  }
+
+  async _processScatterQueue() {
+    if (this._scatterQueueRunning) return;
+    this._scatterQueueRunning = true;
+    const runner = (async () => {
+      try {
+        while (this._scatterQueue.length && this.isPlacementActive && this._scatterMode === ASSET_SCATTER_MODE_BRUSH) {
+          const point = this._scatterQueue.shift();
+          if (!point) continue;
+          if (point.action === 'preview') {
+            await this._scatterPreviewStampAtWorld(point.x, point.y);
+          } else if (point.action === 'erase') {
+            this._scatterEraseAtWorld(point.x, point.y);
+          } else {
+            await this._scatterStampAtWorld(point.x, point.y);
+          }
+        }
+      } catch (_) {
+        // no-op
+      }
+    })();
+    this._scatterQueuePromise = runner;
+    try {
+      await runner;
+    } finally {
+      this._scatterQueueRunning = false;
+      if (this._scatterQueuePromise === runner) this._scatterQueuePromise = null;
+    }
+  }
+
+  _scatterPaintAtWorld(worldX, worldY) {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return;
+    this._updateScatterCursor(worldX, worldY);
+    if (this._scatterMergeEnabled) {
+      this._ensureScatterPreviewOverlay();
+    }
+    const spacing = this._getScatterSpacingWorld();
+    if (!spacing || spacing <= 0) {
+      this._queueScatterStamp(worldX, worldY);
+      this._scatterLastPointerWorld = { x: worldX, y: worldY };
+      this._scatterStrokeDistance = 0;
+      return;
+    }
+    if (!this._scatterLastPointerWorld) {
+      this._queueScatterStamp(worldX, worldY);
+      this._scatterLastPointerWorld = { x: worldX, y: worldY };
+      this._scatterStrokeDistance = 0;
+      return;
+    }
+    const dx = worldX - this._scatterLastPointerWorld.x;
+    const dy = worldY - this._scatterLastPointerWorld.y;
+    const dist = Math.hypot(dx, dy);
+    if (!Number.isFinite(dist) || dist <= 0) return;
+    const ux = dx / dist;
+    const uy = dy / dist;
+    let remaining = dist;
+    let distanceSince = Number.isFinite(this._scatterStrokeDistance) ? this._scatterStrokeDistance : 0;
+    if (distanceSince >= spacing) distanceSince = distanceSince % spacing;
+    let stampX = this._scatterLastPointerWorld.x;
+    let stampY = this._scatterLastPointerWorld.y;
+    while (distanceSince + remaining >= spacing) {
+      const needed = spacing - distanceSince;
+      stampX += ux * needed;
+      stampY += uy * needed;
+      this._queueScatterStamp(stampX, stampY);
+      remaining -= needed;
+      distanceSince = 0;
+    }
+    this._scatterStrokeDistance = distanceSince + remaining;
+    this._scatterLastPointerWorld = { x: worldX, y: worldY };
+  }
+
+  async _scatterStampAtWorld(worldX, worldY) {
+    try {
+      if (!this.currentAsset) return;
+      if (!canvas || !canvas.scene) return;
+      const center = this._applyGridSnapping({ x: worldX, y: worldY });
+      const brushRadius = this._getScatterBrushRadius();
+      const density = this._getScatterDensity();
+      const positions = [];
+      for (let i = 0; i < density; i += 1) {
+        const offset = this._sampleScatterOffset(brushRadius, brushRadius);
+        positions.push({ x: center.x + offset.x, y: center.y + offset.y });
+      }
+      if (!positions.length) return;
+
+      const controller = this._interactionController;
+      let nextSort = controller?.computeNextSortAtElevation?.(this._previewElevation);
+      if (!Number.isFinite(nextSort)) nextSort = this._previewSort || 0;
+
+      const tileDataList = [];
+      for (const pos of positions) {
+        const asset = this._pickScatterAsset();
+        if (!asset) continue;
+        if (this._assetRequiresDownload(asset)) {
+          try { await this._ensureAssetLocal(asset); }
+          catch (_) { continue; }
+        }
+        const snapped = this._applyGridSnapping(pos);
+        const rotation = this._getScatterRotation();
+        const scale = this._getScatterScale();
+        const flip = this._getScatterFlipState();
+        const tileData = this._buildScatterTileData(asset, snapped, {
+          rotation,
+          scale,
+          flip,
+          sort: nextSort
+        });
+        if (!tileData) continue;
+        tileDataList.push(tileData);
+        nextSort += 2;
+      }
+
+      if (!tileDataList.length) return;
+      const created = await canvas.scene.createEmbeddedDocuments('Tile', tileDataList);
+      const createdDocs = Array.isArray(created) ? created : [created];
+      const dropShadowEnabled = this._isGlobalDropShadowEnabled() && this.isDropShadowEnabled();
+      if (dropShadowEnabled) {
+        try {
+          const manager = getAssetShadowManager(this.app);
+          for (const doc of createdDocs) {
+            manager?.registerTile?.(doc);
+          }
+          if (!this._scatterShadowBatchActive) {
+            this._refreshShadowElevationContext({ adopt: false });
+          }
+        } catch (_) {}
+      }
+      this._previewSort = nextSort;
+      if (this.isPlacementActive) {
+        this._syncPreviewOrdering();
+      }
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  _pickScatterAsset() {
+    if (this.isRandomMode && Array.isArray(this.randomAssets) && this.randomAssets.length) {
+      return this._pickRandomAsset() || this.currentAsset;
+    }
+    return this.currentAsset;
+  }
+
+  _getScatterRotation() {
+    const base = this._normalizeRotation(this.currentRotation);
+    if (!this._hasRandomRotationEnabled()) return base;
+    const limit = Math.max(0, Math.min(180, Number(this._rotationRandomStrength) || 0));
+    if (!limit) return base;
+    const offset = (Math.random() * 2 - 1) * limit;
+    return this._normalizeRotation(base + offset);
+  }
+
+  _getScatterScale() {
+    const base = this._clampScale(this.currentScale);
+    if (!this._hasRandomScaleEnabled()) return base;
+    const strengthPercent = Math.max(0, Math.min(100, Number(this._scaleRandomStrength) || 0));
+    if (!strengthPercent) return base;
+    const limit = strengthPercent / 100;
+    const offset = (Math.random() * 2 - 1) * limit;
+    return this._clampScale(base * (1 + offset));
+  }
+
+  _getScatterFlipState() {
+    const baseHorizontal = !!this._flipHorizontal;
+    const baseVertical = !!this._flipVertical;
+    const horizontal = this._flipRandomHorizontalEnabled ? (Math.random() < 0.5 ? !baseHorizontal : baseHorizontal) : baseHorizontal;
+    const vertical = this._flipRandomVerticalEnabled ? (Math.random() < 0.5 ? !baseVertical : baseVertical) : baseVertical;
+    return { horizontal, vertical };
+  }
+
+  _buildScatterTileData(asset, worldPoint, { rotation, scale, flip, sort }) {
+    if (!asset || !worldPoint) return null;
+    const assetPx = this._getAssetBasePxPerSquare();
+    const sceneGridSize = canvas?.scene?.grid?.size || 100;
+    const gridScaleFactor = sceneGridSize / assetPx;
+    const dims = this._computeWorldSizeForAsset(asset, scale);
+    const placedWidth = Math.round(Number(dims.worldWidth || assetPx));
+    const placedHeight = Math.round(Number(dims.worldHeight || assetPx));
+    const x = Math.round(worldPoint.x - placedWidth / 2);
+    const y = Math.round(worldPoint.y - placedHeight / 2);
+    const textureConfig = {
+      src: this._encodeAssetPath(asset.path || asset.url || ''),
+      scaleX: flip?.horizontal ? -1 : 1,
+      scaleY: flip?.vertical ? -1 : 1
+    };
+    const tileData = {
+      texture: textureConfig,
+      width: placedWidth,
+      height: placedHeight,
+      x,
+      y,
+      rotation: rotation ?? 0,
+      hidden: false,
+      locked: false,
+      elevation: this._previewElevation,
+      sort: Number(sort || 0) || 0,
+      overhead: false,
+      roof: false,
+      occlusion: { mode: 0, alpha: 0 }
+    };
+    const globalDropShadowEnabled = this._isGlobalDropShadowEnabled();
+    const dropShadowEnabled = globalDropShadowEnabled && this.isDropShadowEnabled();
+    if (dropShadowEnabled) {
+      tileData.flags = tileData.flags || {};
+      const moduleFlags = Object.assign({}, tileData.flags['fa-nexus'] || {});
+      moduleFlags.shadow = true;
+      moduleFlags.shadowAlpha = this._roundShadowValue(this._dropShadowAlpha, 3);
+      moduleFlags.shadowDilation = this._roundShadowValue(this._dropShadowDilation, 3);
+      moduleFlags.shadowBlur = this._roundShadowValue(this._dropShadowBlur, 3);
+      moduleFlags.shadowOffsetDistance = this._roundShadowValue(this._dropShadowOffsetDistance, 2);
+      moduleFlags.shadowOffsetAngle = this._roundShadowValue(this._normalizeShadowAngle(this._dropShadowOffsetAngle), 1);
+      const offsetVec = this._computeShadowOffsetVector();
+      moduleFlags.shadowOffsetX = this._roundShadowValue(offsetVec.x, 2);
+      moduleFlags.shadowOffsetY = this._roundShadowValue(offsetVec.y, 2);
+      tileData.flags['fa-nexus'] = moduleFlags;
+    }
+    return tileData;
+  }
+
   _startInteractionSession() {
     this._stopInteractionSession();
+    if (this._scatterMode === ASSET_SCATTER_MODE_BRUSH) {
+      this._ensureScatterOverlay();
+      this._updateScatterCursor();
+    }
 
     const pointerMoveHandler = (event, { pointer }) => {
       if (!this.isPlacementActive) return;
@@ -2868,6 +5110,9 @@ export class AssetPlacementManager {
         this._previewContainer.x = displayCoords.x;
         this._previewContainer.y = displayCoords.y;
       }
+      if (this._scatterMode === ASSET_SCATTER_MODE_BRUSH && displayCoords) {
+        this._updateScatterCursor(displayCoords.x, displayCoords.y);
+      }
 
       if (this._suppressDragSelect && (event.buttons & 1) === 1 && pointer?.overCanvas && pointer?.zOk) {
         try {
@@ -2875,6 +5120,13 @@ export class AssetPlacementManager {
           event.stopPropagation();
           event.stopImmediatePropagation?.();
         } catch (_) { /* no-op */ }
+      }
+
+      if (this._scatterMode === ASSET_SCATTER_MODE_BRUSH && this._scatterPainting) {
+        if ((event.buttons & 1) !== 1 || !pointer?.overCanvas || !pointer?.zOk) return;
+        if (worldCoords && Number.isFinite(worldCoords.x) && Number.isFinite(worldCoords.y)) {
+          this._scatterPaintAtWorld(worldCoords.x, worldCoords.y);
+        }
       }
     };
 
@@ -2918,6 +5170,7 @@ export class AssetPlacementManager {
         const step = event.shiftKey ? 1 : baseStep;
         const dir = event.deltaY > 0 ? 1 : -1;
         this.currentRotation = ((this.currentRotation + dir * step) % 360 + 360) % 360;
+        this._persistPlacementSetting('assetPlacementRotation', this.currentRotation);
         this._updateRotationPreview({ clampOffset: true });
         this._syncToolOptionsState();
         return;
@@ -2930,10 +5183,18 @@ export class AssetPlacementManager {
           event.stopImmediatePropagation?.();
           const step = 1.05;
           const dir = event.deltaY < 0 ? 1 : -1;
+          if (this._scatterMode === ASSET_SCATTER_MODE_BRUSH) {
+            const current = this._getScatterBrushSize();
+            let next = current * Math.pow(step, dir);
+            next = Math.round(next);
+            this.setScatterBrushSize(next, true);
+            return;
+          }
           const current = Number(this.currentScale || 1) || 1;
           let next = current * Math.pow(step, dir);
           next = this._clampScale(next);
           this.currentScale = next;
+          this._persistPlacementSetting('assetPlacementScale', this.currentScale);
           this._updateScalePreview({ clampOffset: true });
           this._syncToolOptionsState();
         } catch (_) { /* no-op */ }
@@ -2993,6 +5254,29 @@ export class AssetPlacementManager {
         }
       }
       this._suppressDragSelect = true;
+
+      if (this._scatterMode === ASSET_SCATTER_MODE_BRUSH) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        this._scatterPainting = true;
+        this._scatterLastPointerWorld = null;
+        this._scatterStrokeDistance = 0;
+        this._beginScatterShadowBatch();
+        this._beginScatterPreviewShadowBatch();
+        if (this._scatterMergeEnabled) {
+          if (this._scatterEditing) {
+            this._ensureScatterPreviewOverlay();
+          } else {
+            this._startScatterMergeSession();
+          }
+        }
+        if (this._lastPointerWorld) {
+          this._scatterPaintAtWorld(this._lastPointerWorld.x, this._lastPointerWorld.y);
+        }
+        return false;
+      }
+
       if (this.isDownloading) {
         const queued = (this._previewFrozen && this._frozenPointerScreen)
           ? { x: this._frozenPointerScreen.x, y: this._frozenPointerScreen.y }
@@ -3011,9 +5295,30 @@ export class AssetPlacementManager {
       return false;
     };
 
-    const pointerUpHandler = () => {
+    const pointerUpHandler = async () => {
       if (!this.isPlacementActive) return;
       this._suppressDragSelect = false;
+      if (this._scatterMode === ASSET_SCATTER_MODE_BRUSH) {
+        this._scatterPainting = false;
+        this._scatterLastPointerWorld = null;
+        this._scatterStrokeDistance = 0;
+        if (this._scatterMergeEnabled) {
+          try {
+            if (this._scatterQueuePromise) await this._scatterQueuePromise;
+          } catch (_) {}
+          if (this._scatterEditing) {
+            await this._commitScatterEditChanges();
+          }
+          if (this._scatterHistoryDirty) {
+            this._recordScatterHistorySnapshot();
+            this._syncToolOptionsState({ suppressRender: false });
+          }
+          await this._endScatterPreviewShadowBatch({ awaitQueue: false });
+        } else {
+          await this._endScatterShadowBatch({ awaitQueue: true });
+        }
+        this._stopScatterStroke();
+      }
     };
 
     const keyDownHandler = (event) => {
@@ -3022,10 +5327,35 @@ export class AssetPlacementManager {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
-        this.cancelPlacement('esc');
+        if (this._scatterMode === ASSET_SCATTER_MODE_BRUSH && this._scatterMergeEnabled) {
+          void this._requestScatterCancel({ source: 'escape' });
+        } else {
+          this.cancelPlacement('esc');
+        }
+        return;
+      }
+      const keyName = typeof event?.key === 'string' ? event.key : '';
+      const keyLower = keyName.toLowerCase();
+      const hasModifier = !!(event.ctrlKey || event.metaKey);
+      const isUndo = hasModifier && keyLower === 'z' && !event.shiftKey;
+      const isRedo = hasModifier && (keyLower === 'y' || (keyLower === 'z' && event.shiftKey));
+      if ((isUndo || isRedo) && this._scatterMode === ASSET_SCATTER_MODE_BRUSH && this._scatterMergeEnabled) {
+        if (this._shouldIgnorePlacementHotkey(event, keyName)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        void this._handleEditorAction(isUndo ? 'scatter-undo' : 'scatter-redo');
         return;
       }
       if (this._isEditingExistingTile) return;
+      if ((event.key === 's' || event.key === 'S') && this._scatterMode === ASSET_SCATTER_MODE_BRUSH && this._scatterMergeEnabled) {
+        if (this._shouldIgnoreFreezeShortcut(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        void this._handleEditorAction('scatter-commit');
+        return;
+      }
       const isSpace = event.code === 'Space' || event.key === ' ';
       if (!isSpace || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       if (this._shouldIgnoreFreezeShortcut(event.target)) return;
@@ -3150,6 +5480,7 @@ export class AssetPlacementManager {
           }
         } catch (_) { /* no-op */ }
       }
+      this._syncScatterPreviewOrdering();
       // If in random lazy mode and the current asset is cloud without local cache, ensure now
       if (this.isRandomMode && this.currentAsset && String(this.currentAsset.source || '').toLowerCase() === 'cloud' && !this.currentAsset.cachedLocalPath) {
         try {
@@ -3343,6 +5674,160 @@ export class AssetPlacementManager {
       return { x: rect.left + point.x, y: rect.top + point.y };
     } catch (_) {
       return null;
+    }
+  }
+
+  _readPlacementSetting(key, fallback) {
+    try {
+      const settings = globalThis?.game?.settings;
+      if (!settings || typeof settings.get !== 'function') return fallback;
+      const stored = settings.get('fa-nexus', key);
+      return stored === undefined || stored === null ? fallback : stored;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  _persistPlacementSetting(key, value) {
+    try {
+      const settings = globalThis?.game?.settings;
+      if (!settings || typeof settings.set !== 'function') return;
+      const maybe = settings.set('fa-nexus', key, value);
+      if (maybe?.catch) maybe.catch(() => {});
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  _readPlacementScale() {
+    const raw = Number(this._readPlacementSetting('assetPlacementScale', DEFAULT_SCALE));
+    if (!Number.isFinite(raw)) return DEFAULT_SCALE;
+    return this._clampScale(raw);
+  }
+
+  _readPlacementScaleRandomEnabled() {
+    return !!this._readPlacementSetting('assetPlacementScaleRandomEnabled', false);
+  }
+
+  _readPlacementScaleRandomStrength() {
+    const raw = Number(this._readPlacementSetting('assetPlacementScaleRandomStrength', DEFAULT_SCALE_RANDOM_STRENGTH));
+    if (!Number.isFinite(raw)) return DEFAULT_SCALE_RANDOM_STRENGTH;
+    return Math.min(100, Math.max(0, raw));
+  }
+
+  _readPlacementRotation() {
+    const raw = Number(this._readPlacementSetting('assetPlacementRotation', DEFAULT_ROTATION));
+    if (!Number.isFinite(raw)) return DEFAULT_ROTATION;
+    return this._normalizeRotation(raw);
+  }
+
+  _readPlacementRotationRandomEnabled() {
+    return !!this._readPlacementSetting('assetPlacementRotationRandomEnabled', false);
+  }
+
+  _readPlacementRotationRandomStrength() {
+    const raw = Number(this._readPlacementSetting('assetPlacementRotationRandomStrength', DEFAULT_ROTATION_RANDOM_STRENGTH));
+    if (!Number.isFinite(raw)) return DEFAULT_ROTATION_RANDOM_STRENGTH;
+    return Math.min(180, Math.max(0, raw));
+  }
+
+  _readPlacementFlipHorizontal() {
+    return !!this._readPlacementSetting('assetPlacementFlipHorizontal', false);
+  }
+
+  _readPlacementFlipVertical() {
+    return !!this._readPlacementSetting('assetPlacementFlipVertical', false);
+  }
+
+  _readPlacementFlipRandomHorizontalEnabled() {
+    return !!this._readPlacementSetting('assetPlacementFlipRandomHorizontal', false);
+  }
+
+  _readPlacementFlipRandomVerticalEnabled() {
+    return !!this._readPlacementSetting('assetPlacementFlipRandomVertical', false);
+  }
+
+  _readStoredScatterMode() {
+    const stored = String(this._readPlacementSetting('assetPlacementScatterMode', ASSET_SCATTER_MODE_SINGLE) || '');
+    return stored === ASSET_SCATTER_MODE_BRUSH ? ASSET_SCATTER_MODE_BRUSH : ASSET_SCATTER_MODE_SINGLE;
+  }
+
+  _readDropShadowPreference() {
+    const stored = String(this._readPlacementSetting('assetPlacementDropShadowPreference', 'global') || '');
+    if (stored === 'on') return true;
+    if (stored === 'off') return false;
+    return null;
+  }
+
+  _persistDropShadowPreference(value) {
+    const stored = value === null || value === undefined
+      ? 'global'
+      : (value ? 'on' : 'off');
+    this._persistPlacementSetting('assetPlacementDropShadowPreference', stored);
+  }
+
+  _readStoredScatterBrushSize() {
+    try {
+      const stored = Number(game?.settings?.get?.('fa-nexus', 'assetScatterBrushSize'));
+      if (Number.isFinite(stored)) {
+        return Math.min(SCATTER_BRUSH_SIZE_MAX, Math.max(SCATTER_BRUSH_SIZE_MIN, stored));
+      }
+    } catch (_) {}
+    return SCATTER_BRUSH_SIZE_DEFAULT;
+  }
+
+  _readStoredScatterDensity() {
+    try {
+      const stored = Number(game?.settings?.get?.('fa-nexus', 'assetScatterDensity'));
+      if (Number.isFinite(stored)) {
+        const rounded = Math.round(stored);
+        return Math.min(SCATTER_DENSITY_MAX, Math.max(SCATTER_DENSITY_MIN, rounded));
+      }
+    } catch (_) {}
+    return SCATTER_DENSITY_DEFAULT;
+  }
+
+  _readStoredScatterSprayDeviation() {
+    try {
+      const stored = Number(game?.settings?.get?.('fa-nexus', 'assetScatterSprayDeviation'));
+      if (Number.isFinite(stored)) {
+        const clamped = Math.min(100, Math.max(0, stored));
+        return clamped / 100;
+      }
+    } catch (_) {}
+    return SCATTER_SPRAY_DEVIATION_DEFAULT;
+  }
+
+  _readStoredScatterSpacing() {
+    try {
+      const stored = Number(game?.settings?.get?.('fa-nexus', 'assetScatterSpacing'));
+      if (Number.isFinite(stored)) {
+        return Math.min(SCATTER_SPACING_MAX, Math.max(SCATTER_SPACING_MIN, stored));
+      }
+    } catch (_) {}
+    return SCATTER_SPACING_DEFAULT;
+  }
+
+  _readStoredScatterMergeEnabled() {
+    try {
+      const stored = game?.settings?.get?.('fa-nexus', 'assetScatterMerge');
+      if (stored === true) return true;
+      if (stored === false) {
+        this._persistScatterSetting('assetScatterMerge', true);
+        return true;
+      }
+    } catch (_) {}
+    return true;
+  }
+
+  _persistScatterSetting(key, value) {
+    try {
+      const settings = globalThis?.game?.settings;
+      if (!settings || typeof settings.set !== 'function') return;
+      const maybe = settings.set('fa-nexus', key, value);
+      if (maybe?.catch) maybe.catch(() => {});
+    } catch (_) {
+      // no-op
     }
   }
 
@@ -3590,9 +6075,55 @@ export class AssetPlacementManager {
     catch (_) { /* no-op */ }
   }
 
-    _syncPreviewOrdering() {
-      try {
-        if (!this._previewContainer) return;
+  _applyScatterPreviewOrdering(group) {
+    const container = group?.container;
+    if (!container) return;
+    const primary = canvas?.primary;
+    const tilesSortLayer = (() => {
+      try { return primary?.constructor?.SORT_LAYERS?.TILES ?? 0; }
+      catch (_) { return 0; }
+    })();
+    container.sortLayer = tilesSortLayer;
+    const nextSort = Number.isFinite(group?.sort) ? group.sort : 0;
+    container.sort = nextSort;
+    container.faNexusSort = nextSort;
+    const elevation = Number.isFinite(group?.elevation) ? group.elevation : 0;
+    const renderElevation = getTileRenderElevation(elevation);
+    container.faNexusElevationDoc = elevation;
+    container.faNexusElevation = renderElevation;
+    container.elevation = renderElevation;
+    if (container.parent === canvas?.stage) container.zIndex = SCATTER_PREVIEW_Z_INDEX;
+    else if (container.parent) container.zIndex = 0;
+    const parent = container.parent;
+    if (parent && 'sortDirty' in parent) parent.sortDirty = true;
+    parent?.sortChildren?.();
+  }
+
+  _syncScatterPreviewOrdering() {
+    try {
+      const key = this._getScatterPreviewGroupKey(this._previewElevation);
+      let group = this._scatterPreviewGroups.get(key);
+      if (!group && this.isPlacementActive && this._scatterMode === ASSET_SCATTER_MODE_BRUSH && this._scatterMergeEnabled) {
+        this._ensureScatterPreviewOverlay();
+        group = this._scatterPreviewGroups.get(key);
+      }
+      if (!group) {
+        this._scatterPreviewContainer = null;
+        this._scatterPreviewActiveKey = null;
+        this._syncScatterPreviewFlags();
+        return;
+      }
+      if (Number.isFinite(this._previewSort)) group.sort = this._previewSort;
+      this._scatterPreviewContainer = group.container;
+      this._scatterPreviewActiveKey = key;
+      this._applyScatterPreviewOrdering(group);
+      this._syncScatterPreviewFlags();
+    } catch (_) {}
+  }
+
+  _syncPreviewOrdering() {
+    try {
+      if (this._previewContainer) {
         const controller = this._interactionController;
         const nextSort = controller.computeNextSortAtElevation?.(this._previewElevation) ?? this._previewSort;
         this._previewSort = nextSort;
@@ -3605,7 +6136,9 @@ export class AssetPlacementManager {
         const parent = this._previewContainer.parent;
         if (parent && 'sortDirty' in parent) parent.sortDirty = true;
         parent?.sortChildren?.();
-      } catch (_) {}
+      }
+      this._syncScatterPreviewOrdering();
+    } catch (_) {}
   }
 
   _clearElevationAnnounceTimer() {
@@ -3677,7 +6210,9 @@ export class AssetPlacementManager {
       this.app?.element?.classList?.add?.('placement-sticky');
       this._applyPlacementFreezeClass();
     } catch (_) {} 
-    const message = 'Click to place. Wheel zooms to cursor. Ctrl/Cmd+Wheel rotates (Shift=1°). Alt+Wheel adjusts elevation (Shift=coarse, Ctrl/Cmd=fine). Shift+Wheel scales preview. Right-click or ESC to cancel.';
+    const baseMessage = 'Click to place. Wheel zooms to cursor. Ctrl/Cmd+Wheel rotates (Shift=1°). Alt+Wheel adjusts elevation (Shift=coarse, Ctrl/Cmd=fine). Shift+Wheel scales preview. Right-click or ESC to cancel.';
+    const scatterMessage = this._scatterMode === ASSET_SCATTER_MODE_BRUSH ? 'Scatter mode: drag to paint stamps. ' : '';
+    const message = `${scatterMessage}${baseMessage}`;
     announceChange('asset-placement', message, { throttleMs: 800 });
   }
   _removePlacementFeedback() { 
@@ -3762,6 +6297,18 @@ export class AssetPlacementManager {
       try { Logger.info('Placement.random.pick', { source: 'fallback', index: idx, filename: picked?.filename || picked?.path }); } catch (_) {}
       return picked;
     } catch (_) { return null; }
+  }
+
+  _updateRandomPrefetchCount() {
+    const hasRandomPool = !!(this.isRandomMode && Array.isArray(this.randomAssets) && this.randomAssets.length);
+    if (!hasRandomPool) {
+      try { this._randomPrefetch?.setPrefetchCount?.(0); } catch (_) {}
+      return;
+    }
+    const count = this._scatterMode === ASSET_SCATTER_MODE_BRUSH
+      ? Math.max(SCATTER_PREFETCH_MIN, this.randomAssets.length)
+      : PREFETCH_COUNT_DEFAULT;
+    try { this._randomPrefetch?.setPrefetchCount?.(count); } catch (_) {}
   }
 
   async _switchToNextRandomAsset(initial = false) {

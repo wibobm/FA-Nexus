@@ -40,6 +40,7 @@ const NONE_TEXTURE_ITEM = Object.freeze({
   tier: 'free',
   isNoneTexture: true
 });
+const PORTAL_TEXTURE_MISSING_RETRY_MS = 15000;
 
 function loadSetting(key, fallback) {
   try {
@@ -113,6 +114,7 @@ export class BuildingsTab extends AssetsTab {
     this._activePortalType = GAP_KIND_DOOR; // Default to door per plan
     this._portalToolOptionsCallback = null;
     this._portalPreviewImageCache = new Map();
+    this._portalPreviewMissingCache = new Map();
     this._portalPreviewRenderSeq = 0;
   }
 
@@ -147,9 +149,8 @@ export class BuildingsTab extends AssetsTab {
 
   async onActivate() {
     await super.onActivate();
-    this._ensureSubtabControls();
     this._setActiveSubtab(this._activeSubtab, { silent: true });
-    this._syncSearchField();
+    this._syncSearchField({ apply: false });
   }
 
   onDeactivate() {
@@ -330,7 +331,7 @@ export class BuildingsTab extends AssetsTab {
     });
   }
 
-  _syncSearchField() {
+  _syncSearchField({ apply = true } = {}) {
     const activeKey = this._getSubtabSearchKey(this._activeSubtab, 'paths');
     let query = this._subtabSearch[activeKey];
     if (query === undefined && this._activeSubtab === 'building') {
@@ -340,7 +341,7 @@ export class BuildingsTab extends AssetsTab {
     try {
       const controller = this.app?._searchController;
       // Store the query under the real tab id so SearchController updates its input.
-      controller?.applySearchToTab?.('buildings', query, { refreshTextures: false });
+      controller?.applySearchToTab?.('buildings', query, { refreshTextures: false, apply });
     } catch (_) {}
   }
 
@@ -1667,11 +1668,27 @@ export class BuildingsTab extends AssetsTab {
     if (!thumb) return;
     const wrap = thumb.closest?.('.fa-portals-panel__thumb-wrap');
 
-    if (texturePath) {
-      const filename = texturePath.split('/').pop() || 'Selected';
-      thumb.innerHTML = `
-        <img class="fa-portals-panel__thumb-img" src="${texturePath}" alt="${filename}" loading="lazy" onerror="this.style.display='none'">
-      `;
+    let textureKey = String(texturePath || '');
+    if (textureKey && this._isPortalTextureMissing(textureKey)) {
+      textureKey = '';
+    }
+
+    if (textureKey) {
+      const filename = textureKey.split('/').pop() || 'Selected';
+      const img = document.createElement('img');
+      img.className = 'fa-portals-panel__thumb-img';
+      img.src = textureKey;
+      img.alt = filename;
+      img.loading = 'lazy';
+      img.addEventListener('load', () => {
+        this._portalPreviewMissingCache.delete(textureKey);
+      });
+      img.addEventListener('error', () => {
+        const cleared = this._handleMissingPortalTexture(pickerId, textureKey);
+        if (!cleared) this._updateTextureThumbnail(panel, pickerId, null);
+      });
+      thumb.innerHTML = '';
+      thumb.appendChild(img);
       if (wrap) wrap.dataset.hasTexture = 'true';
     } else {
       // Show placeholder based on picker type
@@ -1693,11 +1710,41 @@ export class BuildingsTab extends AssetsTab {
     }
   }
 
-  _clearPortalTexture(pickerType) {
+  _isPortalTextureMissing(path) {
+    const key = String(path || '');
+    if (!key) return false;
+    const missingAt = this._portalPreviewMissingCache.get(key);
+    if (!missingAt) return false;
+    if (Date.now() - missingAt > PORTAL_TEXTURE_MISSING_RETRY_MS) {
+      this._portalPreviewMissingCache.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  _markPortalTextureMissing(path) {
+    const key = String(path || '');
+    if (!key) return;
+    this._portalPreviewMissingCache.set(key, Date.now());
+    this._portalPreviewImageCache.delete(key);
+  }
+
+  _handleMissingPortalTexture(pickerType, texturePath) {
+    const key = String(texturePath || '');
+    if (!key) return false;
+    this._markPortalTextureMissing(key);
+    const cleared = this._clearPortalTexture(pickerType, { suppressNotice: true });
+    if (cleared) this._portalPreviewMissingCache.delete(key);
+    return cleared;
+  }
+
+  _clearPortalTexture(pickerType, { suppressNotice = false } = {}) {
     const manager = this._buildingManager;
     const delegate = manager?._delegate;
     if (!delegate) {
-      ui?.notifications?.warn?.('Start a building session first.');
+      if (!suppressNotice) {
+        ui?.notifications?.warn?.('Start a building session first.');
+      }
       return false;
     }
 
@@ -1728,7 +1775,7 @@ export class BuildingsTab extends AssetsTab {
     void this._renderPortalPreview(panel, 'window', windowConfig, seq);
   }
 
-	  async _renderPortalPreview(panel, previewId, config = {}, seq = 0) {
+  async _renderPortalPreview(panel, previewId, config = {}, seq = 0) {
     const root = panel.querySelector(`[data-portal-preview="${previewId}"]`);
     if (!root) return;
     const canvas = root.querySelector('canvas.fa-portals-panel__preview-canvas');
@@ -1782,13 +1829,20 @@ export class BuildingsTab extends AssetsTab {
     const loadImage = (path) => {
       const key = String(path || '');
       if (!key) return Promise.resolve(null);
+      if (this._isPortalTextureMissing(key)) return Promise.resolve(null);
       const cached = this._portalPreviewImageCache.get(key);
       if (cached) return cached;
       const promise = new Promise((resolve) => {
         const img = new Image();
         img.decoding = 'async';
-        img.onload = () => resolve(img);
-        img.onerror = () => resolve(null);
+        img.onload = () => {
+          this._portalPreviewMissingCache.delete(key);
+          resolve(img);
+        };
+        img.onerror = () => {
+          this._markPortalTextureMissing(key);
+          resolve(null);
+        };
         img.src = key;
       });
       this._portalPreviewImageCache.set(key, promise);
@@ -1928,23 +1982,39 @@ export class BuildingsTab extends AssetsTab {
     };
 
     // Gather images
-	    const [
-	      doorImg,
-	      frameImg,
-	      sillImg,
-	      glassImg
-	    ] = await Promise.all([
+    const [
+      doorImg,
+      frameImg,
+      sillImg,
+      glassImg
+    ] = await Promise.all([
       isDoor ? loadImage(doorPath) : Promise.resolve(null),
       framePath ? loadImage(framePath) : Promise.resolve(null),
       isWindow ? loadImage(sillPath) : Promise.resolve(null),
       isWindow ? loadImage(glassPath) : Promise.resolve(null)
     ]);
 
-	    if (seq !== this._portalPreviewRenderSeq) return;
+    if (seq !== this._portalPreviewRenderSeq) return;
 
-	    const roundToHalf = (value) => {
-	      const numeric = Number(value);
-	      if (!Number.isFinite(numeric)) return 0;
+    let clearedMissing = false;
+    if (isDoor && doorPath && !doorImg) {
+      clearedMissing = this._handleMissingPortalTexture('door', doorPath) || clearedMissing;
+    }
+    if (framePath && !frameImg) {
+      const picker = isDoor ? 'door-frame' : 'window-frame';
+      clearedMissing = this._handleMissingPortalTexture(picker, framePath) || clearedMissing;
+    }
+    if (isWindow && sillPath && !sillImg) {
+      clearedMissing = this._handleMissingPortalTexture('window-sill', sillPath) || clearedMissing;
+    }
+    if (isWindow && glassPath && !glassImg) {
+      clearedMissing = this._handleMissingPortalTexture('window-texture', glassPath) || clearedMissing;
+    }
+    if (clearedMissing) return;
+
+    const roundToHalf = (value) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return 0;
 	      return Math.round(numeric * 2) / 2;
 	    };
 
@@ -2526,6 +2596,44 @@ export class BuildingsTab extends AssetsTab {
       }
       this._detachEscapeListener();
       return;
+    }
+    if (reason === 'tab-deactivate') {
+      const hasChanges = typeof manager.hasSessionChanges === 'function'
+        ? manager.hasSessionChanges()
+        : true;
+      if (!hasChanges) {
+        try { manager.stop?.({ reason }); } catch (error) {
+          Logger.warn?.('BuildingsTab.building.stop.failed', { reason, error: String(error?.message || error) });
+        }
+        this._detachEscapeListener();
+        return;
+      }
+      if (typeof manager.commitBuilding === 'function') {
+        const commitPromise = manager.commitBuilding({ reason });
+        if (commitPromise?.catch) {
+          commitPromise.catch((error) => {
+            Logger.warn?.('BuildingsTab.building.commit.failed', { reason, error: String(error?.message || error) });
+          });
+        }
+        Promise.resolve(commitPromise).finally(() => {
+          if (!manager.isActive) this._detachEscapeListener();
+        });
+        return;
+      }
+    }
+    if (reason === 'esc') {
+      if (typeof manager.requestCancelSession === 'function') {
+        const cancelPromise = manager.requestCancelSession({ reason });
+        if (cancelPromise?.catch) {
+          cancelPromise.catch((error) => {
+            Logger.warn?.('BuildingsTab.building.cancel.failed', { reason, error: String(error?.message || error) });
+          });
+        }
+        Promise.resolve(cancelPromise).then((cancelled) => {
+          if (cancelled || !manager.isActive) this._detachEscapeListener();
+        });
+        return;
+      }
     }
     try {
       manager.stop?.({ reason });

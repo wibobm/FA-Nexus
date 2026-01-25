@@ -1,49 +1,45 @@
 import {
-  applyPathTile,
-  rehydrateAllPathTiles,
-  cleanupPathOverlay,
-  cleanupPathWallsForTile,
-  clearTileMeshWaiters
-} from './path-geometry.js';
-
-export { applyPathTile, rehydrateAllPathTiles, cleanupPathOverlay };
+  applyAssetScatterTile,
+  rehydrateAllAssetScatterTiles,
+  cleanupAssetScatterOverlay,
+  clearAssetScatterCache
+} from './asset-scatter-geometry.js';
 
 try {
   Hooks.on('canvasReady', () => {
-    try { rehydrateAllPathTiles(); } catch (_) {}
+    try { rehydrateAllAssetScatterTiles(); } catch (_) {}
   });
   Hooks.on('drawTile', (tile) => {
-    try { applyPathTile(tile); } catch (_) {}
+    try { applyAssetScatterTile(tile); } catch (_) {}
   });
   Hooks.on('refreshTile', (tile) => {
-    try { applyPathTile(tile); } catch (_) {}
+    try { applyAssetScatterTile(tile); } catch (_) {}
   });
   Hooks.on('createTile', (doc) => {
     try {
       const tile = canvas.tiles?.placeables?.find((t) => t?.document?.id === doc.id);
-      if (tile) applyPathTile(tile);
+      if (tile) applyAssetScatterTile(tile);
     } catch (_) {}
   });
   Hooks.on('activateTilesLayer', () => {
-    try { rehydrateAllPathTiles(); } catch (_) {}
+    try { rehydrateAllAssetScatterTiles(); } catch (_) {}
   });
   Hooks.on('controlTile', (tile) => {
-    try { applyPathTile(tile); } catch (_) {}
+    try { applyAssetScatterTile(tile); } catch (_) {}
   });
   Hooks.on('updateTile', (doc) => {
     try {
       const tile = canvas.tiles?.placeables?.find((t) => t?.document?.id === doc.id);
-      if (tile) applyPathTile(tile);
+      if (tile) applyAssetScatterTile(tile);
     } catch (_) {}
   });
   Hooks.on('deleteTile', (doc) => {
     try {
       const tile = canvas.tiles?.placeables?.find((t) => t?.document?.id === doc.id);
-      if (tile) cleanupPathOverlay(tile);
+      if (tile) cleanupAssetScatterOverlay(tile);
     } catch (_) {}
-    try { cleanupPathWallsForTile(doc); } catch (_) {}
   });
   Hooks.on('canvasTearDown', () => {
-    try { clearTileMeshWaiters(); } catch (_) {}
+    try { clearAssetScatterCache(); } catch (_) {}
   });
 } catch (_) {}

@@ -1,14 +1,20 @@
 import { NexusLogger as Logger } from '../core/nexus-logger.js';
+import BuildingWallMesher from '../buildings/building-wall-mesher.js';
 
 export const DEFAULT_SEGMENT_SAMPLES = 200;
 export const MIN_POINTS_TO_RENDER = 2;
 export const MIN_WIDTH_MULTIPLIER = 0.01;
 export const MAX_WIDTH_MULTIPLIER = 5;
 const FEATHER_GROW_MULTIPLIER = 1.5;
+const EPSILON = 1e-6;
+const CORNER_DOT_THRESHOLD = Math.cos(Math.PI / 12); // ~15°
 
 const TILE_MESH_WAITERS = new WeakMap();
 let TRANSPARENT_TEXTURE = null;
 let PATH_PROGRAM = null;
+const VISIBLE_ALPHA_THRESHOLD = 10;
+const LINEAR_TENSION_THRESHOLD = 0.999;
+const WIDTH_MULTIPLIER_EPSILON = 1e-3;
 
 function applyMeshOpacity(mesh, alpha) {
   try {
@@ -50,6 +56,70 @@ export function normalizeTension(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
   return Math.max(-1, Math.min(1, num));
+}
+
+function shouldUseWallMesher(controlPoints, data) {
+  if (!Array.isArray(controlPoints) || controlPoints.length < 2) return false;
+  const tension = normalizeTension(data?.tension);
+  if (tension < LINEAR_TENSION_THRESHOLD) return false;
+  const feather = normalizeFeather(data?.feather);
+  if (feather.startMode !== 'none' || feather.endMode !== 'none') return false;
+  if (feather.startLength > 0 || feather.endLength > 0) return false;
+  for (const point of controlPoints) {
+    if (!point) continue;
+    if (Number.isFinite(point.widthLeft) && Math.abs(point.widthLeft - 1) > WIDTH_MULTIPLIER_EPSILON) return false;
+    if (Number.isFinite(point.widthRight) && Math.abs(point.widthRight - 1) > WIDTH_MULTIPLIER_EPSILON) return false;
+  }
+  return true;
+}
+
+function createWallMesherPathMesh(controlPoints, data, texture, options = {}) {
+  try {
+    if (!controlPoints?.length || !texture) return null;
+    const geometryData = BuildingWallMesher.buildCenterline(controlPoints, {
+      width: Math.max(1, Number(data?.width) || 1),
+      closed: !!data?.closed,
+      joinStyle: 'mitre',
+      mitreLimit: 4,
+      textureRepeatDistance: Math.max(1e-3, Number(data?.repeatSpacing) || Number(data?.width) || 1),
+      textureOffset: data?.textureOffset || { x: 0, y: 0 },
+      textureFlip: data?.textureFlip || { horizontal: false, vertical: false }
+    });
+    const positions = geometryData?.positions || [];
+    const uvs = geometryData?.uvs || [];
+    const indices = geometryData?.indices || [];
+    if (!positions.length || !uvs.length || !indices.length) return null;
+    const distances = geometryData?.distances || [];
+    const totalLength = Math.max(0, Number(geometryData?.totalLength) || Number(distances[distances.length - 1]) || 0);
+    const opacityFeather = normalizeOpacityFeather(data?.opacityFeather);
+    const alphas = [];
+    for (let i = 0; i < distances.length; i++) {
+      const alpha = computeOpacityMultiplier(distances[i], totalLength, opacityFeather);
+      alphas.push(alpha, alpha);
+    }
+    if (alphas.length !== positions.length / 2) {
+      const fallback = new Array(positions.length / 2).fill(1);
+      alphas.length = 0;
+      alphas.push(...fallback);
+    }
+    const geometry = new PIXI.Geometry()
+      .addAttribute('aVertexPosition', positions, 2)
+      .addAttribute('aTextureCoord', uvs, 2)
+      .addAttribute('aAlpha', alphas, 1)
+      .addIndex(indices);
+    if (options?.visibleData) {
+      remapVisibleRows(geometry, options.visibleData);
+    }
+    const shader = createPathShader(texture);
+    const mesh = new PIXI.Mesh(geometry, shader);
+    try { mesh.state.blendMode = PIXI.BLEND_MODES.NORMAL; }
+    catch (_) {}
+    mesh.eventMode = 'none';
+    return mesh;
+  } catch (error) {
+    Logger.warn('PathGeometry.createWallMesh.failed', { error: String(error?.message || error) });
+    return null;
+  }
 }
 
 export function computeSegmentParameters(p0, p1, p2, p3) {
@@ -118,6 +188,138 @@ export function lerp(a, b, t) {
   return a + ((b - a) * Math.min(1, Math.max(0, t)));
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function add(a, b) {
+  return { x: a.x + b.x, y: a.y + b.y };
+}
+
+function sub(a, b) {
+  return { x: a.x - b.x, y: a.y - b.y };
+}
+
+function scale(vec, value) {
+  return { x: vec.x * value, y: vec.y * value };
+}
+
+function rotate90(vec) {
+  return { x: -vec.y, y: vec.x };
+}
+
+function dot(a, b) {
+  return (a.x * b.x) + (a.y * b.y);
+}
+
+function cross(a, b) {
+  return (a.x * b.y) - (a.y * b.x);
+}
+
+function resolveDirection(from, to) {
+  if (!from || !to) return null;
+  const dx = Number(to.x) - Number(from.x);
+  const dy = Number(to.y) - Number(from.y);
+  const len = Math.hypot(dx, dy);
+  if (!Number.isFinite(len) || len < EPSILON) return null;
+  return { x: dx / len, y: dy / len };
+}
+
+function computeJoinOffset(prevDir, nextDir, offset, joinStyle, mitreLimit) {
+  const hasPrev = !!prevDir;
+  const hasNext = !!nextDir;
+
+  if (!hasPrev && !hasNext) return { x: 0, y: 0 };
+  if (!hasPrev) {
+    const normal = rotate90(nextDir);
+    return scale(normal, offset);
+  }
+  if (!hasNext) {
+    const normal = rotate90(prevDir);
+    return scale(normal, offset);
+  }
+
+  const normalPrev = rotate90(prevDir);
+  const normalNext = rotate90(nextDir);
+  const turn = cross(prevDir, nextDir);
+  const dotValue = clamp(dot(prevDir, nextDir), -1, 1);
+
+  if (Math.abs(turn) < EPSILON || Math.abs(1 - dotValue) < EPSILON) {
+    return scale(normalNext, offset);
+  }
+
+  if (dotValue < -0.99) {
+    return scale(normalNext, offset);
+  }
+
+  const bisectorX = normalPrev.x + normalNext.x;
+  const bisectorY = normalPrev.y + normalNext.y;
+  const bisectorLen = Math.hypot(bisectorX, bisectorY);
+  if (bisectorLen < EPSILON) {
+    return scale(normalNext, offset);
+  }
+
+  const bisector = { x: bisectorX / bisectorLen, y: bisectorY / bisectorLen };
+  const projectionOntoNext = dot(bisector, normalNext);
+  if (Math.abs(projectionOntoNext) < EPSILON) {
+    return scale(normalNext, offset);
+  }
+
+  const miterLength = offset / projectionOntoNext;
+  const limit = Math.max(1.5, Number.isFinite(mitreLimit) ? mitreLimit : 4);
+  const maxMiter = Math.abs(offset) * limit;
+  const clampedLength = Math.min(Math.abs(miterLength), maxMiter);
+  return scale(bisector, clampedLength * Math.sign(miterLength));
+}
+
+function computeCenterCornerOffset(prevDir, nextDir, offset) {
+  if (!Number.isFinite(offset) || Math.abs(offset) < EPSILON) return null;
+  if (!prevDir && !nextDir) return null;
+  if (!prevDir) prevDir = nextDir;
+  if (!nextDir) nextDir = prevDir;
+
+  const normalPrev = rotate90(prevDir);
+  const normalNext = rotate90(nextDir);
+  const startPoint = scale(normalPrev, offset);
+  const endPoint = scale(normalNext, offset);
+  const denom = cross(prevDir, nextDir);
+
+  if (Math.abs(denom) < EPSILON) {
+    return scale(normalNext, offset);
+  }
+
+  const diff = sub(endPoint, startPoint);
+  const t = cross(diff, nextDir) / denom;
+  const intersection = add(startPoint, scale(prevDir, t));
+  if (!Number.isFinite(intersection.x) || !Number.isFinite(intersection.y)) {
+    return scale(normalNext, offset);
+  }
+  return intersection;
+}
+
+function shouldTreatCornerVertex(prevDir, nextDir, { isEndpoint = false } = {}) {
+  if (isEndpoint) return true;
+  if (!prevDir || !nextDir) return true;
+  const dotValue = clamp(dot(prevDir, nextDir), -1, 1);
+  return dotValue <= CORNER_DOT_THRESHOLD;
+}
+
+function buildCornerInfo(points, closed) {
+  const info = new Array(points.length);
+  const count = points.length;
+  for (let i = 0; i < count; i++) {
+    const current = points[i];
+    const prev = i === 0 ? (closed ? points[count - 1] : null) : points[i - 1];
+    const next = i === count - 1 ? (closed ? points[0] : null) : points[i + 1];
+    const prevDir = resolveDirection(prev, current);
+    const nextDir = resolveDirection(current, next);
+    const isEndpoint = !closed && (i === 0 || i === count - 1);
+    const isCorner = shouldTreatCornerVertex(prevDir, nextDir, { isEndpoint });
+    info[i] = { prevDir, nextDir, isCorner };
+  }
+  return info;
+}
+
 export function clampWidthMultiplier(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 1;
@@ -151,6 +353,32 @@ export function sampleSegment(
   return out;
 }
 
+function sampleLinearSegment(
+  p1,
+  p2,
+  segmentIndex,
+  sampleCount = DEFAULT_SEGMENT_SAMPLES,
+  startWidth = 1,
+  endWidth = 1
+) {
+  const out = [];
+  const count = Math.max(2, sampleCount);
+  const widthStart = clampWidthMultiplier(startWidth);
+  const widthEnd = clampWidthMultiplier(endWidth);
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const segLen = Math.hypot(dx, dy);
+  const tangent = segLen > EPSILON ? { x: dx / segLen, y: dy / segLen } : { x: 1, y: 0 };
+  for (let i = 0; i < count; i++) {
+    const t = i / (count - 1);
+    const posX = p1.x + (dx * t);
+    const posY = p1.y + (dy * t);
+    const widthMultiplier = lerp(widthStart, widthEnd, t);
+    out.push({ x: posX, y: posY, tangent, segmentIndex, widthMultiplier, progress: t });
+  }
+  return out;
+}
+
 export function computeSamplesFromPoints(points, sampleCount = DEFAULT_SEGMENT_SAMPLES, tension = 0, options = {}) {
   if (!Array.isArray(points) || points.length < MIN_POINTS_TO_RENDER) return [];
   const closed = !!options.closed && points.length >= MIN_POINTS_TO_RENDER;
@@ -159,6 +387,8 @@ export function computeSamplesFromPoints(points, sampleCount = DEFAULT_SEGMENT_S
   let totalDistance = 0;
   const segments = Math.max(2, sampleCount);
   const normalizedTension = normalizeTension(tension);
+  const useLinear = normalizedTension >= 0.999;
+  const cornerInfo = useLinear ? buildCornerInfo(points, closed) : null;
   const totalPoints = points.length;
   const limit = closed ? totalPoints : totalPoints - 1;
   for (let i = 0; i < limit; i++) {
@@ -173,11 +403,27 @@ export function computeSamplesFromPoints(points, sampleCount = DEFAULT_SEGMENT_S
     if (!p1 || !p2) continue;
     const startWidth = resolveOutgoingWidth(p1);
     const endWidth = resolveIncomingWidth(p2);
-    const segSamples = sampleSegment(p0, p1, p2, p3, i, segments, normalizedTension, startWidth, endWidth);
+    const segSamples = useLinear
+      ? sampleLinearSegment(p1, p2, i, segments, startWidth, endWidth)
+      : sampleSegment(p0, p1, p2, p3, i, segments, normalizedTension, startWidth, endWidth);
     for (let j = 0; j < segSamples.length; j++) {
       const sample = segSamples[j];
       if (!sample) continue;
-      if (lastPos && j === 0 && i > 0) continue;
+      if (useLinear) {
+        let cornerIndex = null;
+        if (j === 0) cornerIndex = idx1;
+        if (closed && i === limit - 1 && j === segSamples.length - 1) cornerIndex = idx2;
+        if (cornerIndex !== null) {
+          const info = cornerInfo?.[cornerIndex];
+          if (info?.isCorner) {
+            sample.isCorner = true;
+            sample.vertexIndex = cornerIndex;
+            if (info.prevDir) sample.prevDir = { x: info.prevDir.x, y: info.prevDir.y };
+            if (info.nextDir) sample.nextDir = { x: info.nextDir.x, y: info.nextDir.y };
+          }
+        }
+      }
+      if (lastPos && j === 0 && i > 0 && !useLinear) continue;
       if (lastPos) {
         const dx = sample.x - lastPos.x;
         const dy = sample.y - lastPos.y;
@@ -254,9 +500,30 @@ export function createMeshFromSamples(samples, pathWidth, repeatSpacing, texture
       );
       const halfWidth = halfWidthBase * widthMultiplier;
 
+      const useCornerOffsets = !!sample.isCorner && (sample.prevDir || sample.nextDir);
+      let leftOffset = null;
+      let rightOffset = null;
+      let offsetShift = null;
+      if (useCornerOffsets) {
+        const joinStyle = options?.joinStyle || 'mitre';
+        const mitreLimit = Number.isFinite(options?.mitreLimit) ? options.mitreLimit : 4;
+        leftOffset = computeJoinOffset(sample.prevDir, sample.nextDir, halfWidth, joinStyle, mitreLimit);
+        rightOffset = computeJoinOffset(sample.prevDir, sample.nextDir, -halfWidth, joinStyle, mitreLimit);
+        if (Math.abs(offsetY) > EPSILON) {
+          offsetShift = computeCenterCornerOffset(sample.prevDir, sample.nextDir, offsetY);
+        }
+      }
+      if (!leftOffset || !rightOffset) {
+        leftOffset = { x: normal.x * halfWidth, y: normal.y * halfWidth };
+        rightOffset = { x: -normal.x * halfWidth, y: -normal.y * halfWidth };
+      }
+      if (!offsetShift) {
+        offsetShift = { x: normal.x * offsetY, y: normal.y * offsetY };
+      }
+
       // Translate the strip by the Y offset so the whole texture slides instead of wrapping.
-      const centerX = sample.x + (normal.x * offsetY);
-      const centerY = sample.y + (normal.y * offsetY);
+      const centerX = sample.x + offsetShift.x;
+      const centerY = sample.y + offsetShift.y;
       if (lastCenter) {
         const dx = centerX - lastCenter.x;
         const dy = centerY - lastCenter.y;
@@ -264,10 +531,10 @@ export function createMeshFromSamples(samples, pathWidth, repeatSpacing, texture
       }
       lastCenter = { x: centerX, y: centerY };
       const mappedDistance = offsetDistance;
-      const leftX = centerX + normal.x * halfWidth;
-      const leftY = centerY + normal.y * halfWidth;
-      const rightX = centerX - normal.x * halfWidth;
-      const rightY = centerY - normal.y * halfWidth;
+      const leftX = sample.x + offsetShift.x + leftOffset.x;
+      const leftY = sample.y + offsetShift.y + leftOffset.y;
+      const rightX = sample.x + offsetShift.x + rightOffset.x;
+      const rightY = sample.y + offsetShift.y + rightOffset.y;
 
       const uRaw = ((flipH ? -mappedDistance : mappedDistance) + offsetX) / spacing;
       const u = (uRaw * repeatScaleU) + marginBase;
@@ -300,6 +567,9 @@ export function createMeshFromSamples(samples, pathWidth, repeatSpacing, texture
       .addAttribute('aTextureCoord', uvs, 2)
       .addAttribute('aAlpha', alphas, 1)
       .addIndex(indices);
+    if (options?.visibleData) {
+      remapVisibleRows(geometry, options.visibleData);
+    }
 
     const shader = createPathShader(texture);
     const mesh = new PIXI.Mesh(geometry, shader);
@@ -417,6 +687,78 @@ export function encodePath(path) {
     try { return encodeURI(String(path)); }
     catch { return path; }
   }
+}
+
+function normalizeVisibleData(raw, texture) {
+  if (!raw || typeof raw !== 'object') return null;
+  const base = texture?.baseTexture;
+  const totalHeight = Math.max(1, Number(raw.totalHeight) || Number(base?.height) || Number(base?.realHeight) || 0);
+  if (!Number.isFinite(totalHeight) || totalHeight <= 0) return null;
+  const topRow = Math.max(0, Math.min(totalHeight - 1, Number(raw.topRow) || 0));
+  const bottomRow = Math.max(topRow, Math.min(totalHeight - 1, Number(raw.bottomRow ?? (totalHeight - 1))));
+  const visibleHeight = Math.max(1, bottomRow - topRow + 1);
+  return { topRow, bottomRow, totalHeight, visibleHeight };
+}
+
+function detectVisibleRows(texture) {
+  if (!texture) return null;
+  const cached = normalizeVisibleData(texture._cachedVisibleData, texture);
+  if (cached) {
+    texture._cachedVisibleData = cached;
+    return cached;
+  }
+  const base = texture.baseTexture;
+  if (!base || !base.valid) return null;
+  if (typeof document === 'undefined') return null;
+  try {
+    const resource = base.resource;
+    const source = resource?.source;
+    if (!source) return null;
+    const width = base.width;
+    const height = base.height;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    const canvasEl = document.createElement('canvas');
+    canvasEl.width = width;
+    canvasEl.height = height;
+    const ctx = canvasEl.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(source, 0, 0);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    let top = 0;
+    let bottom = height - 1;
+    const rowVisible = (y) => {
+      for (let x = 0; x < width; x++) {
+        if (pixels[(y * width + x) * 4 + 3] > VISIBLE_ALPHA_THRESHOLD) return true;
+      }
+      return false;
+    };
+    while (top < height && !rowVisible(top)) top += 1;
+    while (bottom > top && !rowVisible(bottom)) bottom -= 1;
+    const data = normalizeVisibleData({ topRow: top, bottomRow: bottom, totalHeight: height }, texture);
+    if (data) texture._cachedVisibleData = data;
+    return data;
+  } catch (_) {
+    return null;
+  }
+}
+
+function remapVisibleRows(geometry, visibleData) {
+  if (!geometry || !visibleData) return;
+  const texHeight = Math.max(1, Number(visibleData.totalHeight) || 0);
+  if (!texHeight) return;
+  const uvBuffer = geometry.getBuffer('aTextureCoord');
+  if (!uvBuffer?.data) return;
+  const topRow = Number.isFinite(visibleData.topRow) ? Number(visibleData.topRow) : 0;
+  const bottomRow = Number.isFinite(visibleData.bottomRow) ? Number(visibleData.bottomRow) : (texHeight - 1);
+  const vMin = topRow / texHeight;
+  const vMax = (bottomRow + 1) / texHeight;
+  const vRange = vMax - vMin;
+  if (!(vRange > 0)) return;
+  const data = uvBuffer.data;
+  for (let i = 1; i < data.length; i += 2) {
+    data[i] = vMin + (data[i] * vRange);
+  }
+  uvBuffer.update();
 }
 
 export async function waitForBaseTexture(baseTexture, timeout = 5000) {
@@ -571,6 +913,29 @@ export function cleanupPathOverlay(tile) {
   } catch (_) {}
 }
 
+export async function cleanupPathWallsForTile(tileLike) {
+  try {
+    const doc = tileLike?.document || tileLike || null;
+    const tileId = doc?.id;
+    if (!tileId) return false;
+    const scene = doc?.parent || canvas?.scene;
+    const walls = scene?.walls;
+    if (!walls?.size) return false;
+    const ids = [];
+    for (const wall of walls) {
+      if (!wall) continue;
+      const flag = wall.getFlag?.('fa-nexus', 'pathWall');
+      if (flag?.tileId === tileId && wall.id) ids.push(wall.id);
+    }
+    if (!ids.length) return false;
+    await scene.deleteEmbeddedDocuments('Wall', ids);
+    return true;
+  } catch (error) {
+    Logger.warn('PathGeometry.cleanupWalls.failed', { error: String(error?.message || error) });
+    return false;
+  }
+}
+
 export async function ensureTileMesh(tile, options = {}) {
   try {
     if (!tile || tile.destroyed) return null;
@@ -601,12 +966,98 @@ export async function ensureTileMesh(tile, options = {}) {
   }
 }
 
+function readPathFlag(doc, key) {
+  try {
+    const direct = doc?.getFlag?.('fa-nexus', key);
+    if (direct !== undefined) return direct;
+  } catch (_) {}
+  const flags = doc?.flags?.['fa-nexus'] || doc?._source?.flags?.['fa-nexus'];
+  return flags ? flags[key] : null;
+}
+
+function resolvePathPayloads(doc) {
+  const merged = readPathFlag(doc, 'pathsV2');
+  if (merged && Array.isArray(merged.paths)) {
+    const list = merged.paths.filter((entry) => entry && Array.isArray(entry.controlPoints));
+    if (list.length) {
+      const ordered = list
+        .map((entry, index) => ({ entry, index }))
+        .sort((a, b) => {
+          const aOrder = Number.isFinite(a.entry?.zOrder) ? Number(a.entry.zOrder) : a.index;
+          const bOrder = Number.isFinite(b.entry?.zOrder) ? Number(b.entry.zOrder) : b.index;
+          if (aOrder === bOrder) return a.index - b.index;
+          return aOrder - bOrder;
+        })
+        .map((item) => item.entry);
+      return { kind: 'v2', payloads: ordered };
+    }
+  }
+  const v2 = readPathFlag(doc, 'pathV2');
+  if (v2 && Array.isArray(v2.controlPoints)) return { kind: 'v2', payloads: [v2] };
+  const v1 = readPathFlag(doc, 'path');
+  if (v1 && Array.isArray(v1.controlPoints)) return { kind: 'v1', payloads: [v1] };
+  return { kind: null, payloads: [] };
+}
+
+function shouldSkipV1Runtime(doc) {
+  if (!globalThis?.faNexusPathTilesPremium) return false;
+  const v2 = readPathFlag(doc, 'pathV2');
+  if (v2 && Array.isArray(v2.controlPoints)) return false;
+  const merged = readPathFlag(doc, 'pathsV2');
+  if (merged && Array.isArray(merged.paths)) return false;
+  return true;
+}
+
+function normalizeControlPoints(controlPointsRaw = []) {
+  if (!Array.isArray(controlPointsRaw)) return [];
+  return controlPointsRaw.map((p) => {
+    if (!p) return { x: 0, y: 0, widthLeft: 1, widthRight: 1 };
+    if (Array.isArray(p)) {
+      const x = Number(p[0]) || 0;
+      const y = Number(p[1]) || 0;
+      const width = Number(p[2]) || 1;
+      return { x, y, widthLeft: width, widthRight: width };
+    }
+    const point = {
+      x: Number(p.x) || 0,
+      y: Number(p.y) || 0
+    };
+    if (Number.isFinite(p.widthLeft)) point.widthLeft = Number(p.widthLeft);
+    if (Number.isFinite(p.widthRight)) point.widthRight = Number(p.widthRight);
+    return point;
+  });
+}
+
+function buildRenderKey(payloads = []) {
+  try {
+    return JSON.stringify(payloads);
+  } catch (_) {
+    return '';
+  }
+}
+
+function resolvePathMeshes(container) {
+  if (!container || container.destroyed) return [];
+  const stored = Array.isArray(container.faNexusPathMeshes) && container.faNexusPathMeshes.length
+    ? container.faNexusPathMeshes
+    : (container.faNexusPathMesh ? [container.faNexusPathMesh] : []);
+  if (stored.length) return stored;
+  const children = Array.isArray(container.children) ? container.children : [];
+  const meshes = children.filter((child) => child && !child.destroyed && child.geometry);
+  if (meshes.length) {
+    if (!container.faNexusPathMesh) container.faNexusPathMesh = meshes[0];
+    if (meshes.length > 1) container.faNexusPathMeshes = meshes;
+  }
+  return meshes;
+}
+
 export async function applyPathTile(tile) {
   try {
     if (!tile || tile.destroyed) return;
     const doc = tile.document;
-    const data = doc?.getFlag?.('fa-nexus', 'path');
-    if (!data || !Array.isArray(data.controlPoints) || !data.baseSrc) {
+    if (shouldSkipV1Runtime(doc)) return;
+    const { payloads, kind } = resolvePathPayloads(doc);
+    if (!payloads.length) {
       cleanupPathOverlay(tile);
       return;
     }
@@ -617,100 +1068,145 @@ export async function applyPathTile(tile) {
 
     ensureMeshTransparent(mesh);
 
-    let texture = null;
-    try {
-      texture = await loadPathTexture(data.baseSrc);
-      try { texture.baseTexture.wrapMode = PIXI.WRAP_MODES.REPEAT; }
-      catch (_) {}
-    }
-    catch (err) {
-      Logger.warn('PathGeometry.apply.loadFailed', { error: String(err?.message || err), tileId: doc?.id });
-      return;
-    }
-
-    const controlPointsRaw = data.controlPoints || [];
-    const controlPoints = controlPointsRaw.map((p) => {
-      if (!p) return { x: 0, y: 0, widthLeft: 1, widthRight: 1 };
-      if (Array.isArray(p)) {
-        const x = Number(p[0]) || 0;
-        const y = Number(p[1]) || 0;
-        const width = Number(p[2]) || 1;
-        return { x, y, widthLeft: width, widthRight: width };
-      }
-      const point = {
-        x: Number(p.x) || 0,
-        y: Number(p.y) || 0
-      };
-      if (Number.isFinite(p.widthLeft)) point.widthLeft = Number(p.widthLeft);
-      if (Number.isFinite(p.widthRight)) point.widthRight = Number(p.widthRight);
-      return point;
-    });
-    if (controlPoints.length < MIN_POINTS_TO_RENDER) {
-      cleanupPathOverlay(tile);
-      return;
-    }
-
-    const samples = computeSamplesFromPoints(
-      controlPoints,
-      Number(data.samplesPerSegment) || DEFAULT_SEGMENT_SAMPLES,
-      data?.tension,
-      { closed: !!data?.closed }
-    );
-    if (!samples.length) {
-      cleanupPathOverlay(tile);
-      return;
-    }
-
-    const meshPath = createMeshFromSamples(
-      samples,
-      data.width,
-      data.repeatSpacing,
-      texture,
-      {
-        textureOffset: data?.textureOffset,
-        textureFlip: data?.textureFlip,
-        feather: data?.feather,
-        opacityFeather: data?.opacityFeather
-      }
-    );
-    if (!meshPath) {
-      cleanupPathOverlay(tile);
-      return;
-    }
-
-    let container = tile.faNexusPathContainer;
-    if (!container || container.destroyed) {
-      container = new PIXI.Container();
-      container.eventMode = 'none';
-      container.sortableChildren = false;
-      tile.faNexusPathContainer = container;
-      mesh.addChild(container);
-    } else if (container.parent !== mesh) {
-      try { container.parent?.removeChild?.(container); } catch (_) {}
-      mesh.addChild(container);
-    }
-
     const docAlpha = Number(doc?.alpha);
     const containerAlpha = Number.isFinite(docAlpha) ? Math.min(1, Math.max(0, docAlpha)) : 1;
-    try { container.alpha = containerAlpha; }
-    catch (_) {}
+    const renderKey = buildRenderKey(payloads);
 
-    const prevChildren = container.children?.slice() || [];
-    container.removeChildren();
-    for (const child of prevChildren) {
-      try { child.destroy?.({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+    let container = tile.faNexusPathContainer;
+    if (container && !container.destroyed && container.faNexusPathRenderKey === renderKey) {
+      if (container.parent !== mesh) {
+        try { container.parent?.removeChild?.(container); } catch (_) {}
+        mesh.addChild(container);
+      }
+      try { container.alpha = containerAlpha; }
+      catch (_) {}
+      const prevContainerAlpha = Number.isFinite(container.faNexusPathContainerAlpha)
+        ? Number(container.faNexusPathContainerAlpha)
+        : 1;
+      const existingMeshes = resolvePathMeshes(container);
+      for (const meshPath of existingMeshes) {
+        let entryAlpha = Number.isFinite(meshPath?.faNexusPathAlpha) ? Number(meshPath.faNexusPathAlpha) : null;
+        if (!Number.isFinite(entryAlpha)) {
+          const meshAlpha = Number(meshPath?.alpha);
+          const divisor = prevContainerAlpha > 0 ? prevContainerAlpha : 1;
+          if (Number.isFinite(meshAlpha)) entryAlpha = meshAlpha / divisor;
+        }
+        if (!Number.isFinite(entryAlpha)) entryAlpha = 1;
+        entryAlpha = Math.min(1, Math.max(0, entryAlpha));
+        applyMeshOpacity(meshPath, containerAlpha * entryAlpha);
+        if (!Number.isFinite(meshPath?.faNexusPathAlpha)) {
+          try { meshPath.faNexusPathAlpha = entryAlpha; } catch (_) {}
+        }
+      }
+      container.faNexusPathContainerAlpha = containerAlpha;
+      mesh.faNexusPathContainer = container;
+    } else {
+      if (!container || container.destroyed) {
+        container = new PIXI.Container();
+        container.eventMode = 'none';
+        container.sortableChildren = false;
+        tile.faNexusPathContainer = container;
+        mesh.addChild(container);
+      } else if (container.parent !== mesh) {
+        try { container.parent?.removeChild?.(container); } catch (_) {}
+        mesh.addChild(container);
+      }
+      try { container.alpha = containerAlpha; }
+      catch (_) {}
+
+      const prevChildren = container.children?.slice() || [];
+      container.removeChildren();
+      for (const child of prevChildren) {
+        try { child.destroy?.({ children: true, texture: false, baseTexture: false }); } catch (_) {}
+      }
+      const meshPaths = [];
+      const textureCache = new Map();
+      const visibleCache = new Map();
+      const useVisibleRows = kind === 'v2';
+      for (const data of payloads) {
+        const baseSrc = data?.baseSrc;
+        if (!baseSrc) continue;
+        let texture = textureCache.get(baseSrc);
+        if (!texture) {
+          try {
+            texture = await loadPathTexture(baseSrc);
+            try { texture.baseTexture.wrapMode = PIXI.WRAP_MODES.REPEAT; }
+            catch (_) {}
+            textureCache.set(baseSrc, texture);
+          } catch (err) {
+            Logger.warn('PathGeometry.apply.loadFailed', { error: String(err?.message || err), tileId: doc?.id });
+            continue;
+          }
+        }
+
+        const controlPoints = normalizeControlPoints(data.controlPoints);
+        if (controlPoints.length < MIN_POINTS_TO_RENDER) continue;
+
+        let visibleData = null;
+        if (useVisibleRows) {
+          if (visibleCache.has(baseSrc)) {
+            visibleData = visibleCache.get(baseSrc);
+          } else {
+            visibleData = detectVisibleRows(texture);
+            visibleCache.set(baseSrc, visibleData);
+          }
+        }
+
+        let meshPath = null;
+        if (shouldUseWallMesher(controlPoints, data)) {
+          meshPath = createWallMesherPathMesh(controlPoints, data, texture, { visibleData });
+        } else {
+          const samples = computeSamplesFromPoints(
+            controlPoints,
+            Number(data.samplesPerSegment) || DEFAULT_SEGMENT_SAMPLES,
+            data?.tension,
+            { closed: !!data?.closed }
+          );
+          if (!samples.length) continue;
+          meshPath = createMeshFromSamples(
+            samples,
+            data.width,
+            data.repeatSpacing,
+            texture,
+            {
+              textureOffset: data?.textureOffset,
+              textureFlip: data?.textureFlip,
+              feather: data?.feather,
+              opacityFeather: data?.opacityFeather,
+              visibleData
+            }
+          );
+        }
+        if (!meshPath) continue;
+
+        const entryAlpha = Number.isFinite(data?.layerOpacity) ? Number(data.layerOpacity) : 1;
+        applyMeshOpacity(meshPath, containerAlpha * entryAlpha);
+        try { meshPath.faNexusPathAlpha = entryAlpha; } catch (_) {}
+        container.addChild(meshPath);
+        meshPaths.push(meshPath);
+      }
+      if (!meshPaths.length) {
+        cleanupPathOverlay(tile);
+        return;
+      }
+      container.faNexusPathMesh = meshPaths[0] || null;
+      if (meshPaths.length > 1) container.faNexusPathMeshes = meshPaths;
+      else container.faNexusPathMeshes = null;
+      container.faNexusPathRenderKey = renderKey;
+      container.faNexusPathContainerAlpha = containerAlpha;
+      mesh.faNexusPathContainer = container;
     }
-    container.addChild(meshPath);
-    applyMeshOpacity(meshPath, containerAlpha);
-    container.faNexusPathMesh = meshPath;
-    mesh.faNexusPathContainer = container;
 
+    if (!mesh || mesh.destroyed || !container || container.destroyed) {
+      cleanupPathOverlay(tile);
+      return;
+    }
     const docWidth = Math.max(1, Number(doc?.width) || 0) || Math.max(1, Number(mesh?.width) || 1);
     const docHeight = Math.max(1, Number(doc?.height) || 0) || Math.max(1, Number(mesh?.height) || 1);
-    const sx = Number(mesh.scale?.x ?? 1) || 1;
-    const sy = Number(mesh.scale?.y ?? 1) || 1;
-    container.scale.set(1 / sx, 1 / sy);
-    container.position.set(-(docWidth / 2) / (sx || 1), -(docHeight / 2) / (sy || 1));
+    const sx = Number(mesh?.scale?.x ?? 1) || 1;
+    const sy = Number(mesh?.scale?.y ?? 1) || 1;
+    container.scale?.set?.(1 / sx, 1 / sy);
+    container.position?.set?.(-(docWidth / 2) / (sx || 1), -(docHeight / 2) / (sy || 1));
   } catch (err) {
     Logger.warn('PathGeometry.apply.failed', String(err?.message || err));
   }
@@ -722,8 +1218,10 @@ export function rehydrateAllPathTiles() {
     const list = Array.isArray(canvas.tiles?.placeables) ? canvas.tiles.placeables : [];
     for (const tile of list) {
       try {
-        const data = tile?.document?.getFlag?.('fa-nexus', 'path');
-        if (data) applyPathTile(tile);
+        const doc = tile?.document;
+        if (shouldSkipV1Runtime(doc)) continue;
+        const { payloads } = resolvePathPayloads(doc);
+        if (payloads.length) applyPathTile(tile);
         else cleanupPathOverlay(tile);
       } catch (_) {}
     }

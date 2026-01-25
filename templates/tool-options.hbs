@@ -12,7 +12,16 @@
       <div class="fa-nexus-tool-options__control fa-nexus-grid-snap" data-fa-nexus-grid-snap-root>
         <div class="fa-nexus-tool-options__control-header">
           <span class="fa-nexus-tool-options__label">Subgrid Density</span>
-          <span class="fa-nexus-tool-options__value" data-fa-nexus-grid-snap-display>{{gridSnapResolution.display}}</span>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{gridSnapResolution.min}}"
+                 max="{{gridSnapResolution.max}}"
+                 step="{{gridSnapResolution.step}}"
+                 value="{{gridSnapResolution.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-grid-snap-display
+                 title="{{gridSnapResolution.display}}"
+                 {{#if gridSnapResolution.disabled}}disabled{{/if}}>
         </div>
         <input type="range"
                min="{{gridSnapResolution.min}}"
@@ -116,7 +125,16 @@
             <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-dilation-row>
               <div class="fa-nexus-drop-shadow__row-header">
                 <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.dilation.label}}</span>
-                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-dilation-display>{{dropShadowControls.dilation.display}}</span>
+                <input type="number"
+                       class="fa-nexus-drop-shadow__row-value"
+                       min="{{dropShadowControls.dilation.min}}"
+                       max="{{dropShadowControls.dilation.max}}"
+                       step="{{dropShadowControls.dilation.step}}"
+                       value="{{dropShadowControls.dilation.value}}"
+                       inputmode="decimal"
+                       data-fa-nexus-drop-shadow-dilation-display
+                       title="{{dropShadowControls.dilation.display}}"
+                       {{#if dropShadowControls.dilation.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{dropShadowControls.dilation.min}}"
@@ -134,7 +152,16 @@
             <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-alpha-row>
               <div class="fa-nexus-drop-shadow__row-header">
                 <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.alpha.label}}</span>
-                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-alpha-display>{{dropShadowControls.alpha.display}}</span>
+                <input type="number"
+                       class="fa-nexus-drop-shadow__row-value"
+                       min="{{dropShadowControls.alpha.min}}"
+                       max="{{dropShadowControls.alpha.max}}"
+                       step="{{dropShadowControls.alpha.step}}"
+                       value="{{dropShadowControls.alpha.value}}"
+                       inputmode="decimal"
+                       data-fa-nexus-drop-shadow-alpha-display
+                       title="{{dropShadowControls.alpha.display}}"
+                       {{#if dropShadowControls.alpha.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{dropShadowControls.alpha.min}}"
@@ -152,7 +179,16 @@
             <div class="fa-nexus-drop-shadow__row" data-fa-nexus-drop-shadow-blur-row>
               <div class="fa-nexus-drop-shadow__row-header">
                 <span class="fa-nexus-drop-shadow__row-label">{{dropShadowControls.blur.label}}</span>
-                <span class="fa-nexus-drop-shadow__row-value" data-fa-nexus-drop-shadow-blur-display>{{dropShadowControls.blur.display}}</span>
+                <input type="number"
+                       class="fa-nexus-drop-shadow__row-value"
+                       min="{{dropShadowControls.blur.min}}"
+                       max="{{dropShadowControls.blur.max}}"
+                       step="{{dropShadowControls.blur.step}}"
+                       value="{{dropShadowControls.blur.value}}"
+                       inputmode="decimal"
+                       data-fa-nexus-drop-shadow-blur-display
+                       title="{{dropShadowControls.blur.display}}"
+                       {{#if dropShadowControls.blur.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{dropShadowControls.blur.min}}"
@@ -191,6 +227,165 @@
       </div>
     {{/if}}
 
+    {{#if hasSubtoolOptions}}
+      <div class="fa-nexus-tool-options__control fa-nexus-subtool-options" data-fa-nexus-subtool-options-root>
+        <div class="fa-nexus-tool-options__control-header">
+          <span class="fa-nexus-tool-options__label">Subtool Options</span>
+        </div>
+        <div class="fa-nexus-subtool-options__list">
+          {{#each subtoolOptions as |toggle|}}
+            <label class="fa-nexus-tool-options__toggle" title="{{toggle.tooltip}}">
+              <input type="checkbox" data-fa-nexus-custom-toggle="{{toggle.id}}" {{#if toggle.enabled}}checked{{/if}} {{#if toggle.disabled}}disabled{{/if}}>
+              <span>{{toggle.label}}</span>
+            </label>
+          {{/each}}
+        </div>
+      </div>
+    {{/if}}
+
+    {{#if pathAppearance.freehandSimplify.available}}
+      <div class="fa-nexus-tool-options__control fa-nexus-path-simplify" data-fa-nexus-path-simplify-root>
+        <div class="fa-nexus-tool-options__control-header">
+          <span class="fa-nexus-tool-options__label">Draw Simplification</span>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{pathAppearance.freehandSimplify.min}}"
+                 max="{{pathAppearance.freehandSimplify.max}}"
+                 step="{{pathAppearance.freehandSimplify.step}}"
+                 value="{{pathAppearance.freehandSimplify.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-path-simplify-display
+                 title="{{pathAppearance.freehandSimplify.display}}"
+                 {{#if pathAppearance.freehandSimplify.disabled}}disabled{{/if}}>
+        </div>
+        <input type="range"
+               min="{{pathAppearance.freehandSimplify.min}}"
+               max="{{pathAppearance.freehandSimplify.max}}"
+               step="{{pathAppearance.freehandSimplify.step}}"
+               value="{{pathAppearance.freehandSimplify.value}}"
+               aria-label="Draw Simplification"
+               data-fa-nexus-path-simplify
+               {{#if pathAppearance.freehandSimplify.disabled}}disabled{{/if}}>
+        {{#if pathAppearance.freehandSimplify.hint}}
+          <p class="fa-nexus-tool-options__hint">{{pathAppearance.freehandSimplify.hint}}</p>
+        {{/if}}
+      </div>
+    {{/if}}
+
+    {{#if hasEditorActions}}
+      <div class="fa-nexus-tool-options__control fa-nexus-editor-actions" data-fa-nexus-editor-actions-root>
+        <div class="fa-nexus-tool-options__control-header">
+          <span class="fa-nexus-tool-options__label">Session Actions</span>
+        </div>
+        <div class="fa-nexus-texture-tools__actions fa-nexus-editor-actions__buttons">
+          {{#each editorActions as |action|}}
+            <button type="button"
+                    class="fa-nexus-texture-tools__action fa-nexus-editor-actions__action {{#if action.primary}}is-primary{{/if}}"
+                    data-fa-nexus-editor-action="{{action.id}}"
+                    {{#if action.disabled}}disabled{{/if}}
+                    title="{{action.tooltip}}">
+              <span>{{action.label}}</span>
+            </button>
+          {{/each}}
+        </div>
+      </div>
+    {{/if}}
+
+    {{#if assetScatter.available}}
+      <div class="fa-nexus-tool-options__control fa-nexus-asset-scatter" data-fa-nexus-asset-scatter-root>
+        <div class="fa-nexus-tool-options__control-header">
+          <span class="fa-nexus-tool-options__label">Scatter Brush</span>
+        </div>
+        <div class="fa-nexus-texture-offset__row">
+          <span class="fa-nexus-texture-offset__axis">Brush</span>
+          <input type="range"
+                 min="{{assetScatter.brushSize.min}}"
+                 max="{{assetScatter.brushSize.max}}"
+                 step="{{assetScatter.brushSize.step}}"
+                 value="{{assetScatter.brushSize.value}}"
+                 aria-label="Scatter brush size"
+                 data-fa-nexus-asset-scatter-size
+                 {{#if assetScatter.brushSize.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{assetScatter.brushSize.min}}"
+                 max="{{assetScatter.brushSize.max}}"
+                 step="{{assetScatter.brushSize.step}}"
+                 value="{{assetScatter.brushSize.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-asset-scatter-size-display
+                 title="{{assetScatter.brushSize.display}}"
+                 {{#if assetScatter.brushSize.disabled}}disabled{{/if}}>
+        </div>
+        <div class="fa-nexus-texture-offset__row">
+          <span class="fa-nexus-texture-offset__axis">Density</span>
+          <input type="range"
+                 min="{{assetScatter.density.min}}"
+                 max="{{assetScatter.density.max}}"
+                 step="{{assetScatter.density.step}}"
+                 value="{{assetScatter.density.value}}"
+                 aria-label="Scatter density"
+                 data-fa-nexus-asset-scatter-density
+                 {{#if assetScatter.density.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{assetScatter.density.min}}"
+                 max="{{assetScatter.density.max}}"
+                 step="{{assetScatter.density.step}}"
+                 value="{{assetScatter.density.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-asset-scatter-density-display
+                 title="{{assetScatter.density.display}}"
+                 {{#if assetScatter.density.disabled}}disabled{{/if}}>
+        </div>
+        <div class="fa-nexus-texture-offset__row">
+          <span class="fa-nexus-texture-offset__axis">Spray</span>
+          <input type="range"
+                 min="{{assetScatter.sprayDeviation.min}}"
+                 max="{{assetScatter.sprayDeviation.max}}"
+                 step="{{assetScatter.sprayDeviation.step}}"
+                 value="{{assetScatter.sprayDeviation.value}}"
+                 aria-label="Scatter spray deviation"
+                 data-fa-nexus-asset-scatter-spray
+                 {{#if assetScatter.sprayDeviation.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{assetScatter.sprayDeviation.min}}"
+                 max="{{assetScatter.sprayDeviation.max}}"
+                 step="{{assetScatter.sprayDeviation.step}}"
+                 value="{{assetScatter.sprayDeviation.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-asset-scatter-spray-display
+                 title="{{assetScatter.sprayDeviation.display}}"
+                 {{#if assetScatter.sprayDeviation.disabled}}disabled{{/if}}>
+        </div>
+        <div class="fa-nexus-texture-offset__row">
+          <span class="fa-nexus-texture-offset__axis">Spacing</span>
+          <input type="range"
+                 min="{{assetScatter.spacing.min}}"
+                 max="{{assetScatter.spacing.max}}"
+                 step="{{assetScatter.spacing.step}}"
+                 value="{{assetScatter.spacing.value}}"
+                 aria-label="Scatter spacing"
+                 data-fa-nexus-asset-scatter-spacing
+                 {{#if assetScatter.spacing.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{assetScatter.spacing.min}}"
+                 max="{{assetScatter.spacing.max}}"
+                 step="{{assetScatter.spacing.step}}"
+                 value="{{assetScatter.spacing.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-asset-scatter-spacing-display
+                 title="{{assetScatter.spacing.display}}"
+                 {{#if assetScatter.spacing.disabled}}disabled{{/if}}>
+        </div>
+        {{#if assetScatter.hint}}
+          <p class="fa-nexus-tool-options__hint fa-nexus-asset-scatter__hint">{{assetScatter.hint}}</p>
+        {{/if}}
+      </div>
+    {{/if}}
+
     {{#if hasPlacementToggles}}
       <div class="fa-nexus-tool-options__control fa-nexus-placement" data-fa-nexus-placement-root>
         <div class="fa-nexus-tool-options__control-header">
@@ -224,9 +419,14 @@
           <div class="fa-nexus-placement__order">
             <div class="fa-nexus-placement__order-header">
               <span class="fa-nexus-tool-options__label">Selected Wall</span>
-              {{#if shapeStacking.orderLabel}}
-                <span class="fa-nexus-placement__order-value" data-fa-nexus-placement-order>{{shapeStacking.orderLabel}}</span>
-              {{/if}}
+              <div class="fa-nexus-placement__order-meta">
+                {{#if shapeStacking.orderLabel}}
+                  <span class="fa-nexus-placement__order-value" data-fa-nexus-placement-order>{{shapeStacking.orderLabel}}</span>
+                {{/if}}
+                {{#if shapeStacking.elevationLabel}}
+                  <span class="fa-nexus-placement__order-value fa-nexus-placement__order-value--elevation" data-fa-nexus-placement-elevation>{{shapeStacking.elevationLabel}}</span>
+                {{/if}}
+              </div>
             </div>
             <div class="fa-nexus-placement__order-actions">
               <button type="button"
@@ -356,7 +556,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Scale</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-door-frame-scale-display>{{doorControls.frameSettings.scaleDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{doorControls.frameSettings.scaleMin}}"
+                       max="{{doorControls.frameSettings.scaleMax}}"
+                       step="{{doorControls.frameSettings.scaleStep}}"
+                       value="{{doorControls.frameSettings.scale}}"
+                       inputmode="decimal"
+                       data-fa-nexus-door-frame-scale-display
+                       title="{{doorControls.frameSettings.scaleDisplay}}"
+                       {{#if doorControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{doorControls.frameSettings.scaleMin}}"
@@ -369,7 +578,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Offset X</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-door-frame-offset-x-display>{{doorControls.frameSettings.offsetXDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{doorControls.frameSettings.offsetMin}}"
+                       max="{{doorControls.frameSettings.offsetMax}}"
+                       step="{{doorControls.frameSettings.offsetStep}}"
+                       value="{{doorControls.frameSettings.offsetX}}"
+                       inputmode="decimal"
+                       data-fa-nexus-door-frame-offset-x-display
+                       title="{{doorControls.frameSettings.offsetXDisplay}}"
+                       {{#if doorControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{doorControls.frameSettings.offsetMin}}"
@@ -382,7 +600,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Offset Y</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-door-frame-offset-y-display>{{doorControls.frameSettings.offsetYDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{doorControls.frameSettings.offsetMin}}"
+                       max="{{doorControls.frameSettings.offsetMax}}"
+                       step="{{doorControls.frameSettings.offsetStep}}"
+                       value="{{doorControls.frameSettings.offsetY}}"
+                       inputmode="decimal"
+                       data-fa-nexus-door-frame-offset-y-display
+                       title="{{doorControls.frameSettings.offsetYDisplay}}"
+                       {{#if doorControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{doorControls.frameSettings.offsetMin}}"
@@ -395,7 +622,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Rotation</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-door-frame-rotation-display>{{doorControls.frameSettings.rotationDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{doorControls.frameSettings.rotationMin}}"
+                       max="{{doorControls.frameSettings.rotationMax}}"
+                       step="{{doorControls.frameSettings.rotationStep}}"
+                       value="{{doorControls.frameSettings.rotation}}"
+                       inputmode="decimal"
+                       data-fa-nexus-door-frame-rotation-display
+                       title="{{doorControls.frameSettings.rotationDisplay}}"
+                       {{#if doorControls.frameSettings.rotationDisabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{doorControls.frameSettings.rotationMin}}"
@@ -502,7 +738,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Scale</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-sill-scale-display>{{windowControls.sillSettings.scaleDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.sillSettings.scaleMin}}"
+                       max="{{windowControls.sillSettings.scaleMax}}"
+                       step="{{windowControls.sillSettings.scaleStep}}"
+                       value="{{windowControls.sillSettings.scale}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-sill-scale-display
+                       title="{{windowControls.sillSettings.scaleDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.sillSettings.scaleMin}}"
@@ -515,7 +760,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Offset X</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-sill-offset-x-display>{{windowControls.sillSettings.offsetXDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.sillSettings.offsetMin}}"
+                       max="{{windowControls.sillSettings.offsetMax}}"
+                       step="{{windowControls.sillSettings.offsetStep}}"
+                       value="{{windowControls.sillSettings.offsetX}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-sill-offset-x-display
+                       title="{{windowControls.sillSettings.offsetXDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.sillSettings.offsetMin}}"
@@ -528,7 +782,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Offset Y</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-sill-offset-y-display>{{windowControls.sillSettings.offsetYDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.sillSettings.offsetMin}}"
+                       max="{{windowControls.sillSettings.offsetMax}}"
+                       step="{{windowControls.sillSettings.offsetStep}}"
+                       value="{{windowControls.sillSettings.offsetY}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-sill-offset-y-display
+                       title="{{windowControls.sillSettings.offsetYDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.sillSettings.offsetMin}}"
@@ -569,7 +832,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Scale</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-texture-scale-display>{{windowControls.textureSettings.scaleDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.textureSettings.scaleMin}}"
+                       max="{{windowControls.textureSettings.scaleMax}}"
+                       step="{{windowControls.textureSettings.scaleStep}}"
+                       value="{{windowControls.textureSettings.scale}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-texture-scale-display
+                       title="{{windowControls.textureSettings.scaleDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.textureSettings.scaleMin}}"
@@ -582,7 +854,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Offset X</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-texture-offset-x-display>{{windowControls.textureSettings.offsetXDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.textureSettings.offsetMin}}"
+                       max="{{windowControls.textureSettings.offsetMax}}"
+                       step="{{windowControls.textureSettings.offsetStep}}"
+                       value="{{windowControls.textureSettings.offsetX}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-texture-offset-x-display
+                       title="{{windowControls.textureSettings.offsetXDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.textureSettings.offsetMin}}"
@@ -595,7 +876,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Offset Y</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-texture-offset-y-display>{{windowControls.textureSettings.offsetYDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.textureSettings.offsetMin}}"
+                       max="{{windowControls.textureSettings.offsetMax}}"
+                       step="{{windowControls.textureSettings.offsetStep}}"
+                       value="{{windowControls.textureSettings.offsetY}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-texture-offset-y-display
+                       title="{{windowControls.textureSettings.offsetYDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.textureSettings.offsetMin}}"
@@ -635,7 +925,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Scale</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-frame-scale-display>{{windowControls.frameSettings.scaleDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.frameSettings.scaleMin}}"
+                       max="{{windowControls.frameSettings.scaleMax}}"
+                       step="{{windowControls.frameSettings.scaleStep}}"
+                       value="{{windowControls.frameSettings.scale}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-frame-scale-display
+                       title="{{windowControls.frameSettings.scaleDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.frameSettings.scaleMin}}"
@@ -648,7 +947,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Offset X</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-frame-offset-x-display>{{windowControls.frameSettings.offsetXDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.frameSettings.offsetMin}}"
+                       max="{{windowControls.frameSettings.offsetMax}}"
+                       step="{{windowControls.frameSettings.offsetStep}}"
+                       value="{{windowControls.frameSettings.offsetX}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-frame-offset-x-display
+                       title="{{windowControls.frameSettings.offsetXDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.frameSettings.offsetMin}}"
@@ -661,7 +969,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Offset Y</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-frame-offset-y-display>{{windowControls.frameSettings.offsetYDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.frameSettings.offsetMin}}"
+                       max="{{windowControls.frameSettings.offsetMax}}"
+                       step="{{windowControls.frameSettings.offsetStep}}"
+                       value="{{windowControls.frameSettings.offsetY}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-frame-offset-y-display
+                       title="{{windowControls.frameSettings.offsetYDisplay}}"
+                       {{#if windowControls.disabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.frameSettings.offsetMin}}"
@@ -674,7 +991,16 @@
             <div class="fa-nexus-window-controls__slider-row">
               <div class="fa-nexus-window-controls__slider-header">
                 <span class="fa-nexus-tool-options__label">Rotation</span>
-                <span class="fa-nexus-tool-options__value" data-fa-nexus-window-frame-rotation-display>{{windowControls.frameSettings.rotationDisplay}}</span>
+                <input type="number"
+                       class="fa-nexus-tool-options__value"
+                       min="{{windowControls.frameSettings.rotationMin}}"
+                       max="{{windowControls.frameSettings.rotationMax}}"
+                       step="{{windowControls.frameSettings.rotationStep}}"
+                       value="{{windowControls.frameSettings.rotation}}"
+                       inputmode="decimal"
+                       data-fa-nexus-window-frame-rotation-display
+                       title="{{windowControls.frameSettings.rotationDisplay}}"
+                       {{#if windowControls.frameSettings.rotationDisabled}}disabled{{/if}}>
               </div>
               <input type="range"
                      min="{{windowControls.frameSettings.rotationMin}}"
@@ -735,7 +1061,16 @@
         <div class="fa-nexus-tool-options__control fa-nexus-texture-opacity" data-fa-nexus-texture-opacity-root>
           <div class="fa-nexus-tool-options__control-header">
             <span class="fa-nexus-tool-options__label">Tool Opacity</span>
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-texture-opacity-display>{{texturePaint.opacity.display}}</span>
+            <input type="number"
+                   class="fa-nexus-tool-options__value"
+                   min="{{texturePaint.opacity.min}}"
+                   max="{{texturePaint.opacity.max}}"
+                   step="{{texturePaint.opacity.step}}"
+                   value="{{texturePaint.opacity.value}}"
+                   inputmode="decimal"
+                   data-fa-nexus-texture-opacity-display
+                   title="{{texturePaint.opacity.display}}"
+                   {{#if texturePaint.opacity.disabled}}disabled{{/if}}>
           </div>
           <input type="range"
                  min="{{texturePaint.opacity.min}}"
@@ -750,11 +1085,267 @@
           {{/if}}
         </div>
       {{/if}}
+      {{#if textureBrush.available}}
+        <div class="fa-nexus-tool-options__control fa-nexus-texture-brush" data-fa-nexus-texture-brush-root>
+          <div class="fa-nexus-tool-options__control-header">
+            <span class="fa-nexus-tool-options__label">Brush Settings</span>
+          </div>
+          <div class="fa-nexus-texture-offset__row">
+            <span class="fa-nexus-texture-offset__axis">Brush</span>
+          <input type="range"
+                 min="{{textureBrush.brushSize.min}}"
+                 max="{{textureBrush.brushSize.max}}"
+                 step="{{textureBrush.brushSize.step}}"
+                 value="{{textureBrush.brushSize.value}}"
+                 aria-label="Brush size"
+                 data-fa-nexus-texture-brush-size
+                 {{#if textureBrush.brushSize.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{textureBrush.brushSize.min}}"
+                 max="{{textureBrush.brushSize.max}}"
+                 step="{{textureBrush.brushSize.step}}"
+                 value="{{textureBrush.brushSize.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-texture-brush-size-display
+                 title="{{textureBrush.brushSize.display}}"
+                 {{#if textureBrush.brushSize.disabled}}disabled{{/if}}>
+        </div>
+        <div class="fa-nexus-texture-offset__row">
+          <span class="fa-nexus-texture-offset__axis">Tip %</span>
+          <input type="range"
+                 min="{{textureBrush.particleSize.min}}"
+                 max="{{textureBrush.particleSize.max}}"
+                 step="{{textureBrush.particleSize.step}}"
+                 value="{{textureBrush.particleSize.value}}"
+                 aria-label="Particle size"
+                 data-fa-nexus-texture-particle-size
+                 {{#if textureBrush.particleSize.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{textureBrush.particleSize.min}}"
+                 max="{{textureBrush.particleSize.max}}"
+                 step="{{textureBrush.particleSize.step}}"
+                 value="{{textureBrush.particleSize.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-texture-particle-size-display
+                 title="{{textureBrush.particleSize.display}}"
+                 {{#if textureBrush.particleSize.disabled}}disabled{{/if}}>
+        </div>
+        <div class="fa-nexus-texture-offset__row">
+          <span class="fa-nexus-texture-offset__axis">Density</span>
+          <input type="range"
+                 min="{{textureBrush.particleDensity.min}}"
+                 max="{{textureBrush.particleDensity.max}}"
+                 step="{{textureBrush.particleDensity.step}}"
+                 value="{{textureBrush.particleDensity.value}}"
+                 aria-label="Particle density"
+                 data-fa-nexus-texture-particle-density
+                 {{#if textureBrush.particleDensity.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{textureBrush.particleDensity.min}}"
+                 max="{{textureBrush.particleDensity.max}}"
+                 step="{{textureBrush.particleDensity.step}}"
+                 value="{{textureBrush.particleDensity.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-texture-particle-density-display
+                 title="{{textureBrush.particleDensity.display}}"
+                 {{#if textureBrush.particleDensity.disabled}}disabled{{/if}}>
+        </div>
+        <div class="fa-nexus-texture-offset__row">
+          <span class="fa-nexus-texture-offset__axis">Spray</span>
+          <input type="range"
+                 min="{{textureBrush.sprayDeviation.min}}"
+                 max="{{textureBrush.sprayDeviation.max}}"
+                 step="{{textureBrush.sprayDeviation.step}}"
+                 value="{{textureBrush.sprayDeviation.value}}"
+                 aria-label="Spray deviation"
+                 data-fa-nexus-texture-spray-deviation
+                 {{#if textureBrush.sprayDeviation.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{textureBrush.sprayDeviation.min}}"
+                 max="{{textureBrush.sprayDeviation.max}}"
+                 step="{{textureBrush.sprayDeviation.step}}"
+                 value="{{textureBrush.sprayDeviation.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-texture-spray-deviation-display
+                 title="{{textureBrush.sprayDeviation.display}}"
+                 {{#if textureBrush.sprayDeviation.disabled}}disabled{{/if}}>
+        </div>
+        <div class="fa-nexus-texture-offset__row">
+          <span class="fa-nexus-texture-offset__axis">Spacing</span>
+          <input type="range"
+                 min="{{textureBrush.spacing.min}}"
+                 max="{{textureBrush.spacing.max}}"
+                 step="{{textureBrush.spacing.step}}"
+                 value="{{textureBrush.spacing.value}}"
+                 aria-label="Brush spacing"
+                 data-fa-nexus-texture-brush-spacing
+                 {{#if textureBrush.spacing.disabled}}disabled{{/if}}>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{textureBrush.spacing.min}}"
+                 max="{{textureBrush.spacing.max}}"
+                 step="{{textureBrush.spacing.step}}"
+                 value="{{textureBrush.spacing.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-texture-brush-spacing-display
+                 title="{{textureBrush.spacing.display}}"
+                 {{#if textureBrush.spacing.disabled}}disabled{{/if}}>
+        </div>
+          {{#if textureBrush.hint}}
+            <p class="fa-nexus-tool-options__hint fa-nexus-texture-offset__hint">{{textureBrush.hint}}</p>
+          {{/if}}
+        </div>
+      {{/if}}
+      {{#if heightMap.available}}
+        <div class="fa-nexus-tool-options__control fa-nexus-height-map {{#if heightMap.collapsed}}is-collapsed{{/if}}" data-fa-nexus-height-map-root>
+          <div class="fa-nexus-height-map__header">
+            <button type="button"
+                    class="fa-nexus-height-map__collapse"
+                    data-fa-nexus-height-map-toggle
+                    aria-expanded="{{#unless heightMap.collapsed}}true{{else}}false{{/unless}}"
+                    title="{{#if heightMap.collapsed}}Expand height map settings{{else}}Collapse height map settings{{/if}}">
+              <i class="fas fa-chevron-down" aria-hidden="true"></i>
+            </button>
+            <span class="fa-nexus-tool-options__label">Height Map Painting</span>
+          </div>
+          <div class="fa-nexus-height-map__body" data-fa-nexus-height-map-body>
+            {{#if heightMap.hasToggles}}
+              <div class="fa-nexus-height-map__toggles">
+                {{#each heightMap.toggles as |toggle|}}
+                  <label class="fa-nexus-tool-options__toggle" title="{{toggle.tooltip}}">
+                    <input type="checkbox" data-fa-nexus-custom-toggle="{{toggle.id}}" {{#if toggle.enabled}}checked{{/if}} {{#if toggle.disabled}}disabled{{/if}}>
+                    <span>{{toggle.label}}</span>
+                  </label>
+                {{/each}}
+              </div>
+            {{/if}}
+            {{#if heightBrush.available}}
+              <div class="fa-nexus-height-map__brush fa-nexus-height-brush" data-fa-nexus-height-brush-root>
+                <div class="fa-nexus-tool-options__control-header">
+                  <span class="fa-nexus-tool-options__label">{{#if heightBrush.label}}{{heightBrush.label}}{{else}}Height Threshold{{/if}}</span>
+                </div>
+                <div class="fa-nexus-texture-offset__row">
+                  <span class="fa-nexus-texture-offset__axis">Min</span>
+                  <input type="range"
+                         min="{{heightBrush.min.min}}"
+                         max="{{heightBrush.min.max}}"
+                         step="{{heightBrush.min.step}}"
+                         value="{{heightBrush.min.value}}"
+                         aria-label="Height threshold minimum"
+                         data-fa-nexus-height-threshold-min
+                         {{#if heightBrush.min.disabled}}disabled{{/if}}>
+                  <input type="number"
+                         class="fa-nexus-tool-options__value"
+                         min="{{heightBrush.min.min}}"
+                         max="{{heightBrush.min.max}}"
+                         step="{{heightBrush.min.step}}"
+                         value="{{heightBrush.min.value}}"
+                         inputmode="decimal"
+                         data-fa-nexus-height-threshold-min-display
+                         title="{{heightBrush.min.display}}"
+                         {{#if heightBrush.min.disabled}}disabled{{/if}}>
+                </div>
+                <div class="fa-nexus-texture-offset__row">
+                  <span class="fa-nexus-texture-offset__axis">Max</span>
+                  <input type="range"
+                         min="{{heightBrush.max.min}}"
+                         max="{{heightBrush.max.max}}"
+                         step="{{heightBrush.max.step}}"
+                         value="{{heightBrush.max.value}}"
+                         aria-label="Height threshold maximum"
+                         data-fa-nexus-height-threshold-max
+                         {{#if heightBrush.max.disabled}}disabled{{/if}}>
+                  <input type="number"
+                         class="fa-nexus-tool-options__value"
+                         min="{{heightBrush.max.min}}"
+                         max="{{heightBrush.max.max}}"
+                         step="{{heightBrush.max.step}}"
+                         value="{{heightBrush.max.value}}"
+                         inputmode="decimal"
+                         data-fa-nexus-height-threshold-max-display
+                         title="{{heightBrush.max.display}}"
+                         {{#if heightBrush.max.disabled}}disabled{{/if}}>
+                </div>
+                {{#if heightBrush.hint}}
+                  <p class="fa-nexus-tool-options__hint fa-nexus-texture-offset__hint">{{heightBrush.hint}}</p>
+                {{/if}}
+                {{#if heightBrush.tuningLabel}}
+                  <div class="fa-nexus-tool-options__control-header fa-nexus-height-brush__tuning">
+                    <span class="fa-nexus-tool-options__label">{{heightBrush.tuningLabel}}</span>
+                  </div>
+                {{/if}}
+                {{#if heightBrush.contrast}}
+                  <div class="fa-nexus-texture-offset__row">
+                    <span class="fa-nexus-texture-offset__axis">Contrast</span>
+                    <input type="range"
+                           min="{{heightBrush.contrast.min}}"
+                           max="{{heightBrush.contrast.max}}"
+                           step="{{heightBrush.contrast.step}}"
+                           value="{{heightBrush.contrast.value}}"
+                           aria-label="Height map contrast"
+                           data-fa-nexus-height-contrast
+                           {{#if heightBrush.contrast.disabled}}disabled{{/if}}>
+                    <input type="number"
+                           class="fa-nexus-tool-options__value"
+                           min="{{heightBrush.contrast.min}}"
+                           max="{{heightBrush.contrast.max}}"
+                           step="{{heightBrush.contrast.step}}"
+                           value="{{heightBrush.contrast.value}}"
+                           inputmode="decimal"
+                           data-fa-nexus-height-contrast-display
+                           title="{{heightBrush.contrast.display}}"
+                           {{#if heightBrush.contrast.disabled}}disabled{{/if}}>
+                  </div>
+                {{/if}}
+                {{#if heightBrush.lift}}
+                  <div class="fa-nexus-texture-offset__row">
+                    <span class="fa-nexus-texture-offset__axis">Lift</span>
+                    <input type="range"
+                           min="{{heightBrush.lift.min}}"
+                           max="{{heightBrush.lift.max}}"
+                           step="{{heightBrush.lift.step}}"
+                           value="{{heightBrush.lift.value}}"
+                           aria-label="Height map lift"
+                           data-fa-nexus-height-lift
+                           {{#if heightBrush.lift.disabled}}disabled{{/if}}>
+                    <input type="number"
+                           class="fa-nexus-tool-options__value"
+                           min="{{heightBrush.lift.min}}"
+                           max="{{heightBrush.lift.max}}"
+                           step="{{heightBrush.lift.step}}"
+                           value="{{heightBrush.lift.value}}"
+                           inputmode="decimal"
+                           data-fa-nexus-height-lift-display
+                           title="{{heightBrush.lift.display}}"
+                           {{#if heightBrush.lift.disabled}}disabled{{/if}}>
+                  </div>
+                {{/if}}
+                {{#if heightBrush.tuningHint}}
+                  <p class="fa-nexus-tool-options__hint fa-nexus-texture-offset__hint">{{heightBrush.tuningHint}}</p>
+                {{/if}}
+              </div>
+            {{/if}}
+          </div>
+        </div>
+      {{/if}}
       {{#if layerOpacity.available}}
         <div class="fa-nexus-tool-options__control fa-nexus-texture-layer" data-fa-nexus-texture-layer-root>
           <div class="fa-nexus-tool-options__control-header">
             <span class="fa-nexus-tool-options__label">Texture Opacity</span>
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-texture-layer-display>{{layerOpacity.display}}</span>
+            <input type="number"
+                   class="fa-nexus-tool-options__value"
+                   min="{{layerOpacity.min}}"
+                   max="{{layerOpacity.max}}"
+                   step="{{layerOpacity.step}}"
+                   value="{{layerOpacity.value}}"
+                   inputmode="decimal"
+                   data-fa-nexus-texture-layer-display
+                   title="{{layerOpacity.display}}"
+                   {{#if layerOpacity.disabled}}disabled{{/if}}>
           </div>
           <input type="range"
                  min="{{layerOpacity.min}}"
@@ -775,27 +1366,45 @@
           </div>
           <div class="fa-nexus-texture-offset__row">
             <span class="fa-nexus-texture-offset__axis">X</span>
-            <input type="range"
+          <input type="range"
+                 min="{{textureOffset.x.min}}"
+                 max="{{textureOffset.x.max}}"
+                 step="{{textureOffset.x.step}}"
+                 value="{{textureOffset.x.value}}"
+                 aria-label="Texture Offset X"
+                 data-fa-nexus-texture-offset-x
+                 {{#if textureOffset.x.disabled}}disabled{{/if}}>
+            <input type="number"
+                   class="fa-nexus-tool-options__value"
                    min="{{textureOffset.x.min}}"
                    max="{{textureOffset.x.max}}"
                    step="{{textureOffset.x.step}}"
                    value="{{textureOffset.x.value}}"
-                   aria-label="Texture Offset X"
-                   data-fa-nexus-texture-offset-x
+                   inputmode="decimal"
+                   data-fa-nexus-texture-offset-x-display
+                   title="{{textureOffset.x.display}}"
                    {{#if textureOffset.x.disabled}}disabled{{/if}}>
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-texture-offset-x-display>{{textureOffset.x.display}}</span>
           </div>
           <div class="fa-nexus-texture-offset__row">
             <span class="fa-nexus-texture-offset__axis">Y</span>
-            <input type="range"
+          <input type="range"
+                 min="{{textureOffset.y.min}}"
+                 max="{{textureOffset.y.max}}"
+                 step="{{textureOffset.y.step}}"
+                 value="{{textureOffset.y.value}}"
+                 aria-label="Texture Offset Y"
+                 data-fa-nexus-texture-offset-y
+                 {{#if textureOffset.y.disabled}}disabled{{/if}}>
+            <input type="number"
+                   class="fa-nexus-tool-options__value"
                    min="{{textureOffset.y.min}}"
                    max="{{textureOffset.y.max}}"
                    step="{{textureOffset.y.step}}"
                    value="{{textureOffset.y.value}}"
-                   aria-label="Texture Offset Y"
-                   data-fa-nexus-texture-offset-y
+                   inputmode="decimal"
+                   data-fa-nexus-texture-offset-y-display
+                   title="{{textureOffset.y.display}}"
                    {{#if textureOffset.y.disabled}}disabled{{/if}}>
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-texture-offset-y-display>{{textureOffset.y.display}}</span>
           </div>
           {{#if textureOffset.hint}}
             <p class="fa-nexus-tool-options__hint fa-nexus-texture-offset__hint">{{textureOffset.hint}}</p>
@@ -815,7 +1424,16 @@
           <div class="fa-nexus-tool-options__control fa-nexus-path-opacity" data-fa-nexus-path-opacity-root>
             <div class="fa-nexus-tool-options__control-header">
               <span class="fa-nexus-tool-options__label">Path Opacity</span>
-              <span class="fa-nexus-tool-options__value" data-fa-nexus-path-opacity-display>{{pathAppearance.layerOpacity.display}}</span>
+              <input type="number"
+                     class="fa-nexus-tool-options__value"
+                     min="{{pathAppearance.layerOpacity.min}}"
+                     max="{{pathAppearance.layerOpacity.max}}"
+                     step="{{pathAppearance.layerOpacity.step}}"
+                     value="{{pathAppearance.layerOpacity.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-opacity-display
+                     title="{{pathAppearance.layerOpacity.display}}"
+                     {{#if pathAppearance.layerOpacity.disabled}}disabled{{/if}}>
             </div>
             <input type="range"
                    min="{{pathAppearance.layerOpacity.min}}"
@@ -834,7 +1452,16 @@
           <div class="fa-nexus-tool-options__control fa-nexus-path-scale" data-fa-nexus-path-scale-root>
             <div class="fa-nexus-tool-options__control-header">
               <span class="fa-nexus-tool-options__label">Path Scale</span>
-              <span class="fa-nexus-tool-options__value" data-fa-nexus-path-scale-display>{{pathAppearance.scale.display}}</span>
+              <input type="number"
+                     class="fa-nexus-tool-options__value"
+                     min="{{pathAppearance.scale.min}}"
+                     max="{{pathAppearance.scale.max}}"
+                     step="{{pathAppearance.scale.step}}"
+                     value="{{pathAppearance.scale.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-scale-display
+                     title="{{pathAppearance.scale.display}}"
+                     {{#if pathAppearance.scale.disabled}}disabled{{/if}}>
             </div>
             <input type="range"
                    min="{{pathAppearance.scale.min}}"
@@ -861,7 +1488,16 @@
                      aria-label="Texture Offset X"
                      data-fa-nexus-path-offset-x
                      {{#if pathAppearance.textureOffset.x.disabled}}disabled{{/if}}>
-              <span class="fa-nexus-tool-options__value" data-fa-nexus-path-offset-x-display>{{pathAppearance.textureOffset.x.display}}</span>
+              <input type="number"
+                     class="fa-nexus-tool-options__value"
+                     min="{{pathAppearance.textureOffset.x.min}}"
+                     max="{{pathAppearance.textureOffset.x.max}}"
+                     step="{{pathAppearance.textureOffset.x.step}}"
+                     value="{{pathAppearance.textureOffset.x.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-offset-x-display
+                     title="{{pathAppearance.textureOffset.x.display}}"
+                     {{#if pathAppearance.textureOffset.x.disabled}}disabled{{/if}}>
             </div>
             <div class="fa-nexus-texture-offset__row">
               <span class="fa-nexus-texture-offset__axis">Y</span>
@@ -873,7 +1509,16 @@
                      aria-label="Texture Offset Y"
                      data-fa-nexus-path-offset-y
                      {{#if pathAppearance.textureOffset.y.disabled}}disabled{{/if}}>
-              <span class="fa-nexus-tool-options__value" data-fa-nexus-path-offset-y-display>{{pathAppearance.textureOffset.y.display}}</span>
+              <input type="number"
+                     class="fa-nexus-tool-options__value"
+                     min="{{pathAppearance.textureOffset.y.min}}"
+                     max="{{pathAppearance.textureOffset.y.max}}"
+                     step="{{pathAppearance.textureOffset.y.step}}"
+                     value="{{pathAppearance.textureOffset.y.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-offset-y-display
+                     title="{{pathAppearance.textureOffset.y.display}}"
+                     {{#if pathAppearance.textureOffset.y.disabled}}disabled{{/if}}>
             </div>
             {{#if pathAppearance.textureOffset.hint}}
               <p class="fa-nexus-tool-options__hint fa-nexus-texture-offset__hint">{{pathAppearance.textureOffset.hint}}</p>
@@ -884,7 +1529,16 @@
           <div class="fa-nexus-tool-options__control fa-nexus-path-tension" data-fa-nexus-path-tension-root>
             <div class="fa-nexus-tool-options__control-header">
               <span class="fa-nexus-tool-options__label">Path Tension</span>
-              <span class="fa-nexus-tool-options__value" data-fa-nexus-path-tension-display>{{pathAppearance.tension.display}}</span>
+              <input type="number"
+                     class="fa-nexus-tool-options__value"
+                     min="{{pathAppearance.tension.min}}"
+                     max="{{pathAppearance.tension.max}}"
+                     step="{{pathAppearance.tension.step}}"
+                     value="{{pathAppearance.tension.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-tension-display
+                     title="{{pathAppearance.tension.display}}"
+                     {{#if pathAppearance.tension.disabled}}disabled{{/if}}>
             </div>
             <input type="range"
                    min="{{pathAppearance.tension.min}}"
@@ -939,27 +1593,45 @@
           </div>
           <div class="fa-nexus-texture-offset__row">
             <span class="fa-nexus-texture-offset__axis">X</span>
-            <input type="range"
+          <input type="range"
+                 min="{{fillTexture.offset.x.min}}"
+                 max="{{fillTexture.offset.x.max}}"
+                 step="{{fillTexture.offset.x.step}}"
+                 value="{{fillTexture.offset.x.value}}"
+                 aria-label="Fill Texture Offset X"
+                 data-fa-nexus-fill-offset-x
+                 {{#if fillTexture.offset.x.disabled}}disabled{{/if}}>
+            <input type="number"
+                   class="fa-nexus-tool-options__value"
                    min="{{fillTexture.offset.x.min}}"
                    max="{{fillTexture.offset.x.max}}"
                    step="{{fillTexture.offset.x.step}}"
                    value="{{fillTexture.offset.x.value}}"
-                   aria-label="Fill Texture Offset X"
-                   data-fa-nexus-fill-offset-x
+                   inputmode="decimal"
+                   data-fa-nexus-fill-offset-x-display
+                   title="{{fillTexture.offset.x.display}}"
                    {{#if fillTexture.offset.x.disabled}}disabled{{/if}}>
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-fill-offset-x-display>{{fillTexture.offset.x.display}}</span>
           </div>
           <div class="fa-nexus-texture-offset__row">
             <span class="fa-nexus-texture-offset__axis">Y</span>
-            <input type="range"
+          <input type="range"
+                 min="{{fillTexture.offset.y.min}}"
+                 max="{{fillTexture.offset.y.max}}"
+                 step="{{fillTexture.offset.y.step}}"
+                 value="{{fillTexture.offset.y.value}}"
+                 aria-label="Fill Texture Offset Y"
+                 data-fa-nexus-fill-offset-y
+                 {{#if fillTexture.offset.y.disabled}}disabled{{/if}}>
+            <input type="number"
+                   class="fa-nexus-tool-options__value"
                    min="{{fillTexture.offset.y.min}}"
                    max="{{fillTexture.offset.y.max}}"
                    step="{{fillTexture.offset.y.step}}"
                    value="{{fillTexture.offset.y.value}}"
-                   aria-label="Fill Texture Offset Y"
-                   data-fa-nexus-fill-offset-y
+                   inputmode="decimal"
+                   data-fa-nexus-fill-offset-y-display
+                   title="{{fillTexture.offset.y.display}}"
                    {{#if fillTexture.offset.y.disabled}}disabled{{/if}}>
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-fill-offset-y-display>{{fillTexture.offset.y.display}}</span>
           </div>
           {{#if fillTexture.offset.hint}}
             <p class="fa-nexus-tool-options__hint fa-nexus-texture-offset__hint">{{fillTexture.offset.hint}}</p>
@@ -970,7 +1642,16 @@
         <div class="fa-nexus-tool-options__control fa-nexus-scale" data-fa-nexus-scale-root>
           <div class="fa-nexus-tool-options__control-header">
             <span class="fa-nexus-tool-options__label">{{#if scale.label}}{{scale.label}}{{else}}Scale{{/if}}</span>
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-scale-display>{{scale.display}}</span>
+            <input type="number"
+                   class="fa-nexus-tool-options__value"
+                   min="{{scale.min}}"
+                   max="{{scale.max}}"
+                   step="{{scale.step}}"
+                   value="{{scale.value}}"
+                   inputmode="decimal"
+                   data-fa-nexus-scale-display
+                   title="{{scale.display}}"
+                   {{#if scale.disabled}}disabled{{/if}}>
           </div>
           <div class="fa-nexus-scale__body">
             <input type="range"
@@ -1001,7 +1682,15 @@
                      value="{{scale.strength}}"
                      aria-label="Random scale strength"
                      data-fa-nexus-scale-strength>
-              <span class="fa-nexus-scale__strength-value" data-fa-nexus-scale-strength-label>{{scale.strengthDisplay}}</span>
+              <input type="number"
+                     class="fa-nexus-scale__strength-value"
+                     min="{{scale.strengthMin}}"
+                     max="{{scale.strengthMax}}"
+                     step="{{scale.strengthStep}}"
+                     value="{{scale.strength}}"
+                     inputmode="decimal"
+                     data-fa-nexus-scale-strength-label
+                     title="{{scale.strengthDisplay}}">
             </div>
           {{/if}}
           {{#if scale.randomHint}}
@@ -1014,7 +1703,16 @@
         <div class="fa-nexus-tool-options__control fa-nexus-rotation" data-fa-nexus-rotation-root>
           <div class="fa-nexus-tool-options__control-header">
             <span class="fa-nexus-tool-options__label">{{#if rotation.label}}{{rotation.label}}{{else}}Rotation{{/if}}</span>
-            <span class="fa-nexus-tool-options__value" data-fa-nexus-rotation-display>{{rotation.display}}</span>
+            <input type="number"
+                   class="fa-nexus-tool-options__value"
+                   min="{{rotation.min}}"
+                   max="{{rotation.max}}"
+                   step="{{rotation.step}}"
+                   value="{{rotation.value}}"
+                   inputmode="decimal"
+                   data-fa-nexus-rotation-display
+                   title="{{rotation.display}}"
+                   {{#if rotation.disabled}}disabled{{/if}}>
           </div>
           <div class="fa-nexus-rotation__body">
             <input type="range"
@@ -1045,7 +1743,15 @@
                      value="{{rotation.strength}}"
                      aria-label="Random rotation strength"
                      data-fa-nexus-rotation-strength>
-              <span class="fa-nexus-rotation__strength-value" data-fa-nexus-rotation-strength-label>{{rotation.strengthDisplay}}</span>
+              <input type="number"
+                     class="fa-nexus-rotation__strength-value"
+                     min="{{rotation.strengthMin}}"
+                     max="{{rotation.strengthMax}}"
+                     step="{{rotation.strengthStep}}"
+                     value="{{rotation.strength}}"
+                     inputmode="decimal"
+                     data-fa-nexus-rotation-strength-label
+                     title="{{rotation.strengthDisplay}}">
             </div>
           {{/if}}
           {{#if rotation.randomHint}}
@@ -1145,7 +1851,16 @@
                    value="{{pathFeather.start.length.value}}"
                    data-fa-nexus-feather-start-length
                    {{#if pathFeather.start.length.disabled}}disabled{{/if}}>
-            <span class="fa-nexus-path-feather__value" data-fa-nexus-feather-start-display>{{pathFeather.start.length.display}}</span>
+            <input type="number"
+                   class="fa-nexus-path-feather__value"
+                   min="{{pathFeather.start.length.min}}"
+                   max="{{pathFeather.start.length.max}}"
+                   step="{{pathFeather.start.length.step}}"
+                   value="{{pathFeather.start.length.value}}"
+                   inputmode="decimal"
+                   data-fa-nexus-feather-start-display
+                   title="{{pathFeather.start.length.display}}"
+                   {{#if pathFeather.start.length.disabled}}disabled{{/if}}>
           </div>
         </div>
         <div class="fa-nexus-path-feather__section">
@@ -1165,7 +1880,16 @@
                    value="{{pathFeather.end.length.value}}"
                    data-fa-nexus-feather-end-length
                    {{#if pathFeather.end.length.disabled}}disabled{{/if}}>
-            <span class="fa-nexus-path-feather__value" data-fa-nexus-feather-end-display>{{pathFeather.end.length.display}}</span>
+            <input type="number"
+                   class="fa-nexus-path-feather__value"
+                   min="{{pathFeather.end.length.min}}"
+                   max="{{pathFeather.end.length.max}}"
+                   step="{{pathFeather.end.length.step}}"
+                   value="{{pathFeather.end.length.value}}"
+                   inputmode="decimal"
+                   data-fa-nexus-feather-end-display
+                   title="{{pathFeather.end.length.display}}"
+                   {{#if pathFeather.end.length.disabled}}disabled{{/if}}>
           </div>
         </div>
         {{#if pathFeather.hint}}
@@ -1194,7 +1918,16 @@
                    value="{{opacityFeather.start.length.value}}"
                    data-fa-nexus-opacity-start-length
                    {{#if opacityFeather.start.length.disabled}}disabled{{/if}}>
-            <span class="fa-nexus-opacity-feather__value" data-fa-nexus-opacity-start-display>{{opacityFeather.start.length.display}}</span>
+            <input type="number"
+                   class="fa-nexus-opacity-feather__value"
+                   min="{{opacityFeather.start.length.min}}"
+                   max="{{opacityFeather.start.length.max}}"
+                   step="{{opacityFeather.start.length.step}}"
+                   value="{{opacityFeather.start.length.value}}"
+                   inputmode="decimal"
+                   data-fa-nexus-opacity-start-display
+                   title="{{opacityFeather.start.length.display}}"
+                   {{#if opacityFeather.start.length.disabled}}disabled{{/if}}>
           </div>
         </div>
         <div class="fa-nexus-opacity-feather__section">
@@ -1211,7 +1944,16 @@
                    value="{{opacityFeather.end.length.value}}"
                    data-fa-nexus-opacity-end-length
                    {{#if opacityFeather.end.length.disabled}}disabled{{/if}}>
-            <span class="fa-nexus-opacity-feather__value" data-fa-nexus-opacity-end-display>{{opacityFeather.end.length.display}}</span>
+            <input type="number"
+                   class="fa-nexus-opacity-feather__value"
+                   min="{{opacityFeather.end.length.min}}"
+                   max="{{opacityFeather.end.length.max}}"
+                   step="{{opacityFeather.end.length.step}}"
+                   value="{{opacityFeather.end.length.value}}"
+                   inputmode="decimal"
+                   data-fa-nexus-opacity-end-display
+                   title="{{opacityFeather.end.length.display}}"
+                   {{#if opacityFeather.end.length.disabled}}disabled{{/if}}>
           </div>
         </div>
         {{#if opacityFeather.hint}}
@@ -1227,8 +1969,28 @@
             <input type="checkbox"
                    data-fa-nexus-path-shadow-toggle
                    {{#if pathShadow.enabled}}checked{{/if}}>
-            <span>Wall Shadow</span>
+            <span>Path Shadow</span>
           </label>
+          {{#if pathShadow.editAvailable}}
+            <div class="fa-nexus-path-shadow__edit-row" data-fa-nexus-path-shadow-edit-row>
+              <label class="fa-nexus-tool-options__toggle" data-fa-nexus-path-shadow-edit-root>
+                <input type="checkbox"
+                       data-fa-nexus-path-shadow-edit
+                       {{#if pathShadow.editMode}}checked{{/if}}
+                       {{#if pathShadow.editDisabled}}disabled{{/if}}>
+                <span>Edit Shadow</span>
+              </label>
+              {{#if pathShadow.editReset}}
+                <button type="button"
+                        class="fa-nexus-path-shadow__reset fa-nexus-path-shadow__edit-reset"
+                        data-fa-nexus-path-shadow-edit-reset
+                        title="{{pathShadow.editReset.tooltip}}"
+                        {{#if pathShadow.editReset.disabled}}disabled{{/if}}>
+                  Reset
+                </button>
+              {{/if}}
+            </div>
+          {{/if}}
         </div>
         <div class="fa-nexus-path-shadow__context-block">
           <span class="fa-nexus-path-shadow__elevation" data-fa-nexus-path-shadow-elevation>
@@ -1261,7 +2023,16 @@
           <div class="fa-nexus-path-shadow__slider">
             <div class="fa-nexus-path-shadow__header">
               <span class="fa-nexus-path-shadow__label">Scale</span>
-              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-scale-display>{{pathShadow.scale.display}}</span>
+              <input type="number"
+                     class="fa-nexus-path-shadow__value"
+                     min="{{pathShadow.scale.min}}"
+                     max="{{pathShadow.scale.max}}"
+                     step="{{pathShadow.scale.step}}"
+                     value="{{pathShadow.scale.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-shadow-scale-display
+                     title="{{pathShadow.scale.display}}"
+                     {{#if pathShadow.scale.disabled}}disabled{{/if}}>
             </div>
             <input type="range"
                    min="{{pathShadow.scale.min}}"
@@ -1274,7 +2045,16 @@
           <div class="fa-nexus-path-shadow__slider">
             <div class="fa-nexus-path-shadow__header">
               <span class="fa-nexus-path-shadow__label">Offset</span>
-              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-offset-display>{{pathShadow.offset.display}}</span>
+              <input type="number"
+                     class="fa-nexus-path-shadow__value"
+                     min="{{pathShadow.offset.min}}"
+                     max="{{pathShadow.offset.max}}"
+                     step="{{pathShadow.offset.step}}"
+                     value="{{pathShadow.offset.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-shadow-offset-display
+                     title="{{pathShadow.offset.display}}"
+                     {{#if pathShadow.offset.disabled}}disabled{{/if}}>
             </div>
             <input type="range"
                    min="{{pathShadow.offset.min}}"
@@ -1287,7 +2067,16 @@
           <div class="fa-nexus-path-shadow__slider">
             <div class="fa-nexus-path-shadow__header">
               <span class="fa-nexus-path-shadow__label">Opacity</span>
-              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-alpha-display>{{pathShadow.alpha.display}}</span>
+              <input type="number"
+                     class="fa-nexus-path-shadow__value"
+                     min="{{pathShadow.alpha.min}}"
+                     max="{{pathShadow.alpha.max}}"
+                     step="{{pathShadow.alpha.step}}"
+                     value="{{pathShadow.alpha.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-shadow-alpha-display
+                     title="{{pathShadow.alpha.display}}"
+                     {{#if pathShadow.alpha.disabled}}disabled{{/if}}>
             </div>
             <input type="range"
                    min="{{pathShadow.alpha.min}}"
@@ -1300,7 +2089,16 @@
           <div class="fa-nexus-path-shadow__slider">
             <div class="fa-nexus-path-shadow__header">
               <span class="fa-nexus-path-shadow__label">Blur</span>
-              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-blur-display>{{pathShadow.blur.display}}</span>
+              <input type="number"
+                     class="fa-nexus-path-shadow__value"
+                     min="{{pathShadow.blur.min}}"
+                     max="{{pathShadow.blur.max}}"
+                     step="{{pathShadow.blur.step}}"
+                     value="{{pathShadow.blur.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-shadow-blur-display
+                     title="{{pathShadow.blur.display}}"
+                     {{#if pathShadow.blur.disabled}}disabled{{/if}}>
             </div>
             <input type="range"
                    min="{{pathShadow.blur.min}}"
@@ -1313,7 +2111,16 @@
           <div class="fa-nexus-path-shadow__slider">
             <div class="fa-nexus-path-shadow__header">
               <span class="fa-nexus-path-shadow__label">Dilation</span>
-              <span class="fa-nexus-path-shadow__value" data-fa-nexus-path-shadow-dilation-display>{{pathShadow.dilation.display}}</span>
+              <input type="number"
+                     class="fa-nexus-path-shadow__value"
+                     min="{{pathShadow.dilation.min}}"
+                     max="{{pathShadow.dilation.max}}"
+                     step="{{pathShadow.dilation.step}}"
+                     value="{{pathShadow.dilation.value}}"
+                     inputmode="decimal"
+                     data-fa-nexus-path-shadow-dilation-display
+                     title="{{pathShadow.dilation.display}}"
+                     {{#if pathShadow.dilation.disabled}}disabled{{/if}}>
             </div>
             <input type="range"
                    min="{{pathShadow.dilation.min}}"
@@ -1332,7 +2139,16 @@
       <div class="fa-nexus-tool-options__control fa-nexus-scale" data-fa-nexus-scale-root>
         <div class="fa-nexus-tool-options__control-header">
           <span class="fa-nexus-tool-options__label">{{#if scale.label}}{{scale.label}}{{else}}Scale{{/if}}</span>
-          <span class="fa-nexus-tool-options__value" data-fa-nexus-scale-display>{{scale.display}}</span>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{scale.min}}"
+                 max="{{scale.max}}"
+                 step="{{scale.step}}"
+                 value="{{scale.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-scale-display
+                 title="{{scale.display}}"
+                 {{#if scale.disabled}}disabled{{/if}}>
         </div>
         <div class="fa-nexus-scale__body">
           <input type="range"
@@ -1363,7 +2179,15 @@
                    value="{{scale.strength}}"
                    aria-label="Random scale strength"
                    data-fa-nexus-scale-strength>
-            <span class="fa-nexus-scale__strength-value" data-fa-nexus-scale-strength-label>{{scale.strengthDisplay}}</span>
+            <input type="number"
+                   class="fa-nexus-scale__strength-value"
+                   min="{{scale.strengthMin}}"
+                   max="{{scale.strengthMax}}"
+                   step="{{scale.strengthStep}}"
+                   value="{{scale.strength}}"
+                   inputmode="decimal"
+                   data-fa-nexus-scale-strength-label
+                   title="{{scale.strengthDisplay}}">
           </div>
         {{/if}}
         {{#if scale.randomHint}}
@@ -1378,7 +2202,16 @@
       <div class="fa-nexus-tool-options__control fa-nexus-rotation" data-fa-nexus-rotation-root>
         <div class="fa-nexus-tool-options__control-header">
           <span class="fa-nexus-tool-options__label">{{#if rotation.label}}{{rotation.label}}{{else}}Rotation{{/if}}</span>
-          <span class="fa-nexus-tool-options__value" data-fa-nexus-rotation-display>{{rotation.display}}</span>
+          <input type="number"
+                 class="fa-nexus-tool-options__value"
+                 min="{{rotation.min}}"
+                 max="{{rotation.max}}"
+                 step="{{rotation.step}}"
+                 value="{{rotation.value}}"
+                 inputmode="decimal"
+                 data-fa-nexus-rotation-display
+                 title="{{rotation.display}}"
+                 {{#if rotation.disabled}}disabled{{/if}}>
         </div>
         <div class="fa-nexus-rotation__body">
           <input type="range"
@@ -1409,7 +2242,15 @@
                    value="{{rotation.strength}}"
                    aria-label="Random rotation strength"
                    data-fa-nexus-rotation-strength>
-            <span class="fa-nexus-rotation__strength-value" data-fa-nexus-rotation-strength-label>{{rotation.strengthDisplay}}</span>
+            <input type="number"
+                   class="fa-nexus-rotation__strength-value"
+                   min="{{rotation.strengthMin}}"
+                   max="{{rotation.strengthMax}}"
+                   step="{{rotation.strengthStep}}"
+                   value="{{rotation.strength}}"
+                   inputmode="decimal"
+                   data-fa-nexus-rotation-strength-label
+                   title="{{rotation.strengthDisplay}}">
           </div>
         {{/if}}
         {{#if rotation.randomHint}}

@@ -2,6 +2,10 @@ import { NexusLogger as Logger } from '../core/nexus-logger.js';
 
 const DEFAULT_ALPHA_THRESHOLD = 1 / 255;
 const MASK_ALPHA_THRESHOLD = 1 / 255;
+const DEFAULT_ALPHA_RESOLUTION = 0.25;
+const BUILDING_ALPHA_TARGET_PX = 1024;
+const BUILDING_ALPHA_EXPAND_RADIUS = 1;
+const MIN_ALPHA_RESOLUTION = 0.05;
 const MODULE_ID = 'fa-nexus';
 const TILE_SELECTION_SETTING = 'tilePixelSelection';
 
@@ -63,10 +67,12 @@ export class TilePixelSelection {
     });
     Hooks.on('controlTile', (tile) => { this._updateResizeHandleState(tile); });
     Hooks.on('updateSetting', (data) => {
-      if (!data || data.namespace !== MODULE_ID || data.key !== TILE_SELECTION_SETTING) return;
-      this._settingEnabled = this._getSettingEnabled();
-      this._applyActivation({ rebindAll: true });
-      this._updateAllResizeHandles();
+      if (!data || data.namespace !== MODULE_ID) return;
+      if (data.key === TILE_SELECTION_SETTING) {
+        this._settingEnabled = this._getSettingEnabled();
+        this._applyActivation({ rebindAll: true });
+        this._updateAllResizeHandles();
+      }
     });
 
     this._applyActivation({ rebindAll: true });
@@ -183,12 +189,63 @@ export class TilePixelSelection {
       }
 
       const pathContainer = mesh.faNexusPathContainer || tile.faNexusPathContainer;
-      if (pathContainer?.faNexusPathMesh) {
-        const pathMesh = pathContainer.faNexusPathMesh;
-        if (!this._meshContainsPoint(pathMesh, worldX, worldY)) return false;
-        const pathAlpha = this._sampleMeshTextureAlpha(pathMesh, worldX, worldY);
-        if (pathAlpha === null) return true;
-        return pathAlpha >= DEFAULT_ALPHA_THRESHOLD;
+      if (pathContainer) {
+        let pathMeshes = Array.isArray(pathContainer.faNexusPathMeshes) && pathContainer.faNexusPathMeshes.length
+          ? pathContainer.faNexusPathMeshes
+          : (pathContainer.faNexusPathMesh ? [pathContainer.faNexusPathMesh] : []);
+        if (!pathMeshes.length && Array.isArray(pathContainer.children)) {
+          pathMeshes = pathContainer.children.filter((child) => child && !child.destroyed && child.geometry);
+          if (pathMeshes.length) {
+            if (!pathContainer.faNexusPathMesh) pathContainer.faNexusPathMesh = pathMeshes[0];
+            if (pathMeshes.length > 1) pathContainer.faNexusPathMeshes = pathMeshes;
+          }
+        }
+        let inspectedMesh = false;
+        for (const pathMesh of pathMeshes) {
+          if (!pathMesh || pathMesh.destroyed) continue;
+          inspectedMesh = true;
+          if (!this._meshContainsPoint(pathMesh, worldX, worldY)) continue;
+          const pathAlpha = this._sampleMeshTextureAlpha(pathMesh, worldX, worldY);
+          if (pathAlpha === null) return true;
+          if (pathAlpha >= DEFAULT_ALPHA_THRESHOLD) return true;
+        }
+        if (inspectedMesh) return false;
+      }
+
+      const scatterContainer = mesh.faNexusAssetScatterContainer || tile.faNexusAssetScatterContainer;
+      if (scatterContainer) {
+        const sprites = scatterContainer.children || [];
+        let inspected = false;
+        let sampled = false;
+        for (const sprite of sprites) {
+          if (!sprite || sprite.destroyed) continue;
+          inspected = true;
+          if (!sprite.texture?.valid) continue;
+          sampled = true;
+          const alpha = this._sampleSpriteAlpha(sprite, worldX, worldY, { useLumaWhenOpaque: true });
+          if (alpha === null) return true;
+          if (alpha >= DEFAULT_ALPHA_THRESHOLD) return true;
+        }
+        if (sampled) return false;
+        if (inspected) return true;
+      }
+
+      const flattenContainer = mesh.faNexusFlattenChunkContainer || tile.faNexusFlattenChunkContainer;
+      if (flattenContainer) {
+        const sprites = flattenContainer.children || [];
+        let inspected = false;
+        let sampled = false;
+        for (const sprite of sprites) {
+          if (!sprite || sprite.destroyed) continue;
+          inspected = true;
+          if (!sprite.texture?.valid) continue;
+          sampled = true;
+          const alpha = this._sampleSpriteAlpha(sprite, worldX, worldY, { useLumaWhenOpaque: true });
+          if (alpha === null) return true;
+          if (alpha >= DEFAULT_ALPHA_THRESHOLD) return true;
+        }
+        if (sampled) return false;
+        if (inspected) return true;
       }
 
       const buildingContainer = mesh.faNexusBuildingContainer || tile.faNexusBuildingContainer;
@@ -201,7 +258,10 @@ export class TilePixelSelection {
           if (!buildingMesh || buildingMesh.destroyed || typeof buildingMesh.render !== 'function') continue;
           inspectedMesh = true;
           if (!this._meshContainsPoint(buildingMesh, worldX, worldY)) continue;
-          const buildingAlpha = this._sampleMeshTextureAlpha(buildingMesh, worldX, worldY);
+          const buildingAlpha = this._sampleMeshTextureAlpha(buildingMesh, worldX, worldY, {
+            target: BUILDING_ALPHA_TARGET_PX,
+            expandRadius: BUILDING_ALPHA_EXPAND_RADIUS
+          });
           if (buildingAlpha === null) return true;
           if (buildingAlpha >= DEFAULT_ALPHA_THRESHOLD) return true;
         }
@@ -428,7 +488,7 @@ export class TilePixelSelection {
     }
   }
 
-  static _sampleMeshTextureAlpha(mesh, worldX, worldY) {
+  static _sampleMeshTextureAlpha(mesh, worldX, worldY, options = {}) {
     try {
       const texture = this._resolveMeshTexture(mesh);
       if (!texture || (!texture.valid && !texture.baseTexture?.valid)) return null;
@@ -478,7 +538,7 @@ export class TilePixelSelection {
           const x = u * width;
           const y = v * height;
 
-          const alphaData = this._getAlphaData(texture);
+          const alphaData = this._getAlphaData(texture, options);
           if (!alphaData) return null;
 
           const scaleX = alphaData.width / width;
@@ -492,13 +552,41 @@ export class TilePixelSelection {
           const px = Math.floor(sx);
           const py = Math.floor(sy);
 
-          // Sample from the FULL alpha array, not the cropped one
-          // The cropped bounds are just an optimization for bounding box checks
-          const index = (py * alphaData.width) + px;
           const alphaArray = alphaData.alpha;
-          if (!alphaArray || index < 0 || index >= alphaArray.length) return 0;
-          const alphaByte = alphaArray[index];
-          return Number.isFinite(alphaByte) ? alphaByte / 255 : 0;
+          if (!alphaArray) return null;
+          const alphaWidth = Math.max(1, alphaData.width || 1);
+          const alphaHeight = Math.max(1, alphaData.height || 1);
+          const lumaArray = alphaData.luma;
+          const useLuma = !!(options.useLumaWhenOpaque && lumaArray);
+
+          const sampleAt = (ix, iy) => {
+            if (ix < 0 || ix >= alphaWidth || iy < 0 || iy >= alphaHeight) return 0;
+            const index = (iy * alphaWidth) + ix;
+            if (index < 0 || index >= alphaArray.length) return 0;
+            const alphaByte = alphaArray[index];
+            let value = Number.isFinite(alphaByte) ? alphaByte / 255 : 0;
+            if (useLuma) {
+              const lumaByte = lumaArray[index];
+              const luma = Number.isFinite(lumaByte) ? lumaByte / 255 : 0;
+              value *= luma;
+            }
+            return value;
+          };
+
+          let value = sampleAt(px, py);
+          const radius = Math.max(0, Math.floor(Number(options.expandRadius) || 0));
+          if (radius > 0 && value <= 0) {
+            for (let dy = -radius; dy <= radius; dy += 1) {
+              for (let dx = -radius; dx <= radius; dx += 1) {
+                if (!dx && !dy) continue;
+                const sampled = sampleAt(px + dx, py + dy);
+                if (sampled > value) value = sampled;
+                if (value >= 1) break;
+              }
+              if (value >= 1) break;
+            }
+          }
+          return value;
         }
       }
       return 0;
@@ -566,7 +654,7 @@ export class TilePixelSelection {
       const y = local.y + (anchor.y * height);
       if (x < 0 || y < 0 || x >= width || y >= height) return 0;
 
-      const alphaData = this._getAlphaData(texture);
+      const alphaData = this._getAlphaData(texture, options);
       if (!alphaData) return null;
 
       const scaleX = alphaData.width / width;
@@ -604,12 +692,32 @@ export class TilePixelSelection {
     }
   }
 
-  static _getAlphaData(texture) {
+  static _resolveAlphaResolution(texture, options = {}) {
+    const explicit = Number(options?.resolution);
+    if (Number.isFinite(explicit) && explicit > 0) {
+      return Math.min(1, Math.max(MIN_ALPHA_RESOLUTION, explicit));
+    }
+    const target = Number(options?.target);
+    if (!(Number.isFinite(target) && target > 0)) return DEFAULT_ALPHA_RESOLUTION;
+    const width = Math.max(1, Math.round(texture?.orig?.width ?? texture?.width ?? texture?.baseTexture?.realWidth ?? 1));
+    const height = Math.max(1, Math.round(texture?.orig?.height ?? texture?.height ?? texture?.baseTexture?.realHeight ?? 1));
+    const maxDim = Math.max(width, height);
+    if (!Number.isFinite(maxDim) || maxDim <= 0) return DEFAULT_ALPHA_RESOLUTION;
+    const desired = target / maxDim;
+    return Math.min(1, Math.max(DEFAULT_ALPHA_RESOLUTION, desired));
+  }
+
+  static _getAlphaData(texture, options = {}) {
     try {
       const base = texture?.baseTexture;
       if (!base) return null;
       const frame = texture.frame;
-      const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height}` : 'frame:default';
+      let resolution = this._resolveAlphaResolution(texture, options);
+      if (!Number.isFinite(resolution) || resolution <= 0) resolution = DEFAULT_ALPHA_RESOLUTION;
+      resolution = Math.round(resolution * 1000) / 1000;
+      const key = frame
+        ? `${frame.x},${frame.y},${frame.width},${frame.height}|r:${resolution}`
+        : `frame:default|r:${resolution}`;
       let frameMap = this._alphaCache?.get(base);
       if (!frameMap) {
         frameMap = new Map();
@@ -619,7 +727,7 @@ export class TilePixelSelection {
       let entry = frameMap.get(key);
       if (entry && entry.dirty !== currentDirty) entry = null;
       if (!entry) {
-        entry = this._buildAlphaData(texture);
+        entry = this._buildAlphaData(texture, resolution);
         if (!entry) return null;
         entry.dirty = currentDirty;
         frameMap.set(key, entry);
@@ -631,15 +739,15 @@ export class TilePixelSelection {
     }
   }
 
-  static _buildAlphaData(texture) {
+  static _buildAlphaData(texture, resolution = DEFAULT_ALPHA_RESOLUTION) {
     try {
       const renderer = canvas?.app?.renderer;
       if (!renderer) return null;
       const width = Math.max(1, Math.round(texture?.orig?.width ?? texture?.width ?? texture?.baseTexture?.realWidth ?? 1));
       const height = Math.max(1, Math.round(texture?.orig?.height ?? texture?.height ?? texture?.baseTexture?.realHeight ?? 1));
-      const resolution = 0.25;
-      const targetWidth = Math.max(1, Math.round(width * resolution));
-      const targetHeight = Math.max(1, Math.round(height * resolution));
+      const resolved = Number.isFinite(resolution) && resolution > 0 ? Math.min(1, Math.max(MIN_ALPHA_RESOLUTION, resolution)) : DEFAULT_ALPHA_RESOLUTION;
+      const targetWidth = Math.max(1, Math.round(width * resolved));
+      const targetHeight = Math.max(1, Math.round(height * resolved));
       const sprite = new PIXI.Sprite(texture);
       sprite.anchor.set(0, 0);
       sprite.width = targetWidth;

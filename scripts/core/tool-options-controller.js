@@ -115,7 +115,9 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._boundDropShadowPresetClick = (event) => this._handleDropShadowPresetClick(event);
     this._boundDropShadowPresetContext = (event) => this._handleDropShadowPresetContext(event);
     this._boundDropShadowReset = (event) => this._handleDropShadowReset(event);
+    this._boundResettableContext = (event) => this._handleResettableContext(event);
     this._customToggleBindings = new Map();
+    this._resettableContextRoot = null;
     this._placementRoot = null;
     this._placementPushTopButton = null;
     this._placementPushBottomButton = null;
@@ -136,11 +138,74 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._textureHintDisplay = null;
     this._boundTextureModeClick = (event) => this._handleTextureModeClick(event);
     this._boundTextureActionClick = (event) => this._handleTextureActionClick(event);
+    this._editorActionsRoot = null;
+    this._editorActionButtons = [];
+    this._editorActionButtonMap = new Map();
+    this._boundEditorActionClick = (event) => this._handleEditorActionClick(event);
     this._textureOpacityRoot = null;
     this._textureOpacitySlider = null;
     this._textureOpacityDisplay = null;
     this._boundTextureOpacityInput = (event) => this._handleTextureOpacity(event, false);
     this._boundTextureOpacityCommit = (event) => this._handleTextureOpacity(event, true);
+    this._textureBrushRoot = null;
+    this._textureBrushSizeSlider = null;
+    this._textureBrushSizeDisplay = null;
+    this._textureParticleSizeSlider = null;
+    this._textureParticleSizeDisplay = null;
+    this._textureParticleDensitySlider = null;
+    this._textureParticleDensityDisplay = null;
+    this._textureSprayDeviationSlider = null;
+    this._textureSprayDeviationDisplay = null;
+    this._textureBrushSpacingSlider = null;
+    this._textureBrushSpacingDisplay = null;
+    this._boundTextureBrushSizeInput = (event) => this._handleTextureBrushSetting(event, 'setBrushSize', false);
+    this._boundTextureBrushSizeCommit = (event) => this._handleTextureBrushSetting(event, 'setBrushSize', true);
+    this._boundTextureParticleSizeInput = (event) => this._handleTextureBrushSetting(event, 'setParticleSize', false);
+    this._boundTextureParticleSizeCommit = (event) => this._handleTextureBrushSetting(event, 'setParticleSize', true);
+    this._boundTextureParticleDensityInput = (event) => this._handleTextureBrushSetting(event, 'setParticleDensity', false);
+    this._boundTextureParticleDensityCommit = (event) => this._handleTextureBrushSetting(event, 'setParticleDensity', true);
+    this._boundTextureSprayDeviationInput = (event) => this._handleTextureBrushSetting(event, 'setSprayDeviation', false);
+    this._boundTextureSprayDeviationCommit = (event) => this._handleTextureBrushSetting(event, 'setSprayDeviation', true);
+    this._boundTextureBrushSpacingInput = (event) => this._handleTextureBrushSetting(event, 'setBrushSpacing', false);
+    this._boundTextureBrushSpacingCommit = (event) => this._handleTextureBrushSetting(event, 'setBrushSpacing', true);
+    this._assetScatterRoot = null;
+    this._assetScatterBrushSizeSlider = null;
+    this._assetScatterBrushSizeDisplay = null;
+    this._assetScatterDensitySlider = null;
+    this._assetScatterDensityDisplay = null;
+    this._assetScatterSprayDeviationSlider = null;
+    this._assetScatterSprayDeviationDisplay = null;
+    this._assetScatterSpacingSlider = null;
+    this._assetScatterSpacingDisplay = null;
+    this._boundAssetScatterBrushSizeInput = (event) => this._handleAssetScatterSetting(event, 'setScatterBrushSize', false);
+    this._boundAssetScatterBrushSizeCommit = (event) => this._handleAssetScatterSetting(event, 'setScatterBrushSize', true);
+    this._boundAssetScatterDensityInput = (event) => this._handleAssetScatterSetting(event, 'setScatterDensity', false);
+    this._boundAssetScatterDensityCommit = (event) => this._handleAssetScatterSetting(event, 'setScatterDensity', true);
+    this._boundAssetScatterSprayDeviationInput = (event) => this._handleAssetScatterSetting(event, 'setScatterSprayDeviation', false);
+    this._boundAssetScatterSprayDeviationCommit = (event) => this._handleAssetScatterSetting(event, 'setScatterSprayDeviation', true);
+    this._boundAssetScatterSpacingInput = (event) => this._handleAssetScatterSetting(event, 'setScatterSpacing', false);
+    this._boundAssetScatterSpacingCommit = (event) => this._handleAssetScatterSetting(event, 'setScatterSpacing', true);
+    this._heightMapRoot = null;
+    this._heightMapCollapseButton = null;
+    this._heightMapBody = null;
+    this._boundHeightMapCollapse = (event) => this._handleHeightMapCollapse(event);
+    this._heightBrushRoot = null;
+    this._heightBrushMinSlider = null;
+    this._heightBrushMaxSlider = null;
+    this._heightBrushMinDisplay = null;
+    this._heightBrushMaxDisplay = null;
+    this._boundHeightBrushMinInput = (event) => this._handleHeightBrushThreshold(event, 'min', false);
+    this._boundHeightBrushMinCommit = (event) => this._handleHeightBrushThreshold(event, 'min', true);
+    this._boundHeightBrushMaxInput = (event) => this._handleHeightBrushThreshold(event, 'max', false);
+    this._boundHeightBrushMaxCommit = (event) => this._handleHeightBrushThreshold(event, 'max', true);
+    this._heightBrushContrastSlider = null;
+    this._heightBrushLiftSlider = null;
+    this._heightBrushContrastDisplay = null;
+    this._heightBrushLiftDisplay = null;
+    this._boundHeightBrushContrastInput = (event) => this._handleHeightBrushTuning(event, 'contrast', false);
+    this._boundHeightBrushContrastCommit = (event) => this._handleHeightBrushTuning(event, 'contrast', true);
+    this._boundHeightBrushLiftInput = (event) => this._handleHeightBrushTuning(event, 'lift', false);
+    this._boundHeightBrushLiftCommit = (event) => this._handleHeightBrushTuning(event, 'lift', true);
     this._textureLayerRoot = null;
     this._textureLayerSlider = null;
     this._textureLayerDisplay = null;
@@ -185,6 +250,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._pathTensionDisplay = null;
     this._boundPathTensionInput = (event) => this._handlePathTension(event, false);
     this._boundPathTensionCommit = (event) => this._handlePathTension(event, true);
+    this._pathSimplifyRoot = null;
+    this._pathSimplifySlider = null;
+    this._pathSimplifyDisplay = null;
+    this._boundPathSimplifyInput = (event) => this._handlePathSimplify(event, false);
+    this._boundPathSimplifyCommit = (event) => this._handlePathSimplify(event, true);
     this._showWidthTangentsRoot = null;
     this._showWidthTangentsToggle = null;
     this._boundShowWidthTangentsChange = (event) => this._handleShowWidthTangentsChange(event);
@@ -266,6 +336,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._pathShadowRoot = null;
     this._pathShadowToggle = null;
     this._pathShadowEditToggle = null;
+    this._pathShadowEditRoot = null;
     this._pathShadowOffsetSlider = null;
     this._pathShadowOffsetDisplay = null;
     this._pathShadowAlphaSlider = null;
@@ -277,6 +348,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._pathShadowPresetsRoot = null;
     this._pathShadowPresetButtons = [];
     this._pathShadowResetButton = null;
+    this._pathShadowEditResetButton = null;
     this._pathShadowElevationDisplay = null;
     this._pathShadowNoteDisplay = null;
     this._boundPathShadowToggle = (event) => this._handlePathShadowToggle(event);
@@ -294,6 +366,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._boundPathShadowPresetClick = (event) => this._handlePathShadowPresetClick(event);
     this._boundPathShadowPresetContext = (event) => this._handlePathShadowPresetContext(event);
     this._boundPathShadowReset = (event) => this._handlePathShadowReset(event);
+    this._boundPathShadowEditReset = (event) => this._handlePathShadowEditReset(event);
     this._pathFeatherRoot = null;
     this._pathFeatherStartToggle = null;
     this._pathFeatherEndToggle = null;
@@ -400,6 +473,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     const paths = [
       ['texturePaint', 'available'],
       ['texturePaint', 'opacity', 'available'],
+      ['textureBrush', 'available'],
+      ['assetScatter', 'available'],
+      ['heightBrush', 'available'],
+      ['heightMap', 'available'],
       ['layerOpacity', 'available'],
       ['textureOffset', 'available'],
       ['scale', 'available'],
@@ -409,6 +486,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       ['pathAppearance', 'scale', 'available'],
       ['pathAppearance', 'textureOffset', 'available'],
       ['pathAppearance', 'tension', 'available'],
+      ['pathAppearance', 'freehandSimplify', 'available'],
       ['pathAppearance', 'showWidthTangents', 'available'],
       ['fillElevation', 'available'],
       ['fillTexture', 'available'],
@@ -457,6 +535,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._syncDropShadowControls();
       this._syncTextureToolControls();
       this._syncTextureOpacityControl();
+      this._syncTextureBrushControls();
+      this._syncAssetScatterControls();
+      this._syncHeightMapControls();
+      this._syncHeightBrushControls();
       this._syncTextureOffsetControls();
       this._syncTextureLayerControl();
       this._syncPathAppearanceControls();
@@ -537,20 +619,36 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       enabled: !!toggle?.enabled,
       disabled: !!toggle?.disabled
     });
+    const mapAction = (action) => ({
+      id: String(action?.id || ''),
+      label: String(action?.label || ''),
+      tooltip: String(action?.tooltip || ''),
+      primary: !!action?.primary,
+      disabled: !!action?.disabled
+    });
     const allToggleList = Array.isArray(options.customToggles)
       ? options.customToggles.map(mapToggle).filter((toggle) => toggle.id.length)
       : [];
     const subtoolToggleList = Array.isArray(options.subtoolToggles)
       ? options.subtoolToggles.map(mapToggle).filter((toggle) => toggle.id.length)
       : allToggleList.filter((toggle) => toggle.group === 'subtool');
-    const nonSubtoolToggleList = allToggleList.filter((toggle) => toggle.group !== 'subtool');
+    const subtoolOptionToggleList = allToggleList.filter((toggle) => toggle.group === 'subtool-option');
+    const heightMapToggleList = allToggleList.filter((toggle) => toggle.group === 'height-map');
+    const nonSubtoolToggleList = allToggleList.filter((toggle) => !['subtool', 'subtool-option', 'height-map'].includes(toggle.group));
     const placementToggleList = nonSubtoolToggleList.filter((toggle) => toggle.group === 'placement');
     const customToggleList = nonSubtoolToggleList.filter((toggle) => toggle.group !== 'placement');
+    const editorActionList = Array.isArray(options.editorActions)
+      ? options.editorActions.map(mapAction).filter((action) => action.id.length)
+      : [];
     const placeAs = options.placeAs && typeof options.placeAs === 'object' ? options.placeAs : null;
     const scale = this._prepareScaleContext(options.scale);
     const rotation = this._prepareRotationContext(options.rotation);
     const flip = this._prepareFlipContext(options.flip);
     const texturePaint = this._prepareTexturePaintContext(options.texturePaint);
+    const textureBrush = this._prepareTextureBrushContext(options.textureBrush);
+    const assetScatter = this._prepareAssetScatterContext(options.assetScatter);
+    const heightBrush = this._prepareHeightBrushContext(options.heightBrush);
+    const heightMap = this._prepareHeightMapContext(options.heightMap, heightMapToggleList, heightBrush);
     const textureOffset = this._prepareTextureOffsetContext(options.textureOffset);
     const fillTexture = this._prepareFillTextureContext(options.fillTexture);
     const layerOpacity = this._prepareLayerOpacityContext(options.layerOpacity);
@@ -567,6 +665,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
           available: true,
           hasSelection: !!shapeStackingRaw.hasSelection,
           orderLabel: typeof shapeStackingRaw.orderLabel === 'string' ? shapeStackingRaw.orderLabel : '',
+          elevationLabel: typeof shapeStackingRaw.elevationLabel === 'string' ? shapeStackingRaw.elevationLabel : '',
           pushTopDisabled: !!shapeStackingRaw.pushTopDisabled,
           pushBottomDisabled: !!shapeStackingRaw.pushBottomDisabled,
           hint: typeof shapeStackingRaw.hint === 'string' ? shapeStackingRaw.hint : ''
@@ -588,6 +687,13 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       shortcuts,
       hasSubtoolToggles: subtoolToggleList.length > 0,
       subtoolToggles: subtoolToggleList,
+      hasSubtoolOptions: subtoolOptionToggleList.length > 0,
+      subtoolOptions: subtoolOptionToggleList,
+      hasEditorActions: editorActionList.length > 0,
+      editorActions: editorActionList,
+      hasHeightMapToggles: heightMapToggleList.length > 0,
+      heightMapToggles: heightMapToggleList,
+      heightMap,
       hasPlacementToggles: placementToggleList.length > 0,
       placementToggles: placementToggleList,
       hasCustomToggles: customToggleList.length > 0,
@@ -597,6 +703,9 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       placeAs: placeAs || { available: false },
       rotation,
       texturePaint,
+      textureBrush,
+      assetScatter,
+      heightBrush,
       textureOffset,
       fillTexture,
       layerOpacity,
@@ -871,6 +980,152 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     };
   }
 
+  _prepareTextureBrushContext(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) {
+      return { available: false };
+    }
+    const clamp = (value, min, max, fallback) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return fallback;
+      return Math.min(max, Math.max(min, num));
+    };
+    const buildAxis = (axisRaw = {}, defaults = {}, formatDisplay) => {
+      const minDefault = Number.isFinite(defaults.min) ? Number(defaults.min) : 0;
+      const maxDefault = Number.isFinite(defaults.max) ? Number(defaults.max) : 100;
+      const stepDefault = Number.isFinite(defaults.step) && Number(defaults.step) > 0 ? Number(defaults.step) : 1;
+      const min = Number.isFinite(axisRaw.min) ? Number(axisRaw.min) : minDefault;
+      const max = Number.isFinite(axisRaw.max) ? Number(axisRaw.max) : maxDefault;
+      const step = Number.isFinite(axisRaw.step) && Number(axisRaw.step) > 0 ? Number(axisRaw.step) : stepDefault;
+      const fallbackValue = Number.isFinite(defaults.value) ? Number(defaults.value) : min;
+      const value = clamp(axisRaw.value, min, max, fallbackValue);
+      const display = typeof axisRaw.display === 'string'
+        ? axisRaw.display
+        : (typeof formatDisplay === 'function' ? formatDisplay(value) : String(value));
+      return {
+        min,
+        max,
+        step,
+        value,
+        display,
+        disabled: !!axisRaw.disabled || !!raw.disabled
+      };
+    };
+    const brushSize = buildAxis(raw.brushSize, { min: 1, max: 2000, step: 1 }, (value) => `${Math.round(value)}px`);
+    const particleSize = buildAxis(raw.particleSize, { min: 1, max: 100, step: 1 }, (value) => `${Math.round(value)}%`);
+    const particleDensity = buildAxis(raw.particleDensity, { min: 1, max: 25, step: 1 }, (value) => `${Math.round(value)}`);
+    const sprayDeviation = buildAxis(raw.sprayDeviation, { min: 0, max: 100, step: 1 }, (value) => `${Math.round(value)}%`);
+    const spacing = buildAxis(raw.spacing, { min: 1, max: 200, step: 1 }, (value) => `${Math.round(value)}%`);
+    return {
+      available: true,
+      disabled: !!raw.disabled,
+      brushSize,
+      particleSize,
+      particleDensity,
+      sprayDeviation,
+      spacing,
+      hint: typeof raw.hint === 'string' ? raw.hint : ''
+    };
+  }
+
+  _prepareAssetScatterContext(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) {
+      return { available: false };
+    }
+    const clamp = (value, min, max, fallback) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return fallback;
+      return Math.min(max, Math.max(min, num));
+    };
+    const buildAxis = (axisRaw = {}, defaults = {}, formatDisplay) => {
+      const minDefault = Number.isFinite(defaults.min) ? Number(defaults.min) : 0;
+      const maxDefault = Number.isFinite(defaults.max) ? Number(defaults.max) : 100;
+      const stepDefault = Number.isFinite(defaults.step) && Number(defaults.step) > 0 ? Number(defaults.step) : 1;
+      const min = Number.isFinite(axisRaw.min) ? Number(axisRaw.min) : minDefault;
+      const max = Number.isFinite(axisRaw.max) ? Number(axisRaw.max) : maxDefault;
+      const step = Number.isFinite(axisRaw.step) && Number(axisRaw.step) > 0 ? Number(axisRaw.step) : stepDefault;
+      const fallbackValue = Number.isFinite(defaults.value) ? Number(defaults.value) : min;
+      const value = clamp(axisRaw.value, min, max, fallbackValue);
+      const display = typeof axisRaw.display === 'string'
+        ? axisRaw.display
+        : (typeof formatDisplay === 'function' ? formatDisplay(value) : String(value));
+      return {
+        min,
+        max,
+        step,
+        value,
+        display,
+        disabled: !!axisRaw.disabled || !!raw.disabled
+      };
+    };
+    const brushSize = buildAxis(raw.brushSize, { min: 1, max: 2400, step: 1 }, (value) => `${Math.round(value)}px`);
+    const density = buildAxis(raw.density, { min: 1, max: 20, step: 1 }, (value) => `${Math.round(value)}`);
+    const sprayDeviation = buildAxis(raw.sprayDeviation, { min: 0, max: 100, step: 1 }, (value) => `${Math.round(value)}%`);
+    const spacing = buildAxis(raw.spacing, { min: 0, max: 200, step: 1 }, (value) => `${Math.round(value)}%`);
+    return {
+      available: true,
+      disabled: !!raw.disabled,
+      brushSize,
+      density,
+      sprayDeviation,
+      spacing,
+      hint: typeof raw.hint === 'string' ? raw.hint : ''
+    };
+  }
+
+  _prepareHeightMapContext(raw, toggleList = [], heightBrush = { available: false }) {
+    const base = raw && typeof raw === 'object' ? raw : {};
+    const hasToggles = Array.isArray(toggleList) && toggleList.length > 0;
+    const hasBrush = !!heightBrush?.available;
+    return {
+      available: hasToggles || hasBrush,
+      collapsed: !!base.collapsed,
+      disabled: !!base.disabled,
+      hasToggles,
+      toggles: toggleList
+    };
+  }
+
+  _prepareHeightBrushContext(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) {
+      return { available: false };
+    }
+    const clamp = (value, min, max, fallback) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return fallback;
+      return Math.min(max, Math.max(min, num));
+    };
+    const buildAxis = (axisRaw = {}, fallbackValue = 0) => {
+      const min = Number.isFinite(axisRaw.min) ? Number(axisRaw.min) : 0;
+      const max = Number.isFinite(axisRaw.max) ? Number(axisRaw.max) : 100;
+      const step = Number.isFinite(axisRaw.step) && Number(axisRaw.step) > 0 ? Number(axisRaw.step) : 1;
+      const value = clamp(axisRaw.value, min, max, fallbackValue);
+      const display = typeof axisRaw.display === 'string' ? axisRaw.display : `${Math.round(value)}%`;
+      return {
+        min,
+        max,
+        step,
+        value,
+        display,
+        disabled: !!axisRaw.disabled || !!raw.disabled
+      };
+    };
+    const minAxis = buildAxis(raw.min, 0);
+    const maxAxis = buildAxis(raw.max, 100);
+    const contrastAxis = raw.contrast ? buildAxis(raw.contrast, 1) : null;
+    const liftAxis = raw.lift ? buildAxis(raw.lift, 0) : null;
+    return {
+      available: true,
+      label: typeof raw.label === 'string' ? raw.label : 'Height Threshold',
+      hint: typeof raw.hint === 'string' ? raw.hint : '',
+      min: minAxis,
+      max: maxAxis,
+      tuningLabel: typeof raw.tuningLabel === 'string' ? raw.tuningLabel : '',
+      tuningHint: typeof raw.tuningHint === 'string' ? raw.tuningHint : '',
+      contrast: contrastAxis,
+      lift: liftAxis
+    };
+  }
+
   _prepareTextureOpacityContext(raw) {
     if (!raw || typeof raw !== 'object' || raw.available === false) {
       return { available: false };
@@ -1065,7 +1320,16 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       enabled: coerceBool(raw.enabled),
       disabled: coerceBool(raw.disabled),
       editMode: coerceBool(raw.editMode),
+      editAvailable: raw.editAvailable !== false,
       editDisabled: coerceBool(raw.editDisabled),
+      editReset: (() => {
+        const resetRaw = raw.editReset && typeof raw.editReset === 'object' ? raw.editReset : null;
+        if (!resetRaw) return null;
+        return {
+          disabled: coerceBool(resetRaw.disabled),
+          tooltip: coerceString(resetRaw.tooltip, '')
+        };
+      })(),
       activePreset: Number.isInteger(raw.activePreset) ? Number(raw.activePreset) : -1,
       presets: Array.isArray(raw.presets) ? raw.presets.map((entry, index) => normalizePreset(entry, index)) : [],
       presetsHint: coerceString(raw.presetsHint, ''),
@@ -1191,15 +1455,17 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     const textureOffset = this._prepareTextureOffsetContext(data.textureOffset);
     const scale = this._preparePathScaleContext(data.scale);
     const tension = this._preparePathTensionContext(data.tension);
+    const freehandSimplify = this._prepareFreehandSimplifyContext(data.freehandSimplify);
     const showWidthTangents = this._prepareShowWidthTangentsContext(data.showWidthTangents);
     const hint = typeof data.hint === 'string' ? data.hint : '';
     return {
-      available: !!(layerOpacity.available || textureOffset.available || scale.available || tension.available || showWidthTangents.available),
+      available: !!(layerOpacity.available || textureOffset.available || scale.available || tension.available || freehandSimplify.available || showWidthTangents.available),
       hint,
       layerOpacity,
       textureOffset,
       scale,
       tension,
+      freehandSimplify,
       showWidthTangents
     };
   }
@@ -1249,6 +1515,27 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       step,
       value,
       display,
+      disabled
+    };
+  }
+
+  _prepareFreehandSimplifyContext(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) return { available: false };
+    const value = Number(raw.value ?? 0);
+    const min = Number(raw.min ?? 0);
+    const max = Number(raw.max ?? 1);
+    const step = Number(raw.step ?? 0.01);
+    const disabled = !!raw.disabled;
+    const display = typeof raw.display === 'string' ? raw.display : value.toFixed(2);
+    const hint = typeof raw.hint === 'string' ? raw.hint : '';
+    return {
+      available: true,
+      min,
+      max,
+      step,
+      value,
+      display,
+      hint,
       disabled
     };
   }
@@ -1381,11 +1668,81 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     else content.setAttribute('style', style);
   }
 
+  _bindDisplayInput(display, inputHandler, commitHandler) {
+    if (!display || display.tagName !== 'INPUT') return;
+    if (inputHandler) display.addEventListener('input', inputHandler);
+    if (commitHandler) display.addEventListener('change', commitHandler);
+  }
+
+  _unbindDisplayInput(display, inputHandler, commitHandler) {
+    if (!display || display.tagName !== 'INPUT') return;
+    if (inputHandler) {
+      try { display.removeEventListener('input', inputHandler); } catch (_) {}
+    }
+    if (commitHandler) {
+      try { display.removeEventListener('change', commitHandler); } catch (_) {}
+    }
+  }
+
+  _applyDefaultValue(target, value) {
+    if (!target || typeof target.setAttribute !== 'function') return;
+    const hasValue = value !== undefined && value !== null && value !== '';
+    if (!hasValue || (typeof value === 'number' && !Number.isFinite(value))) {
+      try { target.removeAttribute('data-fa-nexus-default-value'); } catch (_) {}
+      return;
+    }
+    try { target.setAttribute('data-fa-nexus-default-value', String(value)); } catch (_) {}
+  }
+
+  _inferStepDecimals(step) {
+    const numeric = Number(step);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    if (numeric >= 1) return 0;
+    const text = String(step);
+    const dot = text.indexOf('.');
+    if (dot === -1) return 0;
+    const decimals = text.length - dot - 1;
+    return decimals > 0 ? decimals : 0;
+  }
+
+  _normalizeNumericInputValue(value, step) {
+    if (value === '' || value === null || value === undefined) return value;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return value;
+    const decimals = this._inferStepDecimals(step);
+    if (decimals === null) return numeric;
+    return Number(numeric.toFixed(decimals));
+  }
+
+  _syncDisplayValue(display, data = {}, { disabled = false } = {}) {
+    if (!display) return;
+    const text = data.display || '';
+    if (display.tagName === 'INPUT') {
+      const rawValue = data.value ?? '';
+      const normalizedValue = (display.type === 'number')
+        ? this._normalizeNumericInputValue(rawValue, data.step ?? display.step)
+        : rawValue;
+      const nextValue = normalizedValue === null || normalizedValue === undefined ? '' : String(normalizedValue);
+      if (display.value !== nextValue) display.value = nextValue;
+      if (data.min !== undefined) display.min = String(data.min);
+      if (data.max !== undefined) display.max = String(data.max);
+      if (data.step !== undefined) display.step = String(data.step);
+      this._applyDefaultValue(display, data.defaultValue);
+      display.disabled = !!data.disabled || !!disabled;
+      if (text) display.title = text;
+      else display.removeAttribute('title');
+    } else if (display.textContent !== text) {
+      display.textContent = text;
+    }
+  }
+
   _bindControls() {
     this._unbindControls();
     try {
       const root = this.element;
       if (!root) return;
+      root.addEventListener('contextmenu', this._boundResettableContext);
+      this._resettableContextRoot = root;
       const gridToggle = root.querySelector('#fa-nexus-grid-snap-toggle');
       if (gridToggle) {
         gridToggle.checked = !!this._gridSnapEnabled;
@@ -1406,7 +1763,12 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       this._bindDropShadowControls();
       this._bindTextureToolControls();
+      this._bindEditorActions();
       this._bindTextureOpacityControl();
+      this._bindTextureBrushControls();
+      this._bindAssetScatterControls();
+      this._bindHeightMapControls();
+      this._bindHeightBrushControls();
       this._bindTextureLayerControl();
       this._bindTextureOffsetControls();
       this._bindPathAppearanceControls();
@@ -1484,6 +1846,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   _unbindControls() {
+    if (this._resettableContextRoot) {
+      try { this._resettableContextRoot.removeEventListener('contextmenu', this._boundResettableContext); }
+      catch (_) {}
+      this._resettableContextRoot = null;
+    }
     if (this._gridSnapToggle) {
       try { this._gridSnapToggle.removeEventListener('change', this._boundGridSnapChange); }
       catch (_) {}
@@ -1497,7 +1864,12 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._unbindDropShadowControls();
     this._unbindTextureToolControls();
+    this._unbindEditorActions();
     this._unbindTextureOpacityControl();
+    this._unbindTextureBrushControls();
+    this._unbindAssetScatterControls();
+    this._unbindHeightMapControls();
+    this._unbindHeightBrushControls();
     this._unbindTextureLayerControl();
     this._unbindTextureOffsetControls();
     this._unbindPathAppearanceControls();
@@ -1573,6 +1945,25 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._placeAsHpStaticError = null;
     this._placeAsHpPercentRow = null;
     this._placeAsHpStaticRow = null;
+  }
+
+  _handleResettableContext(event) {
+    if (!event || event.defaultPrevented) return;
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const input = target.closest('input[type="range"], input[type="number"]');
+    if (!input || input.disabled) return;
+    const defaultValue = input.dataset?.faNexusDefaultValue;
+    if (defaultValue === undefined || defaultValue === null || defaultValue === '') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (input.value !== String(defaultValue)) {
+      input.value = String(defaultValue);
+    }
+    try {
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (_) {}
   }
 
   _handleGridSnapChange(event) {
@@ -1671,7 +2062,14 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       slider.value = String(this._gridSnapSubdivisions);
     }
     if (display) {
-      display.textContent = this._formatGridSnapResolutionDisplay(this._gridSnapSubdivisions);
+      this._syncDisplayValue(display, {
+        min: slider?.min,
+        max: slider?.max,
+        step: slider?.step,
+        value: this._gridSnapSubdivisions,
+        display: this._formatGridSnapResolutionDisplay(this._gridSnapSubdivisions),
+        disabled: !available
+      }, { disabled: !available });
     }
   }
 
@@ -1690,6 +2088,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       slider.addEventListener('input', this._boundGridSnapResolutionInput);
       slider.addEventListener('change', this._boundGridSnapResolutionCommit);
     }
+    this._bindDisplayInput(this._gridSnapResolutionDisplay, this._boundGridSnapResolutionInput, this._boundGridSnapResolutionCommit);
     this._syncGridSnapResolutionControl();
   }
 
@@ -1700,6 +2099,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._gridSnapResolutionSlider.removeEventListener('change', this._boundGridSnapResolutionCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._gridSnapResolutionDisplay, this._boundGridSnapResolutionInput, this._boundGridSnapResolutionCommit);
     this._gridSnapResolutionSlider = null;
     this._gridSnapResolutionDisplay = null;
     this._gridSnapResolutionRoot = null;
@@ -1711,7 +2111,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     const value = this._normalizeGridSnapSubdivision(target.value);
     this._gridSnapSubdivisions = value;
     if (this._gridSnapResolutionDisplay) {
-      this._gridSnapResolutionDisplay.textContent = this._formatGridSnapResolutionDisplay(value);
+      this._syncDisplayValue(this._gridSnapResolutionDisplay, {
+        value,
+        display: this._formatGridSnapResolutionDisplay(value)
+      });
     }
     if (!commit) return;
     const controller = this._controller;
@@ -1736,7 +2139,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._gridSnapResolutionSlider.value = String(this._gridSnapSubdivisions);
     }
     if (this._gridSnapResolutionDisplay) {
-      this._gridSnapResolutionDisplay.textContent = this._formatGridSnapResolutionDisplay(this._gridSnapSubdivisions);
+      this._syncDisplayValue(this._gridSnapResolutionDisplay, {
+        value: this._gridSnapSubdivisions,
+        display: this._formatGridSnapResolutionDisplay(this._gridSnapSubdivisions)
+      });
     }
   }
 
@@ -1796,18 +2202,21 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       alphaSlider.addEventListener('change', this._boundDropShadowAlphaCommit);
       this._dropShadowAlphaSlider = alphaSlider;
     }
+    this._bindDisplayInput(this._dropShadowAlphaDisplay, this._boundDropShadowAlphaInput, this._boundDropShadowAlphaCommit);
     const dilationSlider = root.querySelector('[data-fa-nexus-drop-shadow-dilation]');
     if (dilationSlider) {
       dilationSlider.addEventListener('input', this._boundDropShadowDilationInput);
       dilationSlider.addEventListener('change', this._boundDropShadowDilationCommit);
       this._dropShadowDilationSlider = dilationSlider;
     }
+    this._bindDisplayInput(this._dropShadowDilationDisplay, this._boundDropShadowDilationInput, this._boundDropShadowDilationCommit);
     const blurSlider = root.querySelector('[data-fa-nexus-drop-shadow-blur]');
     if (blurSlider) {
       blurSlider.addEventListener('input', this._boundDropShadowBlurInput);
       blurSlider.addEventListener('change', this._boundDropShadowBlurCommit);
       this._dropShadowBlurSlider = blurSlider;
     }
+    this._bindDisplayInput(this._dropShadowBlurDisplay, this._boundDropShadowBlurInput, this._boundDropShadowBlurCommit);
     const offsetControl = root.querySelector('[data-fa-nexus-drop-shadow-offset-control]');
     if (offsetControl) {
       offsetControl.addEventListener('pointerdown', this._boundDropShadowOffsetPointerDown);
@@ -1830,18 +2239,21 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._dropShadowAlphaSlider.removeEventListener('change', this._boundDropShadowAlphaCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._dropShadowAlphaDisplay, this._boundDropShadowAlphaInput, this._boundDropShadowAlphaCommit);
     if (this._dropShadowDilationSlider) {
       try {
         this._dropShadowDilationSlider.removeEventListener('input', this._boundDropShadowDilationInput);
         this._dropShadowDilationSlider.removeEventListener('change', this._boundDropShadowDilationCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._dropShadowDilationDisplay, this._boundDropShadowDilationInput, this._boundDropShadowDilationCommit);
     if (this._dropShadowBlurSlider) {
       try {
         this._dropShadowBlurSlider.removeEventListener('input', this._boundDropShadowBlurInput);
         this._dropShadowBlurSlider.removeEventListener('change', this._boundDropShadowBlurCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._dropShadowBlurDisplay, this._boundDropShadowBlurInput, this._boundDropShadowBlurCommit);
     if (this._dropShadowOffsetControl) {
       try { this._dropShadowOffsetControl.removeEventListener('pointerdown', this._boundDropShadowOffsetPointerDown); } catch (_) {}
       try { this._dropShadowOffsetControl.removeEventListener('contextmenu', this._boundDropShadowOffsetContext); } catch (_) {}
@@ -1895,7 +2307,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       if (entry.step !== undefined) slider.step = entry.step;
       if (entry.value !== undefined) slider.value = entry.value;
       slider.disabled = !!entry.disabled;
-      if (display) display.textContent = entry.display ?? '';
+      if (display) this._syncDisplayValue(display, entry);
     };
     const collapsed = !!state.collapsed;
     if (this._dropShadowRoot) {
@@ -2282,6 +2694,77 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
   }
 
+  _bindEditorActions() {
+    const root = this.element?.querySelector('[data-fa-nexus-editor-actions-root]') || null;
+    if (!root) {
+      this._unbindEditorActions();
+      return;
+    }
+    this._editorActionsRoot = root;
+    const actionButtons = Array.from(root.querySelectorAll('[data-fa-nexus-editor-action]'));
+    this._editorActionButtons = actionButtons;
+    this._editorActionButtonMap = new Map();
+    for (const button of actionButtons) {
+      button.addEventListener('click', this._boundEditorActionClick);
+      const id = button.dataset?.faNexusEditorAction || '';
+      if (id) this._editorActionButtonMap.set(id, button);
+    }
+    this._syncEditorActions();
+  }
+
+  _unbindEditorActions() {
+    if (this._editorActionButtons?.length) {
+      for (const button of this._editorActionButtons) {
+        try { button.removeEventListener('click', this._boundEditorActionClick); }
+        catch (_) {}
+      }
+    }
+    this._editorActionButtons = [];
+    this._editorActionButtonMap = new Map();
+    this._editorActionsRoot = null;
+  }
+
+  _syncEditorActions() {
+    if (!this._editorActionsRoot) return;
+    const actionStateList = Array.isArray(this._toolOptionState?.editorActions)
+      ? this._toolOptionState.editorActions
+      : [];
+    if (!actionStateList.length) {
+      this._editorActionsRoot.hidden = true;
+      return;
+    }
+    this._editorActionsRoot.hidden = false;
+    const stateMap = new Map();
+    for (const entry of actionStateList) {
+      const id = String(entry?.id || '');
+      if (!id) continue;
+      stateMap.set(id, {
+        id,
+        label: String(entry?.label || ''),
+        tooltip: String(entry?.tooltip || ''),
+        primary: !!entry?.primary,
+        disabled: !!entry?.disabled
+      });
+    }
+    for (const button of this._editorActionButtons || []) {
+      const id = button.dataset?.faNexusEditorAction || '';
+      const actionState = stateMap.get(id);
+      if (!actionState) {
+        button.hidden = true;
+        continue;
+      }
+      button.hidden = false;
+      button.disabled = !!actionState.disabled;
+      button.classList.toggle('is-primary', !!actionState.primary);
+      if (actionState.tooltip) button.title = actionState.tooltip;
+      else button.removeAttribute('title');
+      const labelEl = button.querySelector('span');
+      if (labelEl && actionState.label && labelEl.textContent !== actionState.label) {
+        labelEl.textContent = actionState.label;
+      }
+    }
+  }
+
   _handleTextureModeClick(event) {
     const button = event?.currentTarget || event?.target;
     if (!button) return;
@@ -2324,6 +2807,27 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
   }
 
+  _handleEditorActionClick(event) {
+    const button = event?.currentTarget || event?.target;
+    if (!button) return;
+    const id = button.dataset?.faNexusEditorAction;
+    if (!id) return;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('handleEditorAction', id);
+      if (result?.then) {
+        result.catch(() => {}).finally(() => this._syncEditorActions());
+      } else {
+        this._syncEditorActions();
+      }
+    } catch (_) {
+      this._syncEditorActions();
+    }
+  }
+
   _bindTextureOpacityControl() {
     const root = this.element?.querySelector('[data-fa-nexus-texture-opacity-root]') || null;
     if (!root) {
@@ -2338,7 +2842,253 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._textureOpacitySlider = slider;
     }
     this._textureOpacityDisplay = root.querySelector('[data-fa-nexus-texture-opacity-display]') || null;
+    this._bindDisplayInput(this._textureOpacityDisplay, this._boundTextureOpacityInput, this._boundTextureOpacityCommit);
     this._syncTextureOpacityControl();
+  }
+
+  _handleTextureBrushSetting(event, handlerName, commit) {
+    const slider = event?.currentTarget || event?.target;
+    if (!slider || !handlerName) return;
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const value = Number(slider.value);
+      const result = controller.invokeToolHandler(handlerName, value, !!commit);
+      if (result?.then) {
+        result.catch(() => {}).finally(() => this._syncTextureBrushControls());
+      } else {
+        this._syncTextureBrushControls();
+      }
+    } catch (_) {
+      this._syncTextureBrushControls();
+    }
+  }
+
+  _bindTextureBrushControls() {
+    const root = this.element?.querySelector('[data-fa-nexus-texture-brush-root]') || null;
+    if (!root) {
+      this._unbindTextureBrushControls();
+      return;
+    }
+    this._textureBrushRoot = root;
+    const brushSize = root.querySelector('[data-fa-nexus-texture-brush-size]');
+    if (brushSize) {
+      brushSize.addEventListener('input', this._boundTextureBrushSizeInput);
+      brushSize.addEventListener('change', this._boundTextureBrushSizeCommit);
+      this._textureBrushSizeSlider = brushSize;
+    }
+    const particleSize = root.querySelector('[data-fa-nexus-texture-particle-size]');
+    if (particleSize) {
+      particleSize.addEventListener('input', this._boundTextureParticleSizeInput);
+      particleSize.addEventListener('change', this._boundTextureParticleSizeCommit);
+      this._textureParticleSizeSlider = particleSize;
+    }
+    const particleDensity = root.querySelector('[data-fa-nexus-texture-particle-density]');
+    if (particleDensity) {
+      particleDensity.addEventListener('input', this._boundTextureParticleDensityInput);
+      particleDensity.addEventListener('change', this._boundTextureParticleDensityCommit);
+      this._textureParticleDensitySlider = particleDensity;
+    }
+    const sprayDeviation = root.querySelector('[data-fa-nexus-texture-spray-deviation]');
+    if (sprayDeviation) {
+      sprayDeviation.addEventListener('input', this._boundTextureSprayDeviationInput);
+      sprayDeviation.addEventListener('change', this._boundTextureSprayDeviationCommit);
+      this._textureSprayDeviationSlider = sprayDeviation;
+    }
+    const brushSpacing = root.querySelector('[data-fa-nexus-texture-brush-spacing]');
+    if (brushSpacing) {
+      brushSpacing.addEventListener('input', this._boundTextureBrushSpacingInput);
+      brushSpacing.addEventListener('change', this._boundTextureBrushSpacingCommit);
+      this._textureBrushSpacingSlider = brushSpacing;
+    }
+    this._textureBrushSizeDisplay = root.querySelector('[data-fa-nexus-texture-brush-size-display]') || null;
+    this._textureParticleSizeDisplay = root.querySelector('[data-fa-nexus-texture-particle-size-display]') || null;
+    this._textureParticleDensityDisplay = root.querySelector('[data-fa-nexus-texture-particle-density-display]') || null;
+    this._textureSprayDeviationDisplay = root.querySelector('[data-fa-nexus-texture-spray-deviation-display]') || null;
+    this._textureBrushSpacingDisplay = root.querySelector('[data-fa-nexus-texture-brush-spacing-display]') || null;
+    this._bindDisplayInput(this._textureBrushSizeDisplay, this._boundTextureBrushSizeInput, this._boundTextureBrushSizeCommit);
+    this._bindDisplayInput(this._textureParticleSizeDisplay, this._boundTextureParticleSizeInput, this._boundTextureParticleSizeCommit);
+    this._bindDisplayInput(this._textureParticleDensityDisplay, this._boundTextureParticleDensityInput, this._boundTextureParticleDensityCommit);
+    this._bindDisplayInput(this._textureSprayDeviationDisplay, this._boundTextureSprayDeviationInput, this._boundTextureSprayDeviationCommit);
+    this._bindDisplayInput(this._textureBrushSpacingDisplay, this._boundTextureBrushSpacingInput, this._boundTextureBrushSpacingCommit);
+    this._syncTextureBrushControls();
+  }
+
+  _handleAssetScatterSetting(event, handlerName, commit) {
+    const slider = event?.currentTarget || event?.target;
+    if (!slider || !handlerName) return;
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const value = Number(slider.value);
+      const result = controller.invokeToolHandler(handlerName, value, !!commit);
+      if (result?.then) {
+        result.catch(() => {}).finally(() => this._syncAssetScatterControls());
+      } else {
+        this._syncAssetScatterControls();
+      }
+    } catch (_) {
+      this._syncAssetScatterControls();
+    }
+  }
+
+  _bindAssetScatterControls() {
+    const root = this.element?.querySelector('[data-fa-nexus-asset-scatter-root]') || null;
+    if (!root) {
+      this._unbindAssetScatterControls();
+      return;
+    }
+    this._assetScatterRoot = root;
+    const brushSize = root.querySelector('[data-fa-nexus-asset-scatter-size]');
+    if (brushSize) {
+      brushSize.addEventListener('input', this._boundAssetScatterBrushSizeInput);
+      brushSize.addEventListener('change', this._boundAssetScatterBrushSizeCommit);
+      this._assetScatterBrushSizeSlider = brushSize;
+    }
+    const density = root.querySelector('[data-fa-nexus-asset-scatter-density]');
+    if (density) {
+      density.addEventListener('input', this._boundAssetScatterDensityInput);
+      density.addEventListener('change', this._boundAssetScatterDensityCommit);
+      this._assetScatterDensitySlider = density;
+    }
+    const spray = root.querySelector('[data-fa-nexus-asset-scatter-spray]');
+    if (spray) {
+      spray.addEventListener('input', this._boundAssetScatterSprayDeviationInput);
+      spray.addEventListener('change', this._boundAssetScatterSprayDeviationCommit);
+      this._assetScatterSprayDeviationSlider = spray;
+    }
+    const spacing = root.querySelector('[data-fa-nexus-asset-scatter-spacing]');
+    if (spacing) {
+      spacing.addEventListener('input', this._boundAssetScatterSpacingInput);
+      spacing.addEventListener('change', this._boundAssetScatterSpacingCommit);
+      this._assetScatterSpacingSlider = spacing;
+    }
+    this._assetScatterBrushSizeDisplay = root.querySelector('[data-fa-nexus-asset-scatter-size-display]') || null;
+    this._assetScatterDensityDisplay = root.querySelector('[data-fa-nexus-asset-scatter-density-display]') || null;
+    this._assetScatterSprayDeviationDisplay = root.querySelector('[data-fa-nexus-asset-scatter-spray-display]') || null;
+    this._assetScatterSpacingDisplay = root.querySelector('[data-fa-nexus-asset-scatter-spacing-display]') || null;
+    this._bindDisplayInput(this._assetScatterBrushSizeDisplay, this._boundAssetScatterBrushSizeInput, this._boundAssetScatterBrushSizeCommit);
+    this._bindDisplayInput(this._assetScatterDensityDisplay, this._boundAssetScatterDensityInput, this._boundAssetScatterDensityCommit);
+    this._bindDisplayInput(this._assetScatterSprayDeviationDisplay, this._boundAssetScatterSprayDeviationInput, this._boundAssetScatterSprayDeviationCommit);
+    this._bindDisplayInput(this._assetScatterSpacingDisplay, this._boundAssetScatterSpacingInput, this._boundAssetScatterSpacingCommit);
+    this._syncAssetScatterControls();
+  }
+
+  _handleHeightBrushThreshold(event, axis, commit) {
+    const slider = event?.currentTarget || event?.target;
+    if (!slider) return;
+    if (this._controller?.invokeToolHandler) {
+      this._controller.invokeToolHandler('setHeightThreshold', axis, slider.value, !!commit);
+    }
+  }
+
+  _handleHeightBrushTuning(event, key, commit) {
+    const slider = event?.currentTarget || event?.target;
+    if (!slider) return;
+    const handler = key === 'contrast' ? 'setHeightContrast' : 'setHeightLift';
+    if (this._controller?.invokeToolHandler) {
+      this._controller.invokeToolHandler(handler, slider.value, !!commit);
+    }
+  }
+
+  _bindHeightMapControls() {
+    const root = this.element?.querySelector('[data-fa-nexus-height-map-root]') || null;
+    if (!root) {
+      this._unbindHeightMapControls();
+      return;
+    }
+    this._heightMapRoot = root;
+    this._heightMapCollapseButton = root.querySelector('[data-fa-nexus-height-map-toggle]') || null;
+    if (this._heightMapCollapseButton) {
+      this._heightMapCollapseButton.addEventListener('click', this._boundHeightMapCollapse);
+    }
+    this._heightMapBody = root.querySelector('[data-fa-nexus-height-map-body]') || null;
+    this._syncHeightMapControls();
+  }
+
+  _unbindHeightMapControls() {
+    if (this._heightMapCollapseButton) {
+      try { this._heightMapCollapseButton.removeEventListener('click', this._boundHeightMapCollapse); } catch (_) {}
+    }
+    this._heightMapRoot = null;
+    this._heightMapCollapseButton = null;
+    this._heightMapBody = null;
+  }
+
+  _syncHeightMapControls() {
+    if (!this._heightMapRoot) return;
+    const state = this._toolOptionState?.heightMap || { available: false };
+    const available = !!state.available;
+    if (!available) {
+      this._heightMapRoot.hidden = true;
+      return;
+    }
+    this._heightMapRoot.hidden = false;
+    const collapsed = !!state.collapsed;
+    this._heightMapRoot.classList.toggle('is-collapsed', collapsed);
+    if (this._heightMapBody) {
+      if (collapsed) this._heightMapBody.setAttribute('aria-hidden', 'true');
+      else this._heightMapBody.removeAttribute('aria-hidden');
+    }
+    if (this._heightMapCollapseButton) {
+      this._heightMapCollapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      this._heightMapCollapseButton.setAttribute('aria-label', collapsed ? 'Expand height map settings' : 'Collapse height map settings');
+      this._heightMapCollapseButton.classList.toggle('is-collapsed', collapsed);
+      this._heightMapCollapseButton.disabled = !!state.disabled;
+    }
+  }
+
+  _handleHeightMapCollapse(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try { controller.invokeToolHandler('toggleHeightMapCollapsed'); }
+    catch (_) {}
+  }
+
+  _bindHeightBrushControls() {
+    const root = this.element?.querySelector('[data-fa-nexus-height-brush-root]') || null;
+    if (!root) {
+      this._unbindHeightBrushControls();
+      return;
+    }
+    this._heightBrushRoot = root;
+    const minSlider = root.querySelector('[data-fa-nexus-height-threshold-min]');
+    if (minSlider) {
+      minSlider.addEventListener('input', this._boundHeightBrushMinInput);
+      minSlider.addEventListener('change', this._boundHeightBrushMinCommit);
+      this._heightBrushMinSlider = minSlider;
+    }
+    const maxSlider = root.querySelector('[data-fa-nexus-height-threshold-max]');
+    if (maxSlider) {
+      maxSlider.addEventListener('input', this._boundHeightBrushMaxInput);
+      maxSlider.addEventListener('change', this._boundHeightBrushMaxCommit);
+      this._heightBrushMaxSlider = maxSlider;
+    }
+    const contrastSlider = root.querySelector('[data-fa-nexus-height-contrast]');
+    if (contrastSlider) {
+      contrastSlider.addEventListener('input', this._boundHeightBrushContrastInput);
+      contrastSlider.addEventListener('change', this._boundHeightBrushContrastCommit);
+      this._heightBrushContrastSlider = contrastSlider;
+    }
+    const liftSlider = root.querySelector('[data-fa-nexus-height-lift]');
+    if (liftSlider) {
+      liftSlider.addEventListener('input', this._boundHeightBrushLiftInput);
+      liftSlider.addEventListener('change', this._boundHeightBrushLiftCommit);
+      this._heightBrushLiftSlider = liftSlider;
+    }
+    this._heightBrushMinDisplay = root.querySelector('[data-fa-nexus-height-threshold-min-display]') || null;
+    this._heightBrushMaxDisplay = root.querySelector('[data-fa-nexus-height-threshold-max-display]') || null;
+    this._heightBrushContrastDisplay = root.querySelector('[data-fa-nexus-height-contrast-display]') || null;
+    this._heightBrushLiftDisplay = root.querySelector('[data-fa-nexus-height-lift-display]') || null;
+    this._bindDisplayInput(this._heightBrushMinDisplay, this._boundHeightBrushMinInput, this._boundHeightBrushMinCommit);
+    this._bindDisplayInput(this._heightBrushMaxDisplay, this._boundHeightBrushMaxInput, this._boundHeightBrushMaxCommit);
+    this._bindDisplayInput(this._heightBrushContrastDisplay, this._boundHeightBrushContrastInput, this._boundHeightBrushContrastCommit);
+    this._bindDisplayInput(this._heightBrushLiftDisplay, this._boundHeightBrushLiftInput, this._boundHeightBrushLiftCommit);
+    this._syncHeightBrushControls();
   }
 
   _bindTextureLayerControl() {
@@ -2355,6 +3105,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._textureLayerSlider = slider;
     }
     this._textureLayerDisplay = root.querySelector('[data-fa-nexus-texture-layer-display]') || null;
+    this._bindDisplayInput(this._textureLayerDisplay, this._boundTextureLayerInput, this._boundTextureLayerCommit);
     this._syncTextureLayerControl();
   }
 
@@ -2379,6 +3130,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._textureOffsetXDisplay = root.querySelector('[data-fa-nexus-texture-offset-x-display]') || null;
     this._textureOffsetYDisplay = root.querySelector('[data-fa-nexus-texture-offset-y-display]') || null;
+    this._bindDisplayInput(this._textureOffsetXDisplay, this._boundTextureOffsetXInput, this._boundTextureOffsetXCommit);
+    this._bindDisplayInput(this._textureOffsetYDisplay, this._boundTextureOffsetYInput, this._boundTextureOffsetYCommit);
     this._syncTextureOffsetControls();
   }
 
@@ -2389,9 +3142,139 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._textureOpacitySlider.removeEventListener('change', this._boundTextureOpacityCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._textureOpacityDisplay, this._boundTextureOpacityInput, this._boundTextureOpacityCommit);
     this._textureOpacityRoot = null;
     this._textureOpacitySlider = null;
     this._textureOpacityDisplay = null;
+  }
+
+  _unbindTextureBrushControls() {
+    if (this._textureBrushSizeSlider) {
+      try {
+        this._textureBrushSizeSlider.removeEventListener('input', this._boundTextureBrushSizeInput);
+        this._textureBrushSizeSlider.removeEventListener('change', this._boundTextureBrushSizeCommit);
+      } catch (_) {}
+    }
+    if (this._textureParticleSizeSlider) {
+      try {
+        this._textureParticleSizeSlider.removeEventListener('input', this._boundTextureParticleSizeInput);
+        this._textureParticleSizeSlider.removeEventListener('change', this._boundTextureParticleSizeCommit);
+      } catch (_) {}
+    }
+    if (this._textureParticleDensitySlider) {
+      try {
+        this._textureParticleDensitySlider.removeEventListener('input', this._boundTextureParticleDensityInput);
+        this._textureParticleDensitySlider.removeEventListener('change', this._boundTextureParticleDensityCommit);
+      } catch (_) {}
+    }
+    if (this._textureSprayDeviationSlider) {
+      try {
+        this._textureSprayDeviationSlider.removeEventListener('input', this._boundTextureSprayDeviationInput);
+        this._textureSprayDeviationSlider.removeEventListener('change', this._boundTextureSprayDeviationCommit);
+      } catch (_) {}
+    }
+    if (this._textureBrushSpacingSlider) {
+      try {
+        this._textureBrushSpacingSlider.removeEventListener('input', this._boundTextureBrushSpacingInput);
+        this._textureBrushSpacingSlider.removeEventListener('change', this._boundTextureBrushSpacingCommit);
+      } catch (_) {}
+    }
+    this._unbindDisplayInput(this._textureBrushSizeDisplay, this._boundTextureBrushSizeInput, this._boundTextureBrushSizeCommit);
+    this._unbindDisplayInput(this._textureParticleSizeDisplay, this._boundTextureParticleSizeInput, this._boundTextureParticleSizeCommit);
+    this._unbindDisplayInput(this._textureParticleDensityDisplay, this._boundTextureParticleDensityInput, this._boundTextureParticleDensityCommit);
+    this._unbindDisplayInput(this._textureSprayDeviationDisplay, this._boundTextureSprayDeviationInput, this._boundTextureSprayDeviationCommit);
+    this._unbindDisplayInput(this._textureBrushSpacingDisplay, this._boundTextureBrushSpacingInput, this._boundTextureBrushSpacingCommit);
+    this._textureBrushRoot = null;
+    this._textureBrushSizeSlider = null;
+    this._textureBrushSizeDisplay = null;
+    this._textureParticleSizeSlider = null;
+    this._textureParticleSizeDisplay = null;
+    this._textureParticleDensitySlider = null;
+    this._textureParticleDensityDisplay = null;
+    this._textureSprayDeviationSlider = null;
+    this._textureSprayDeviationDisplay = null;
+    this._textureBrushSpacingSlider = null;
+    this._textureBrushSpacingDisplay = null;
+  }
+
+  _unbindAssetScatterControls() {
+    if (this._assetScatterBrushSizeSlider) {
+      try {
+        this._assetScatterBrushSizeSlider.removeEventListener('input', this._boundAssetScatterBrushSizeInput);
+        this._assetScatterBrushSizeSlider.removeEventListener('change', this._boundAssetScatterBrushSizeCommit);
+      } catch (_) {}
+    }
+    if (this._assetScatterDensitySlider) {
+      try {
+        this._assetScatterDensitySlider.removeEventListener('input', this._boundAssetScatterDensityInput);
+        this._assetScatterDensitySlider.removeEventListener('change', this._boundAssetScatterDensityCommit);
+      } catch (_) {}
+    }
+    if (this._assetScatterSprayDeviationSlider) {
+      try {
+        this._assetScatterSprayDeviationSlider.removeEventListener('input', this._boundAssetScatterSprayDeviationInput);
+        this._assetScatterSprayDeviationSlider.removeEventListener('change', this._boundAssetScatterSprayDeviationCommit);
+      } catch (_) {}
+    }
+    if (this._assetScatterSpacingSlider) {
+      try {
+        this._assetScatterSpacingSlider.removeEventListener('input', this._boundAssetScatterSpacingInput);
+        this._assetScatterSpacingSlider.removeEventListener('change', this._boundAssetScatterSpacingCommit);
+      } catch (_) {}
+    }
+    this._unbindDisplayInput(this._assetScatterBrushSizeDisplay, this._boundAssetScatterBrushSizeInput, this._boundAssetScatterBrushSizeCommit);
+    this._unbindDisplayInput(this._assetScatterDensityDisplay, this._boundAssetScatterDensityInput, this._boundAssetScatterDensityCommit);
+    this._unbindDisplayInput(this._assetScatterSprayDeviationDisplay, this._boundAssetScatterSprayDeviationInput, this._boundAssetScatterSprayDeviationCommit);
+    this._unbindDisplayInput(this._assetScatterSpacingDisplay, this._boundAssetScatterSpacingInput, this._boundAssetScatterSpacingCommit);
+    this._assetScatterRoot = null;
+    this._assetScatterBrushSizeSlider = null;
+    this._assetScatterBrushSizeDisplay = null;
+    this._assetScatterDensitySlider = null;
+    this._assetScatterDensityDisplay = null;
+    this._assetScatterSprayDeviationSlider = null;
+    this._assetScatterSprayDeviationDisplay = null;
+    this._assetScatterSpacingSlider = null;
+    this._assetScatterSpacingDisplay = null;
+  }
+
+  _unbindHeightBrushControls() {
+    if (this._heightBrushMinSlider) {
+      try {
+        this._heightBrushMinSlider.removeEventListener('input', this._boundHeightBrushMinInput);
+        this._heightBrushMinSlider.removeEventListener('change', this._boundHeightBrushMinCommit);
+      } catch (_) {}
+    }
+    if (this._heightBrushMaxSlider) {
+      try {
+        this._heightBrushMaxSlider.removeEventListener('input', this._boundHeightBrushMaxInput);
+        this._heightBrushMaxSlider.removeEventListener('change', this._boundHeightBrushMaxCommit);
+      } catch (_) {}
+    }
+    if (this._heightBrushContrastSlider) {
+      try {
+        this._heightBrushContrastSlider.removeEventListener('input', this._boundHeightBrushContrastInput);
+        this._heightBrushContrastSlider.removeEventListener('change', this._boundHeightBrushContrastCommit);
+      } catch (_) {}
+    }
+    if (this._heightBrushLiftSlider) {
+      try {
+        this._heightBrushLiftSlider.removeEventListener('input', this._boundHeightBrushLiftInput);
+        this._heightBrushLiftSlider.removeEventListener('change', this._boundHeightBrushLiftCommit);
+      } catch (_) {}
+    }
+    this._unbindDisplayInput(this._heightBrushMinDisplay, this._boundHeightBrushMinInput, this._boundHeightBrushMinCommit);
+    this._unbindDisplayInput(this._heightBrushMaxDisplay, this._boundHeightBrushMaxInput, this._boundHeightBrushMaxCommit);
+    this._unbindDisplayInput(this._heightBrushContrastDisplay, this._boundHeightBrushContrastInput, this._boundHeightBrushContrastCommit);
+    this._unbindDisplayInput(this._heightBrushLiftDisplay, this._boundHeightBrushLiftInput, this._boundHeightBrushLiftCommit);
+    this._heightBrushRoot = null;
+    this._heightBrushMinSlider = null;
+    this._heightBrushMaxSlider = null;
+    this._heightBrushContrastSlider = null;
+    this._heightBrushLiftSlider = null;
+    this._heightBrushMinDisplay = null;
+    this._heightBrushMaxDisplay = null;
+    this._heightBrushContrastDisplay = null;
+    this._heightBrushLiftDisplay = null;
   }
 
   _unbindTextureLayerControl() {
@@ -2401,6 +3284,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._textureLayerSlider.removeEventListener('change', this._boundTextureLayerCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._textureLayerDisplay, this._boundTextureLayerInput, this._boundTextureLayerCommit);
     this._textureLayerRoot = null;
     this._textureLayerSlider = null;
     this._textureLayerDisplay = null;
@@ -2419,6 +3303,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._textureOffsetYSlider.removeEventListener('change', this._boundTextureOffsetYCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._textureOffsetXDisplay, this._boundTextureOffsetXInput, this._boundTextureOffsetXCommit);
+    this._unbindDisplayInput(this._textureOffsetYDisplay, this._boundTextureOffsetYInput, this._boundTextureOffsetYCommit);
     this._textureOffsetRoot = null;
     this._textureOffsetXSlider = null;
     this._textureOffsetYSlider = null;
@@ -2442,11 +3328,132 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextValue = String(state.value);
         if (this._textureOpacitySlider.value !== nextValue) this._textureOpacitySlider.value = nextValue;
       }
+      this._applyDefaultValue(this._textureOpacitySlider, state.defaultValue);
       this._textureOpacitySlider.disabled = !!state.disabled;
     }
     if (this._textureOpacityDisplay) {
-      const display = state.display || '';
-      if (this._textureOpacityDisplay.textContent !== display) this._textureOpacityDisplay.textContent = display;
+      this._syncDisplayValue(this._textureOpacityDisplay, state);
+    }
+  }
+
+  _syncTextureBrushControls() {
+    if (!this._textureBrushRoot) return;
+    const state = this._toolOptionState?.textureBrush || { available: false };
+    if (!state.available) {
+      this._textureBrushRoot.hidden = true;
+      return;
+    }
+    this._textureBrushRoot.hidden = false;
+    const applySlider = (slider, data, display) => {
+      if (!slider || !data) return;
+      if (data.min !== undefined) slider.min = String(data.min);
+      if (data.max !== undefined) slider.max = String(data.max);
+      if (data.step !== undefined) slider.step = String(data.step);
+      if (data.value !== undefined) {
+        const nextValue = String(data.value);
+        if (slider.value !== nextValue) slider.value = nextValue;
+      }
+      this._applyDefaultValue(slider, data.defaultValue);
+      slider.disabled = !!state.disabled || !!data.disabled;
+      if (display) this._syncDisplayValue(display, data, { disabled: state.disabled });
+    };
+    applySlider(this._textureBrushSizeSlider, state.brushSize, this._textureBrushSizeDisplay);
+    applySlider(this._textureParticleSizeSlider, state.particleSize, this._textureParticleSizeDisplay);
+    applySlider(this._textureParticleDensitySlider, state.particleDensity, this._textureParticleDensityDisplay);
+    applySlider(this._textureSprayDeviationSlider, state.sprayDeviation, this._textureSprayDeviationDisplay);
+    applySlider(this._textureBrushSpacingSlider, state.spacing, this._textureBrushSpacingDisplay);
+  }
+
+  _syncAssetScatterControls() {
+    if (!this._assetScatterRoot) return;
+    const state = this._toolOptionState?.assetScatter || { available: false };
+    if (!state.available) {
+      this._assetScatterRoot.hidden = true;
+      return;
+    }
+    this._assetScatterRoot.hidden = false;
+    const applySlider = (slider, data, display) => {
+      if (!slider || !data) return;
+      if (data.min !== undefined) slider.min = String(data.min);
+      if (data.max !== undefined) slider.max = String(data.max);
+      if (data.step !== undefined) slider.step = String(data.step);
+      if (data.value !== undefined) {
+        const nextValue = String(data.value);
+        if (slider.value !== nextValue) slider.value = nextValue;
+      }
+      this._applyDefaultValue(slider, data.defaultValue);
+      slider.disabled = !!state.disabled || !!data.disabled;
+      if (display) this._syncDisplayValue(display, data, { disabled: state.disabled });
+    };
+    applySlider(this._assetScatterBrushSizeSlider, state.brushSize, this._assetScatterBrushSizeDisplay);
+    applySlider(this._assetScatterDensitySlider, state.density, this._assetScatterDensityDisplay);
+    applySlider(this._assetScatterSprayDeviationSlider, state.sprayDeviation, this._assetScatterSprayDeviationDisplay);
+    applySlider(this._assetScatterSpacingSlider, state.spacing, this._assetScatterSpacingDisplay);
+  }
+
+  _syncHeightBrushControls() {
+    if (!this._heightBrushRoot) return;
+    const state = this._toolOptionState?.heightBrush || { available: false };
+    if (!state.available) {
+      this._heightBrushRoot.hidden = true;
+      return;
+    }
+    this._heightBrushRoot.hidden = false;
+    if (this._heightBrushMinSlider) {
+      if (state.min?.min !== undefined) this._heightBrushMinSlider.min = String(state.min.min);
+      if (state.min?.max !== undefined) this._heightBrushMinSlider.max = String(state.min.max);
+      if (state.min?.step !== undefined) this._heightBrushMinSlider.step = String(state.min.step);
+      if (state.min?.value !== undefined) {
+        const nextMin = String(state.min.value);
+        if (this._heightBrushMinSlider.value !== nextMin) this._heightBrushMinSlider.value = nextMin;
+      }
+      this._applyDefaultValue(this._heightBrushMinSlider, state.min?.defaultValue);
+      this._heightBrushMinSlider.disabled = !!state.min?.disabled || !!state.disabled;
+    }
+    if (this._heightBrushMaxSlider) {
+      if (state.max?.min !== undefined) this._heightBrushMaxSlider.min = String(state.max.min);
+      if (state.max?.max !== undefined) this._heightBrushMaxSlider.max = String(state.max.max);
+      if (state.max?.step !== undefined) this._heightBrushMaxSlider.step = String(state.max.step);
+      if (state.max?.value !== undefined) {
+        const nextMax = String(state.max.value);
+        if (this._heightBrushMaxSlider.value !== nextMax) this._heightBrushMaxSlider.value = nextMax;
+      }
+      this._applyDefaultValue(this._heightBrushMaxSlider, state.max?.defaultValue);
+      this._heightBrushMaxSlider.disabled = !!state.max?.disabled || !!state.disabled;
+    }
+    if (this._heightBrushContrastSlider) {
+      if (state.contrast?.min !== undefined) this._heightBrushContrastSlider.min = String(state.contrast.min);
+      if (state.contrast?.max !== undefined) this._heightBrushContrastSlider.max = String(state.contrast.max);
+      if (state.contrast?.step !== undefined) this._heightBrushContrastSlider.step = String(state.contrast.step);
+      if (state.contrast?.value !== undefined) {
+        const nextContrast = String(state.contrast.value);
+        if (this._heightBrushContrastSlider.value !== nextContrast) this._heightBrushContrastSlider.value = nextContrast;
+      }
+      this._applyDefaultValue(this._heightBrushContrastSlider, state.contrast?.defaultValue);
+      this._heightBrushContrastSlider.disabled = !!state.contrast?.disabled || !!state.disabled;
+    }
+    if (this._heightBrushLiftSlider) {
+      if (state.lift?.min !== undefined) this._heightBrushLiftSlider.min = String(state.lift.min);
+      if (state.lift?.max !== undefined) this._heightBrushLiftSlider.max = String(state.lift.max);
+      if (state.lift?.step !== undefined) this._heightBrushLiftSlider.step = String(state.lift.step);
+      if (state.lift?.value !== undefined) {
+        const nextLift = String(state.lift.value);
+        if (this._heightBrushLiftSlider.value !== nextLift) this._heightBrushLiftSlider.value = nextLift;
+      }
+      this._applyDefaultValue(this._heightBrushLiftSlider, state.lift?.defaultValue);
+      this._heightBrushLiftSlider.disabled = !!state.lift?.disabled || !!state.disabled;
+    }
+    if (this._heightBrushMinDisplay) {
+      this._syncDisplayValue(this._heightBrushMinDisplay, state.min || {});
+    }
+    if (this._heightBrushMaxDisplay) {
+      this._syncDisplayValue(this._heightBrushMaxDisplay, state.max || {});
+    }
+    if (this._heightBrushContrastDisplay) {
+      this._syncDisplayValue(this._heightBrushContrastDisplay, state.contrast || {});
+    }
+    if (this._heightBrushLiftDisplay) {
+      this._syncDisplayValue(this._heightBrushLiftDisplay, state.lift || {});
     }
   }
 
@@ -2466,10 +3473,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextValue = String(state.value);
         if (this._textureLayerSlider.value !== nextValue) this._textureLayerSlider.value = nextValue;
       }
+      this._applyDefaultValue(this._textureLayerSlider, state.defaultValue);
     }
     if (this._textureLayerDisplay) {
-      const display = state.display || '';
-      if (this._textureLayerDisplay.textContent !== display) this._textureLayerDisplay.textContent = display;
+      this._syncDisplayValue(this._textureLayerDisplay, state);
     }
   }
 
@@ -2489,6 +3496,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextX = String(state.x.value);
         if (this._textureOffsetXSlider.value !== nextX) this._textureOffsetXSlider.value = nextX;
       }
+      this._applyDefaultValue(this._textureOffsetXSlider, state.x?.defaultValue);
       this._textureOffsetXSlider.disabled = !!state.x?.disabled || !!state.disabled;
     }
     if (this._textureOffsetYSlider) {
@@ -2499,15 +3507,14 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextY = String(state.y.value);
         if (this._textureOffsetYSlider.value !== nextY) this._textureOffsetYSlider.value = nextY;
       }
+      this._applyDefaultValue(this._textureOffsetYSlider, state.y?.defaultValue);
       this._textureOffsetYSlider.disabled = !!state.y?.disabled || !!state.disabled;
     }
     if (this._textureOffsetXDisplay) {
-      const text = state.x?.display || '';
-      if (this._textureOffsetXDisplay.textContent !== text) this._textureOffsetXDisplay.textContent = text;
+      this._syncDisplayValue(this._textureOffsetXDisplay, state.x || {}, { disabled: state.disabled });
     }
     if (this._textureOffsetYDisplay) {
-      const text = state.y?.display || '';
-      if (this._textureOffsetYDisplay.textContent !== text) this._textureOffsetYDisplay.textContent = text;
+      this._syncDisplayValue(this._textureOffsetYDisplay, state.y || {}, { disabled: state.disabled });
     }
   }
 
@@ -2516,6 +3523,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._bindPathScaleControl();
     this._bindPathOffsetControls();
     this._bindPathTensionControls();
+    this._bindPathSimplifyControls();
     this._bindShowWidthTangentsControls();
     this._syncPathAppearanceControls();
   }
@@ -2525,6 +3533,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._unbindPathScaleControl();
     this._unbindPathOffsetControls();
     this._unbindPathTensionControls();
+    this._unbindPathSimplifyControls();
     this._unbindShowWidthTangentsControls();
   }
 
@@ -2533,6 +3542,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._syncPathScaleControl();
     this._syncPathOffsetControls();
     this._syncPathTensionControls();
+    this._syncPathSimplifyControls();
     this._syncShowWidthTangentsControls();
   }
 
@@ -2562,6 +3572,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._fillTextureOffsetXDisplay = root.querySelector('[data-fa-nexus-fill-offset-x-display]') || null;
     this._fillTextureOffsetYDisplay = root.querySelector('[data-fa-nexus-fill-offset-y-display]') || null;
+    this._bindDisplayInput(this._fillTextureOffsetXDisplay, this._boundFillTextureOffsetXInput, this._boundFillTextureOffsetXCommit);
+    this._bindDisplayInput(this._fillTextureOffsetYDisplay, this._boundFillTextureOffsetYInput, this._boundFillTextureOffsetYCommit);
     this._syncFillTextureControls();
   }
 
@@ -2578,6 +3590,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._fillTextureOffsetYSlider.removeEventListener('change', this._boundFillTextureOffsetYCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._fillTextureOffsetXDisplay, this._boundFillTextureOffsetXInput, this._boundFillTextureOffsetXCommit);
+    this._unbindDisplayInput(this._fillTextureOffsetYDisplay, this._boundFillTextureOffsetYInput, this._boundFillTextureOffsetYCommit);
     this._fillTextureOffsetRoot = null;
     this._fillTextureOffsetXSlider = null;
     this._fillTextureOffsetYSlider = null;
@@ -2601,6 +3615,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextX = String(state.x.value);
         if (this._fillTextureOffsetXSlider.value !== nextX) this._fillTextureOffsetXSlider.value = nextX;
       }
+      this._applyDefaultValue(this._fillTextureOffsetXSlider, state.x?.defaultValue);
       this._fillTextureOffsetXSlider.disabled = !!state.x?.disabled || !!state.disabled;
     }
     if (this._fillTextureOffsetYSlider) {
@@ -2611,15 +3626,14 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextY = String(state.y.value);
         if (this._fillTextureOffsetYSlider.value !== nextY) this._fillTextureOffsetYSlider.value = nextY;
       }
+      this._applyDefaultValue(this._fillTextureOffsetYSlider, state.y?.defaultValue);
       this._fillTextureOffsetYSlider.disabled = !!state.y?.disabled || !!state.disabled;
     }
     if (this._fillTextureOffsetXDisplay) {
-      const text = state.x?.display || '';
-      if (this._fillTextureOffsetXDisplay.textContent !== text) this._fillTextureOffsetXDisplay.textContent = text;
+      this._syncDisplayValue(this._fillTextureOffsetXDisplay, state.x || {}, { disabled: state.disabled });
     }
     if (this._fillTextureOffsetYDisplay) {
-      const text = state.y?.display || '';
-      if (this._fillTextureOffsetYDisplay.textContent !== text) this._fillTextureOffsetYDisplay.textContent = text;
+      this._syncDisplayValue(this._fillTextureOffsetYDisplay, state.y || {}, { disabled: state.disabled });
     }
   }
 
@@ -2705,6 +3719,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(state.value);
         if (this._fillElevationInput.value !== next) this._fillElevationInput.value = next;
       }
+      this._applyDefaultValue(this._fillElevationInput, state.defaultValue);
       this._fillElevationInput.disabled = !!state.disabled;
     }
     if (this._fillElevationDisplay) {
@@ -2727,6 +3742,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._pathOpacitySlider = slider;
     this._pathOpacityDisplay = root.querySelector('[data-fa-nexus-path-opacity-display]') || null;
+    this._bindDisplayInput(this._pathOpacityDisplay, this._boundPathOpacityInput, this._boundPathOpacityCommit);
   }
 
   _unbindPathOpacityControl() {
@@ -2734,6 +3750,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       try { this._pathOpacitySlider.removeEventListener('input', this._boundPathOpacityInput); } catch (_) {}
       try { this._pathOpacitySlider.removeEventListener('change', this._boundPathOpacityCommit); } catch (_) {}
     }
+    this._unbindDisplayInput(this._pathOpacityDisplay, this._boundPathOpacityInput, this._boundPathOpacityCommit);
     this._pathOpacityRoot = null;
     this._pathOpacitySlider = null;
     this._pathOpacityDisplay = null;
@@ -2755,11 +3772,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(state.value);
         if (this._pathOpacitySlider.value !== next) this._pathOpacitySlider.value = next;
       }
+      this._applyDefaultValue(this._pathOpacitySlider, state.defaultValue);
       this._pathOpacitySlider.disabled = !!state.disabled;
     }
     if (this._pathOpacityDisplay) {
-      const text = state.display || '';
-      if (this._pathOpacityDisplay.textContent !== text) this._pathOpacityDisplay.textContent = text;
+      this._syncDisplayValue(this._pathOpacityDisplay, state);
     }
   }
 
@@ -2793,6 +3810,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._pathScaleSlider = slider;
     this._pathScaleDisplay = root.querySelector('[data-fa-nexus-path-scale-display]') || null;
+    this._bindDisplayInput(this._pathScaleDisplay, this._boundPathScaleInput, this._boundPathScaleCommit);
   }
 
   _unbindPathScaleControl() {
@@ -2801,6 +3819,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       try { this._pathScaleSlider.removeEventListener('change', this._boundPathScaleCommit); } catch (_) {}
       try { this._pathScaleSlider.removeEventListener('wheel', this._boundPathScaleWheel); } catch (_) {}
     }
+    this._unbindDisplayInput(this._pathScaleDisplay, this._boundPathScaleInput, this._boundPathScaleCommit);
     this._pathScaleRoot = null;
     this._pathScaleSlider = null;
     this._pathScaleDisplay = null;
@@ -2822,11 +3841,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(state.value);
         if (this._pathScaleSlider.value !== next) this._pathScaleSlider.value = next;
       }
+      this._applyDefaultValue(this._pathScaleSlider, state.defaultValue);
       this._pathScaleSlider.disabled = !!state.disabled;
     }
     if (this._pathScaleDisplay) {
-      const text = state.display || '';
-      if (this._pathScaleDisplay.textContent !== text) this._pathScaleDisplay.textContent = text;
+      this._syncDisplayValue(this._pathScaleDisplay, state);
     }
   }
 
@@ -2925,6 +3944,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._pathOffsetYSlider = ySlider;
     this._pathOffsetXDisplay = root.querySelector('[data-fa-nexus-path-offset-x-display]') || null;
     this._pathOffsetYDisplay = root.querySelector('[data-fa-nexus-path-offset-y-display]') || null;
+    this._bindDisplayInput(this._pathOffsetXDisplay, this._boundPathOffsetXInput, this._boundPathOffsetXCommit);
+    this._bindDisplayInput(this._pathOffsetYDisplay, this._boundPathOffsetYInput, this._boundPathOffsetYCommit);
   }
 
   _unbindPathOffsetControls() {
@@ -2936,6 +3957,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       try { this._pathOffsetYSlider.removeEventListener('input', this._boundPathOffsetYInput); } catch (_) {}
       try { this._pathOffsetYSlider.removeEventListener('change', this._boundPathOffsetYCommit); } catch (_) {}
     }
+    this._unbindDisplayInput(this._pathOffsetXDisplay, this._boundPathOffsetXInput, this._boundPathOffsetXCommit);
+    this._unbindDisplayInput(this._pathOffsetYDisplay, this._boundPathOffsetYInput, this._boundPathOffsetYCommit);
     this._pathOffsetRoot = null;
     this._pathOffsetXSlider = null;
     this._pathOffsetYSlider = null;
@@ -2960,6 +3983,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(x.value);
         if (this._pathOffsetXSlider.value !== next) this._pathOffsetXSlider.value = next;
       }
+      this._applyDefaultValue(this._pathOffsetXSlider, x.defaultValue);
       this._pathOffsetXSlider.disabled = !!x.disabled || !!state.disabled;
     }
     if (this._pathOffsetYSlider) {
@@ -2971,15 +3995,14 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(y.value);
         if (this._pathOffsetYSlider.value !== next) this._pathOffsetYSlider.value = next;
       }
+      this._applyDefaultValue(this._pathOffsetYSlider, y.defaultValue);
       this._pathOffsetYSlider.disabled = !!y.disabled || !!state.disabled;
     }
     if (this._pathOffsetXDisplay) {
-      const text = state.x?.display || '';
-      if (this._pathOffsetXDisplay.textContent !== text) this._pathOffsetXDisplay.textContent = text;
+      this._syncDisplayValue(this._pathOffsetXDisplay, state.x || {}, { disabled: state.disabled });
     }
     if (this._pathOffsetYDisplay) {
-      const text = state.y?.display || '';
-      if (this._pathOffsetYDisplay.textContent !== text) this._pathOffsetYDisplay.textContent = text;
+      this._syncDisplayValue(this._pathOffsetYDisplay, state.y || {}, { disabled: state.disabled });
     }
   }
 
@@ -3012,6 +4035,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._pathTensionSlider = slider;
     this._pathTensionDisplay = root.querySelector('[data-fa-nexus-path-tension-display]') || null;
+    this._bindDisplayInput(this._pathTensionDisplay, this._boundPathTensionInput, this._boundPathTensionCommit);
   }
 
   _unbindPathTensionControls() {
@@ -3019,6 +4043,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       try { this._pathTensionSlider.removeEventListener('input', this._boundPathTensionInput); } catch (_) {}
       try { this._pathTensionSlider.removeEventListener('change', this._boundPathTensionCommit); } catch (_) {}
     }
+    this._unbindDisplayInput(this._pathTensionDisplay, this._boundPathTensionInput, this._boundPathTensionCommit);
     this._pathTensionRoot = null;
     this._pathTensionSlider = null;
     this._pathTensionDisplay = null;
@@ -3040,11 +4065,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(state.value);
         if (this._pathTensionSlider.value !== next) this._pathTensionSlider.value = next;
       }
+      this._applyDefaultValue(this._pathTensionSlider, state.defaultValue);
       this._pathTensionSlider.disabled = !!state.disabled;
     }
     if (this._pathTensionDisplay) {
-      const text = state.display || '';
-      if (this._pathTensionDisplay.textContent !== text) this._pathTensionDisplay.textContent = text;
+      this._syncDisplayValue(this._pathTensionDisplay, state);
     }
   }
 
@@ -3060,6 +4085,73 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       else this._syncPathTensionControls();
     } catch (_) {
       this._syncPathTensionControls();
+    }
+  }
+
+  _bindPathSimplifyControls() {
+    const root = this.element?.querySelector('[data-fa-nexus-path-simplify-root]') || null;
+    if (!root) {
+      this._unbindPathSimplifyControls();
+      return;
+    }
+    this._pathSimplifyRoot = root;
+    const slider = root.querySelector('[data-fa-nexus-path-simplify]') || null;
+    if (slider) {
+      slider.addEventListener('input', this._boundPathSimplifyInput);
+      slider.addEventListener('change', this._boundPathSimplifyCommit);
+    }
+    this._pathSimplifySlider = slider;
+    this._pathSimplifyDisplay = root.querySelector('[data-fa-nexus-path-simplify-display]') || null;
+    this._bindDisplayInput(this._pathSimplifyDisplay, this._boundPathSimplifyInput, this._boundPathSimplifyCommit);
+  }
+
+  _unbindPathSimplifyControls() {
+    if (this._pathSimplifySlider) {
+      try { this._pathSimplifySlider.removeEventListener('input', this._boundPathSimplifyInput); } catch (_) {}
+      try { this._pathSimplifySlider.removeEventListener('change', this._boundPathSimplifyCommit); } catch (_) {}
+    }
+    this._unbindDisplayInput(this._pathSimplifyDisplay, this._boundPathSimplifyInput, this._boundPathSimplifyCommit);
+    this._pathSimplifyRoot = null;
+    this._pathSimplifySlider = null;
+    this._pathSimplifyDisplay = null;
+  }
+
+  _syncPathSimplifyControls() {
+    if (!this._pathSimplifyRoot) return;
+    const state = this._toolOptionState?.pathAppearance?.freehandSimplify || { available: false };
+    if (!state.available) {
+      this._pathSimplifyRoot.hidden = true;
+      return;
+    }
+    this._pathSimplifyRoot.hidden = false;
+    if (this._pathSimplifySlider) {
+      if (state.min !== undefined) this._pathSimplifySlider.min = String(state.min);
+      if (state.max !== undefined) this._pathSimplifySlider.max = String(state.max);
+      if (state.step !== undefined) this._pathSimplifySlider.step = String(state.step);
+      if (state.value !== undefined) {
+        const next = String(state.value);
+        if (this._pathSimplifySlider.value !== next) this._pathSimplifySlider.value = next;
+      }
+      this._applyDefaultValue(this._pathSimplifySlider, state.defaultValue);
+      this._pathSimplifySlider.disabled = !!state.disabled;
+    }
+    if (this._pathSimplifyDisplay) {
+      this._syncDisplayValue(this._pathSimplifyDisplay, state);
+    }
+  }
+
+  _handlePathSimplify(event, commit) {
+    const slider = event?.currentTarget || event?.target;
+    if (!slider) return;
+    const value = slider.value;
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('setFreehandSimplify', value, !!commit);
+      if (result?.then) result.catch(() => {}).finally(() => this._syncPathSimplifyControls());
+      else this._syncPathSimplifyControls();
+    } catch (_) {
+      this._syncPathSimplifyControls();
     }
   }
 
@@ -3325,6 +4417,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._scaleRoot = root;
     this._scaleDisplay = root.querySelector('[data-fa-nexus-scale-display]') || null;
+    this._bindDisplayInput(this._scaleDisplay, this._boundScaleInput, this._boundScaleInput);
 
     const baseSlider = root.querySelector('[data-fa-nexus-scale-base]');
     if (baseSlider) {
@@ -3349,6 +4442,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._scaleStrengthSlider = strengthSlider;
     }
     this._scaleStrengthDisplay = root.querySelector('[data-fa-nexus-scale-strength-label]') || null;
+    this._bindDisplayInput(this._scaleStrengthDisplay, this._boundScaleStrength, this._boundScaleStrength);
 
     this._syncScaleControls();
   }
@@ -3366,6 +4460,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._scaleStrengthSlider.removeEventListener('change', this._boundScaleStrength);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._scaleDisplay, this._boundScaleInput, this._boundScaleInput);
+    this._unbindDisplayInput(this._scaleStrengthDisplay, this._boundScaleStrength, this._boundScaleStrength);
     if (this._scaleRandomButton) {
       try { this._scaleRandomButton.removeEventListener('click', this._boundScaleRandom); }
       catch (_) {}
@@ -3383,8 +4479,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (!this._scaleRoot) return;
     const state = this._toolOptionState?.scale || {};
     if (this._scaleDisplay) {
-      const text = state.display || '';
-      if (this._scaleDisplay.textContent !== text) this._scaleDisplay.textContent = text;
+      this._syncDisplayValue(this._scaleDisplay, state);
     }
     if (this._scaleBaseSlider) {
       if (state.min !== undefined) this._scaleBaseSlider.min = String(state.min);
@@ -3394,6 +4489,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextValue = String(state.value);
         if (this._scaleBaseSlider.value !== nextValue) this._scaleBaseSlider.value = nextValue;
       }
+      this._applyDefaultValue(this._scaleBaseSlider, state.defaultValue);
       this._scaleBaseSlider.disabled = !!state.disabled;
     }
     const randomVisible = state.randomButtonVisible !== false;
@@ -3423,11 +4519,18 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextStrength = String(state.strength);
         if (this._scaleStrengthSlider.value !== nextStrength) this._scaleStrengthSlider.value = nextStrength;
       }
+      this._applyDefaultValue(this._scaleStrengthSlider, state.strengthDefault);
       this._scaleStrengthSlider.disabled = !strengthVisible;
     }
     if (this._scaleStrengthDisplay) {
-      const text = state.strengthDisplay || '';
-      if (this._scaleStrengthDisplay.textContent !== text) this._scaleStrengthDisplay.textContent = text;
+      this._syncDisplayValue(this._scaleStrengthDisplay, {
+        min: state.strengthMin,
+        max: state.strengthMax,
+        step: state.strengthStep,
+        value: state.strength,
+        display: state.strengthDisplay || '',
+        defaultValue: state.strengthDefault
+      });
     }
   }
 
@@ -3502,6 +4605,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._rotationRoot = root;
     this._rotationDisplay = root.querySelector('[data-fa-nexus-rotation-display]') || null;
+    this._bindDisplayInput(this._rotationDisplay, this._boundRotationInput, this._boundRotationInput);
 
     const baseSlider = root.querySelector('[data-fa-nexus-rotation-base]');
     if (baseSlider) {
@@ -3525,6 +4629,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._rotationStrengthSlider = strengthSlider;
     }
     this._rotationStrengthDisplay = root.querySelector('[data-fa-nexus-rotation-strength-label]') || null;
+    this._bindDisplayInput(this._rotationStrengthDisplay, this._boundRotationStrength, this._boundRotationStrength);
 
     this._syncRotationControls();
   }
@@ -3542,6 +4647,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._rotationStrengthSlider.removeEventListener('change', this._boundRotationStrength);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._rotationDisplay, this._boundRotationInput, this._boundRotationInput);
+    this._unbindDisplayInput(this._rotationStrengthDisplay, this._boundRotationStrength, this._boundRotationStrength);
     if (this._rotationRandomButton) {
       try { this._rotationRandomButton.removeEventListener('click', this._boundRotationRandom); }
       catch (_) {}
@@ -3559,8 +4666,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (!this._rotationRoot) return;
     const state = this._toolOptionState?.rotation || {};
     if (this._rotationDisplay) {
-      const text = state.display || '';
-      if (this._rotationDisplay.textContent !== text) this._rotationDisplay.textContent = text;
+      this._syncDisplayValue(this._rotationDisplay, state);
     }
     if (this._rotationBaseSlider) {
       if (state.min !== undefined) this._rotationBaseSlider.min = String(state.min);
@@ -3570,6 +4676,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextValue = String(state.value);
         if (this._rotationBaseSlider.value !== nextValue) this._rotationBaseSlider.value = nextValue;
       }
+      this._applyDefaultValue(this._rotationBaseSlider, state.defaultValue);
       this._rotationBaseSlider.disabled = !!state.disabled;
     }
     const randomVisible = state.randomButtonVisible !== false;
@@ -3599,11 +4706,18 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const nextStrength = String(state.strength);
         if (this._rotationStrengthSlider.value !== nextStrength) this._rotationStrengthSlider.value = nextStrength;
       }
+      this._applyDefaultValue(this._rotationStrengthSlider, state.strengthDefault);
       this._rotationStrengthSlider.disabled = !strengthVisible;
     }
     if (this._rotationStrengthDisplay) {
-      const text = state.strengthDisplay || '';
-      if (this._rotationStrengthDisplay.textContent !== text) this._rotationStrengthDisplay.textContent = text;
+      this._syncDisplayValue(this._rotationStrengthDisplay, {
+        min: state.strengthMin,
+        max: state.strengthMax,
+        step: state.strengthStep,
+        value: state.strength,
+        display: state.strengthDisplay || '',
+        defaultValue: state.strengthDefault
+      });
     }
   }
 
@@ -3660,6 +4774,9 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       editToggle.addEventListener('change', this._boundPathShadowEditToggle);
       this._pathShadowEditToggle = editToggle;
     }
+    this._pathShadowEditRoot = root.querySelector('[data-fa-nexus-path-shadow-edit-row]')
+      || root.querySelector('[data-fa-nexus-path-shadow-edit-root]')
+      || (editToggle ? editToggle.closest('label') : null);
     this._pathShadowPresetsRoot = root.querySelector('[data-fa-nexus-path-shadow-presets]') || null;
     if (this._pathShadowPresetsRoot) {
       this._pathShadowPresetButtons = Array.from(this._pathShadowPresetsRoot.querySelectorAll('[data-fa-nexus-path-shadow-preset]'));
@@ -3673,6 +4790,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._pathShadowResetButton = root.querySelector('[data-fa-nexus-path-shadow-reset]') || null;
     if (this._pathShadowResetButton) {
       this._pathShadowResetButton.addEventListener('click', this._boundPathShadowReset);
+    }
+    this._pathShadowEditResetButton = root.querySelector('[data-fa-nexus-path-shadow-edit-reset]') || null;
+    if (this._pathShadowEditResetButton) {
+      this._pathShadowEditResetButton.addEventListener('click', this._boundPathShadowEditReset);
     }
     this._pathShadowElevationDisplay = root.querySelector('[data-fa-nexus-path-shadow-elevation]') || null;
     this._pathShadowNoteDisplay = root.querySelector('[data-fa-nexus-path-shadow-note]') || null;
@@ -3711,6 +4832,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._pathShadowAlphaDisplay = root.querySelector('[data-fa-nexus-path-shadow-alpha-display]') || null;
     this._pathShadowBlurDisplay = root.querySelector('[data-fa-nexus-path-shadow-blur-display]') || null;
     this._pathShadowDilationDisplay = root.querySelector('[data-fa-nexus-path-shadow-dilation-display]') || null;
+    this._bindDisplayInput(this._pathShadowScaleDisplay, this._boundPathShadowScaleInput, this._boundPathShadowScaleCommit);
+    this._bindDisplayInput(this._pathShadowOffsetDisplay, this._boundPathShadowOffsetInput, this._boundPathShadowOffsetCommit);
+    this._bindDisplayInput(this._pathShadowAlphaDisplay, this._boundPathShadowAlphaInput, this._boundPathShadowAlphaCommit);
+    this._bindDisplayInput(this._pathShadowBlurDisplay, this._boundPathShadowBlurInput, this._boundPathShadowBlurCommit);
+    this._bindDisplayInput(this._pathShadowDilationDisplay, this._boundPathShadowDilationInput, this._boundPathShadowDilationCommit);
     this._syncPathShadowControls();
   }
 
@@ -3731,6 +4857,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     if (this._pathShadowResetButton) {
       try { this._pathShadowResetButton.removeEventListener('click', this._boundPathShadowReset); }
+      catch (_) {}
+    }
+    if (this._pathShadowEditResetButton) {
+      try { this._pathShadowEditResetButton.removeEventListener('click', this._boundPathShadowEditReset); }
       catch (_) {}
     }
     if (this._pathShadowScaleSlider) {
@@ -3763,12 +4893,19 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._pathShadowDilationSlider.removeEventListener('change', this._boundPathShadowDilationCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._pathShadowScaleDisplay, this._boundPathShadowScaleInput, this._boundPathShadowScaleCommit);
+    this._unbindDisplayInput(this._pathShadowOffsetDisplay, this._boundPathShadowOffsetInput, this._boundPathShadowOffsetCommit);
+    this._unbindDisplayInput(this._pathShadowAlphaDisplay, this._boundPathShadowAlphaInput, this._boundPathShadowAlphaCommit);
+    this._unbindDisplayInput(this._pathShadowBlurDisplay, this._boundPathShadowBlurInput, this._boundPathShadowBlurCommit);
+    this._unbindDisplayInput(this._pathShadowDilationDisplay, this._boundPathShadowDilationInput, this._boundPathShadowDilationCommit);
     this._pathShadowRoot = null;
     this._pathShadowToggle = null;
     this._pathShadowEditToggle = null;
+    this._pathShadowEditRoot = null;
     this._pathShadowPresetsRoot = null;
     this._pathShadowPresetButtons = [];
     this._pathShadowResetButton = null;
+    this._pathShadowEditResetButton = null;
     this._pathShadowScaleSlider = null;
     this._pathShadowOffsetSlider = null;
     this._pathShadowAlphaSlider = null;
@@ -3789,13 +4926,17 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._pathShadowRoot.classList.toggle('is-hidden', !state.available);
     }
     if (!state.available) return;
+    const editAvailable = state.editAvailable !== false;
+    if (this._pathShadowEditRoot) {
+      this._pathShadowEditRoot.classList.toggle('is-hidden', !editAvailable);
+    }
     if (this._pathShadowToggle) {
       this._pathShadowToggle.checked = !!state.enabled;
       this._pathShadowToggle.disabled = !!state.disabled;
     }
     if (this._pathShadowEditToggle) {
       this._pathShadowEditToggle.checked = !!state.editMode;
-      this._pathShadowEditToggle.disabled = !state.enabled || !!state.editDisabled;
+      this._pathShadowEditToggle.disabled = !state.enabled || !!state.editDisabled || !editAvailable;
     }
     if (this._pathShadowElevationDisplay) {
       const displayValue = state.context?.display ?? '0';
@@ -3835,6 +4976,12 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       const tooltip = state.reset?.tooltip;
       if (tooltip && tooltip.length) this._pathShadowResetButton.title = tooltip;
     }
+    if (this._pathShadowEditResetButton) {
+      const disabled = !!state.editReset?.disabled;
+      this._pathShadowEditResetButton.disabled = disabled;
+      const tooltip = state.editReset?.tooltip;
+      if (tooltip && tooltip.length) this._pathShadowEditResetButton.title = tooltip;
+    }
     if (this._pathShadowScaleSlider && state.scale) {
       const cfg = state.scale;
       if (cfg.min !== undefined) this._pathShadowScaleSlider.min = String(cfg.min);
@@ -3845,8 +4992,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         if (this._pathShadowScaleSlider.value !== next) this._pathShadowScaleSlider.value = next;
       }
       this._pathShadowScaleSlider.disabled = !!cfg.disabled;
-      if (this._pathShadowScaleDisplay && cfg.display !== undefined) {
-        this._pathShadowScaleDisplay.textContent = String(cfg.display);
+      if (this._pathShadowScaleDisplay) {
+        this._syncDisplayValue(this._pathShadowScaleDisplay, cfg);
       }
     }
     if (this._pathShadowOffsetSlider && state.offset) {
@@ -3859,8 +5006,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         if (this._pathShadowOffsetSlider.value !== next) this._pathShadowOffsetSlider.value = next;
       }
       this._pathShadowOffsetSlider.disabled = !!cfg.disabled;
-      if (this._pathShadowOffsetDisplay && cfg.display !== undefined) {
-        this._pathShadowOffsetDisplay.textContent = String(cfg.display);
+      if (this._pathShadowOffsetDisplay) {
+        this._syncDisplayValue(this._pathShadowOffsetDisplay, cfg);
       }
     }
     if (this._pathShadowAlphaSlider && state.alpha) {
@@ -3873,8 +5020,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         if (this._pathShadowAlphaSlider.value !== next) this._pathShadowAlphaSlider.value = next;
       }
       this._pathShadowAlphaSlider.disabled = !!cfg.disabled;
-      if (this._pathShadowAlphaDisplay && cfg.display !== undefined) {
-        this._pathShadowAlphaDisplay.textContent = String(cfg.display);
+      if (this._pathShadowAlphaDisplay) {
+        this._syncDisplayValue(this._pathShadowAlphaDisplay, cfg);
       }
     }
     if (this._pathShadowBlurSlider && state.blur) {
@@ -3887,8 +5034,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         if (this._pathShadowBlurSlider.value !== next) this._pathShadowBlurSlider.value = next;
       }
       this._pathShadowBlurSlider.disabled = !!cfg.disabled;
-      if (this._pathShadowBlurDisplay && cfg.display !== undefined) {
-        this._pathShadowBlurDisplay.textContent = String(cfg.display);
+      if (this._pathShadowBlurDisplay) {
+        this._syncDisplayValue(this._pathShadowBlurDisplay, cfg);
       }
     }
     if (this._pathShadowDilationSlider && state.dilation) {
@@ -3901,8 +5048,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         if (this._pathShadowDilationSlider.value !== next) this._pathShadowDilationSlider.value = next;
       }
       this._pathShadowDilationSlider.disabled = !!cfg.disabled;
-      if (this._pathShadowDilationDisplay && cfg.display !== undefined) {
-        this._pathShadowDilationDisplay.textContent = String(cfg.display);
+      if (this._pathShadowDilationDisplay) {
+        this._syncDisplayValue(this._pathShadowDilationDisplay, cfg);
       }
     }
   }
@@ -3996,6 +5143,25 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
   }
 
+  _handlePathShadowEditReset(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const controller = this._controller;
+    if (!controller?.invokeToolHandler) return;
+    try {
+      const result = controller.invokeToolHandler('resetPathShadowEdit');
+      if (result?.then) {
+        result.catch(() => {}).finally(() => this._syncPathShadowControls());
+      } else {
+        this._syncPathShadowControls();
+      }
+    } catch (_) {
+      this._syncPathShadowControls();
+    }
+  }
+
   _bindPathFeatherControls() {
     const root = this.element?.querySelector('[data-fa-nexus-path-feather]') || null;
     if (!root) {
@@ -4025,6 +5191,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._pathFeatherStartValue = root.querySelector('[data-fa-nexus-feather-start-display]') || null;
     this._pathFeatherEndValue = root.querySelector('[data-fa-nexus-feather-end-display]') || null;
+    this._bindDisplayInput(this._pathFeatherStartValue, this._boundPathFeatherStartInput, this._boundPathFeatherStartCommit);
+    this._bindDisplayInput(this._pathFeatherEndValue, this._boundPathFeatherEndInput, this._boundPathFeatherEndCommit);
     this._pathFeatherHint = root.querySelector('[data-fa-nexus-feather-hint]') || null;
     this._syncPathFeatherControls();
   }
@@ -4050,6 +5218,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._pathFeatherEndSlider.removeEventListener('change', this._boundPathFeatherEndCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._pathFeatherStartValue, this._boundPathFeatherStartInput, this._boundPathFeatherStartCommit);
+    this._unbindDisplayInput(this._pathFeatherEndValue, this._boundPathFeatherEndInput, this._boundPathFeatherEndCommit);
     this._pathFeatherRoot = null;
     this._pathFeatherStartToggle = null;
     this._pathFeatherEndToggle = null;
@@ -4081,9 +5251,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(length.value);
         if (this._pathFeatherStartSlider.value !== next) this._pathFeatherStartSlider.value = next;
       }
+      this._applyDefaultValue(this._pathFeatherStartSlider, length.defaultValue);
       this._pathFeatherStartSlider.disabled = !!length.disabled;
-      if (this._pathFeatherStartValue && length.display !== undefined) {
-        this._pathFeatherStartValue.textContent = String(length.display);
+      if (this._pathFeatherStartValue) {
+        this._syncDisplayValue(this._pathFeatherStartValue, length);
       }
     }
     if (this._pathFeatherEndSlider && state.end?.length) {
@@ -4095,9 +5266,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(length.value);
         if (this._pathFeatherEndSlider.value !== next) this._pathFeatherEndSlider.value = next;
       }
+      this._applyDefaultValue(this._pathFeatherEndSlider, length.defaultValue);
       this._pathFeatherEndSlider.disabled = !!length.disabled;
-      if (this._pathFeatherEndValue && length.display !== undefined) {
-        this._pathFeatherEndValue.textContent = String(length.display);
+      if (this._pathFeatherEndValue) {
+        this._syncDisplayValue(this._pathFeatherEndValue, length);
       }
     }
     if (this._pathFeatherHint) {
@@ -4154,6 +5326,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     this._opacityFeatherStartValue = root.querySelector('[data-fa-nexus-opacity-start-display]') || null;
     this._opacityFeatherEndValue = root.querySelector('[data-fa-nexus-opacity-end-display]') || null;
+    this._bindDisplayInput(this._opacityFeatherStartValue, this._boundOpacityFeatherStartInput, this._boundOpacityFeatherStartCommit);
+    this._bindDisplayInput(this._opacityFeatherEndValue, this._boundOpacityFeatherEndInput, this._boundOpacityFeatherEndCommit);
     this._opacityFeatherHint = root.querySelector('[data-fa-nexus-opacity-hint]') || null;
     this._syncOpacityFeatherControls();
   }
@@ -4179,6 +5353,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         this._opacityFeatherEndSlider.removeEventListener('change', this._boundOpacityFeatherEndCommit);
       } catch (_) {}
     }
+    this._unbindDisplayInput(this._opacityFeatherStartValue, this._boundOpacityFeatherStartInput, this._boundOpacityFeatherStartCommit);
+    this._unbindDisplayInput(this._opacityFeatherEndValue, this._boundOpacityFeatherEndInput, this._boundOpacityFeatherEndCommit);
     this._opacityFeatherRoot = null;
     this._opacityFeatherStartToggle = null;
     this._opacityFeatherEndToggle = null;
@@ -4210,9 +5386,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(length.value);
         if (this._opacityFeatherStartSlider.value !== next) this._opacityFeatherStartSlider.value = next;
       }
+      this._applyDefaultValue(this._opacityFeatherStartSlider, length.defaultValue);
       this._opacityFeatherStartSlider.disabled = !state.start.enabled || !!length.disabled;
-      if (this._opacityFeatherStartValue && length.display !== undefined) {
-        this._opacityFeatherStartValue.textContent = String(length.display);
+      if (this._opacityFeatherStartValue) {
+        this._syncDisplayValue(this._opacityFeatherStartValue, length, { disabled: !state.start.enabled });
       }
     }
     if (this._opacityFeatherEndSlider && state.end?.length) {
@@ -4224,9 +5401,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         const next = String(length.value);
         if (this._opacityFeatherEndSlider.value !== next) this._opacityFeatherEndSlider.value = next;
       }
+      this._applyDefaultValue(this._opacityFeatherEndSlider, length.defaultValue);
       this._opacityFeatherEndSlider.disabled = !state.end.enabled || !!length.disabled;
-      if (this._opacityFeatherEndValue && length.display !== undefined) {
-        this._opacityFeatherEndValue.textContent = String(length.display);
+      if (this._opacityFeatherEndValue) {
+        this._syncDisplayValue(this._opacityFeatherEndValue, length, { disabled: !state.end.enabled });
       }
     }
     if (this._opacityFeatherHint) {
@@ -4281,9 +5459,13 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
 
   _syncCustomToggles() {
     if (!this.element) return;
-    const stateList = Array.isArray(this._toolOptionState?.customToggles)
-      ? this._toolOptionState.customToggles
-      : [];
+    const stateList = [];
+    if (Array.isArray(this._toolOptionState?.customToggles)) {
+      stateList.push(...this._toolOptionState.customToggles);
+    }
+    if (Array.isArray(this._toolOptionState?.subtoolToggles)) {
+      stateList.push(...this._toolOptionState.subtoolToggles);
+    }
     const stateMap = new Map();
     for (const toggle of stateList) {
       if (!toggle || typeof toggle !== 'object') continue;
@@ -4468,6 +5650,17 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
           this._controller?.invokeToolHandler?.('setDoorFrameScale', val, true);
         });
       }
+      const frameScaleDisplay = root.querySelector('[data-fa-nexus-door-frame-scale-display]');
+      if (frameScaleDisplay) {
+        frameScaleDisplay.addEventListener('input', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameScale', val, false);
+        });
+        frameScaleDisplay.addEventListener('change', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameScale', val, true);
+        });
+      }
       const frameOffsetXSlider = root.querySelector('[data-fa-nexus-door-frame-offset-x]');
       if (frameOffsetXSlider) {
         frameOffsetXSlider.addEventListener('input', (ev) => {
@@ -4475,6 +5668,17 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
           this._controller?.invokeToolHandler?.('setDoorFrameOffsetX', val, false);
         });
         frameOffsetXSlider.addEventListener('change', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameOffsetX', val, true);
+        });
+      }
+      const frameOffsetXDisplay = root.querySelector('[data-fa-nexus-door-frame-offset-x-display]');
+      if (frameOffsetXDisplay) {
+        frameOffsetXDisplay.addEventListener('input', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameOffsetX', val, false);
+        });
+        frameOffsetXDisplay.addEventListener('change', (ev) => {
           const val = Number(ev.target.value);
           this._controller?.invokeToolHandler?.('setDoorFrameOffsetX', val, true);
         });
@@ -4490,6 +5694,17 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
           this._controller?.invokeToolHandler?.('setDoorFrameOffsetY', val, true);
         });
       }
+      const frameOffsetYDisplay = root.querySelector('[data-fa-nexus-door-frame-offset-y-display]');
+      if (frameOffsetYDisplay) {
+        frameOffsetYDisplay.addEventListener('input', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameOffsetY', val, false);
+        });
+        frameOffsetYDisplay.addEventListener('change', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameOffsetY', val, true);
+        });
+      }
       const frameRotationSlider = root.querySelector('[data-fa-nexus-door-frame-rotation]');
       if (frameRotationSlider) {
         frameRotationSlider.addEventListener('input', (ev) => {
@@ -4497,6 +5712,17 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
           this._controller?.invokeToolHandler?.('setDoorFrameRotation', val, false);
         });
         frameRotationSlider.addEventListener('change', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameRotation', val, true);
+        });
+      }
+      const frameRotationDisplay = root.querySelector('[data-fa-nexus-door-frame-rotation-display]');
+      if (frameRotationDisplay) {
+        frameRotationDisplay.addEventListener('input', (ev) => {
+          const val = Number(ev.target.value);
+          this._controller?.invokeToolHandler?.('setDoorFrameRotation', val, false);
+        });
+        frameRotationDisplay.addEventListener('change', (ev) => {
           const val = Number(ev.target.value);
           this._controller?.invokeToolHandler?.('setDoorFrameRotation', val, true);
         });
@@ -4560,20 +5786,104 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (frameSettings) {
       const scaleSlider = root.querySelector('[data-fa-nexus-door-frame-scale]');
       const scaleDisplay = root.querySelector('[data-fa-nexus-door-frame-scale-display]');
-      if (scaleSlider) scaleSlider.value = frameSettings.scale ?? 1;
-      if (scaleDisplay) scaleDisplay.textContent = frameSettings.scaleDisplay || '100%';
+      const scaleState = {
+        min: frameSettings.scaleMin,
+        max: frameSettings.scaleMax,
+        step: frameSettings.scaleStep,
+        value: frameSettings.scale ?? 1,
+        defaultValue: frameSettings.scaleDefault,
+        display: frameSettings.scaleDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (scaleSlider) {
+        if (scaleState.min !== undefined) scaleSlider.min = String(scaleState.min);
+        if (scaleState.max !== undefined) scaleSlider.max = String(scaleState.max);
+        if (scaleState.step !== undefined) scaleSlider.step = String(scaleState.step);
+        if (scaleState.value !== undefined) {
+          const next = String(scaleState.value);
+          if (scaleSlider.value !== next) scaleSlider.value = next;
+        }
+        this._applyDefaultValue(scaleSlider, scaleState.defaultValue);
+        scaleSlider.disabled = !!scaleState.disabled;
+      }
+      if (scaleDisplay) {
+        this._syncDisplayValue(scaleDisplay, scaleState, { disabled: scaleState.disabled });
+      }
       const offsetXSlider = root.querySelector('[data-fa-nexus-door-frame-offset-x]');
       const offsetXDisplay = root.querySelector('[data-fa-nexus-door-frame-offset-x-display]');
-      if (offsetXSlider) offsetXSlider.value = frameSettings.offsetX ?? 0;
-      if (offsetXDisplay) offsetXDisplay.textContent = frameSettings.offsetXDisplay || '0';
+      const offsetXState = {
+        min: frameSettings.offsetMin,
+        max: frameSettings.offsetMax,
+        step: frameSettings.offsetStep,
+        value: frameSettings.offsetX ?? 0,
+        defaultValue: frameSettings.offsetXDefault,
+        display: frameSettings.offsetXDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (offsetXSlider) {
+        if (offsetXState.min !== undefined) offsetXSlider.min = String(offsetXState.min);
+        if (offsetXState.max !== undefined) offsetXSlider.max = String(offsetXState.max);
+        if (offsetXState.step !== undefined) offsetXSlider.step = String(offsetXState.step);
+        if (offsetXState.value !== undefined) {
+          const next = String(offsetXState.value);
+          if (offsetXSlider.value !== next) offsetXSlider.value = next;
+        }
+        this._applyDefaultValue(offsetXSlider, offsetXState.defaultValue);
+        offsetXSlider.disabled = !!offsetXState.disabled;
+      }
+      if (offsetXDisplay) {
+        this._syncDisplayValue(offsetXDisplay, offsetXState, { disabled: offsetXState.disabled });
+      }
       const offsetYSlider = root.querySelector('[data-fa-nexus-door-frame-offset-y]');
       const offsetYDisplay = root.querySelector('[data-fa-nexus-door-frame-offset-y-display]');
-      if (offsetYSlider) offsetYSlider.value = frameSettings.offsetY ?? 0;
-      if (offsetYDisplay) offsetYDisplay.textContent = frameSettings.offsetYDisplay || '0';
+      const offsetYState = {
+        min: frameSettings.offsetMin,
+        max: frameSettings.offsetMax,
+        step: frameSettings.offsetStep,
+        value: frameSettings.offsetY ?? 0,
+        defaultValue: frameSettings.offsetYDefault,
+        display: frameSettings.offsetYDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (offsetYSlider) {
+        if (offsetYState.min !== undefined) offsetYSlider.min = String(offsetYState.min);
+        if (offsetYState.max !== undefined) offsetYSlider.max = String(offsetYState.max);
+        if (offsetYState.step !== undefined) offsetYSlider.step = String(offsetYState.step);
+        if (offsetYState.value !== undefined) {
+          const next = String(offsetYState.value);
+          if (offsetYSlider.value !== next) offsetYSlider.value = next;
+        }
+        this._applyDefaultValue(offsetYSlider, offsetYState.defaultValue);
+        offsetYSlider.disabled = !!offsetYState.disabled;
+      }
+      if (offsetYDisplay) {
+        this._syncDisplayValue(offsetYDisplay, offsetYState, { disabled: offsetYState.disabled });
+      }
       const rotationSlider = root.querySelector('[data-fa-nexus-door-frame-rotation]');
       const rotationDisplay = root.querySelector('[data-fa-nexus-door-frame-rotation-display]');
-      if (rotationSlider) rotationSlider.value = frameSettings.rotation ?? 0;
-      if (rotationDisplay) rotationDisplay.textContent = frameSettings.rotationDisplay || '0°';
+      const rotationState = {
+        min: frameSettings.rotationMin,
+        max: frameSettings.rotationMax,
+        step: frameSettings.rotationStep,
+        value: frameSettings.rotation ?? 0,
+        defaultValue: frameSettings.rotationDefault,
+        display: frameSettings.rotationDisplay || '',
+        disabled: !!state.disabled || !!frameSettings.rotationDisabled
+      };
+      if (rotationSlider) {
+        if (rotationState.min !== undefined) rotationSlider.min = String(rotationState.min);
+        if (rotationState.max !== undefined) rotationSlider.max = String(rotationState.max);
+        if (rotationState.step !== undefined) rotationSlider.step = String(rotationState.step);
+        if (rotationState.value !== undefined) {
+          const next = String(rotationState.value);
+          if (rotationSlider.value !== next) rotationSlider.value = next;
+        }
+        this._applyDefaultValue(rotationSlider, rotationState.defaultValue);
+        rotationSlider.disabled = !!rotationState.disabled;
+      }
+      if (rotationDisplay) {
+        this._syncDisplayValue(rotationDisplay, rotationState, { disabled: rotationState.disabled });
+      }
     }
   }
 
@@ -4615,15 +5925,30 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         sillScaleSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), false));
         sillScaleSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), true));
       }
+      const sillScaleDisplay = root.querySelector('[data-fa-nexus-window-sill-scale-display]');
+      if (sillScaleDisplay) {
+        sillScaleDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), false));
+        sillScaleDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), true));
+      }
       const sillOffsetXSlider = root.querySelector('[data-fa-nexus-window-sill-offset-x]');
       if (sillOffsetXSlider) {
         sillOffsetXSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), false));
         sillOffsetXSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), true));
       }
+      const sillOffsetXDisplay = root.querySelector('[data-fa-nexus-window-sill-offset-x-display]');
+      if (sillOffsetXDisplay) {
+        sillOffsetXDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), false));
+        sillOffsetXDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), true));
+      }
       const sillOffsetYSlider = root.querySelector('[data-fa-nexus-window-sill-offset-y]');
       if (sillOffsetYSlider) {
         sillOffsetYSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), false));
         sillOffsetYSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), true));
+      }
+      const sillOffsetYDisplay = root.querySelector('[data-fa-nexus-window-sill-offset-y-display]');
+      if (sillOffsetYDisplay) {
+        sillOffsetYDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), false));
+        sillOffsetYDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), true));
       }
       // Window texture controls
       const texturePick = root.querySelector('[data-fa-nexus-window-texture-pick]');
@@ -4635,15 +5960,30 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         textureScaleSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), false));
         textureScaleSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), true));
       }
+      const textureScaleDisplay = root.querySelector('[data-fa-nexus-window-texture-scale-display]');
+      if (textureScaleDisplay) {
+        textureScaleDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), false));
+        textureScaleDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), true));
+      }
       const textureOffsetXSlider = root.querySelector('[data-fa-nexus-window-texture-offset-x]');
       if (textureOffsetXSlider) {
         textureOffsetXSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), false));
         textureOffsetXSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), true));
       }
+      const textureOffsetXDisplay = root.querySelector('[data-fa-nexus-window-texture-offset-x-display]');
+      if (textureOffsetXDisplay) {
+        textureOffsetXDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), false));
+        textureOffsetXDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), true));
+      }
       const textureOffsetYSlider = root.querySelector('[data-fa-nexus-window-texture-offset-y]');
       if (textureOffsetYSlider) {
         textureOffsetYSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), false));
         textureOffsetYSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), true));
+      }
+      const textureOffsetYDisplay = root.querySelector('[data-fa-nexus-window-texture-offset-y-display]');
+      if (textureOffsetYDisplay) {
+        textureOffsetYDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), false));
+        textureOffsetYDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), true));
       }
       // Frame controls
       const framePick = root.querySelector('[data-fa-nexus-window-frame-pick]');
@@ -4655,20 +5995,40 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
         frameScaleSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), false));
         frameScaleSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), true));
       }
+      const frameScaleDisplay = root.querySelector('[data-fa-nexus-window-frame-scale-display]');
+      if (frameScaleDisplay) {
+        frameScaleDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), false));
+        frameScaleDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), true));
+      }
       const frameOffsetXSlider = root.querySelector('[data-fa-nexus-window-frame-offset-x]');
       if (frameOffsetXSlider) {
         frameOffsetXSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), false));
         frameOffsetXSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), true));
+      }
+      const frameOffsetXDisplay = root.querySelector('[data-fa-nexus-window-frame-offset-x-display]');
+      if (frameOffsetXDisplay) {
+        frameOffsetXDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), false));
+        frameOffsetXDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), true));
       }
       const frameOffsetYSlider = root.querySelector('[data-fa-nexus-window-frame-offset-y]');
       if (frameOffsetYSlider) {
         frameOffsetYSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), false));
         frameOffsetYSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), true));
       }
+      const frameOffsetYDisplay = root.querySelector('[data-fa-nexus-window-frame-offset-y-display]');
+      if (frameOffsetYDisplay) {
+        frameOffsetYDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), false));
+        frameOffsetYDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), true));
+      }
       const frameRotationSlider = root.querySelector('[data-fa-nexus-window-frame-rotation]');
       if (frameRotationSlider) {
         frameRotationSlider.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), false));
         frameRotationSlider.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), true));
+      }
+      const frameRotationDisplay = root.querySelector('[data-fa-nexus-window-frame-rotation-display]');
+      if (frameRotationDisplay) {
+        frameRotationDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), false));
+        frameRotationDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), true));
       }
       root._faWindowBound = true;
     }
@@ -4721,16 +6081,79 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (sillSettings) {
       const scaleSlider = root.querySelector('[data-fa-nexus-window-sill-scale]');
       const scaleDisplay = root.querySelector('[data-fa-nexus-window-sill-scale-display]');
-      if (scaleSlider) scaleSlider.value = sillSettings.scale ?? 1;
-      if (scaleDisplay) scaleDisplay.textContent = sillSettings.scaleDisplay || '100%';
+      const scaleState = {
+        min: sillSettings.scaleMin,
+        max: sillSettings.scaleMax,
+        step: sillSettings.scaleStep,
+        value: sillSettings.scale ?? 1,
+        defaultValue: sillSettings.scaleDefault,
+        display: sillSettings.scaleDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (scaleSlider) {
+        if (scaleState.min !== undefined) scaleSlider.min = String(scaleState.min);
+        if (scaleState.max !== undefined) scaleSlider.max = String(scaleState.max);
+        if (scaleState.step !== undefined) scaleSlider.step = String(scaleState.step);
+        if (scaleState.value !== undefined) {
+          const next = String(scaleState.value);
+          if (scaleSlider.value !== next) scaleSlider.value = next;
+        }
+        this._applyDefaultValue(scaleSlider, scaleState.defaultValue);
+        scaleSlider.disabled = !!scaleState.disabled;
+      }
+      if (scaleDisplay) {
+        this._syncDisplayValue(scaleDisplay, scaleState, { disabled: scaleState.disabled });
+      }
       const offsetXSlider = root.querySelector('[data-fa-nexus-window-sill-offset-x]');
       const offsetXDisplay = root.querySelector('[data-fa-nexus-window-sill-offset-x-display]');
-      if (offsetXSlider) offsetXSlider.value = sillSettings.offsetX ?? 0;
-      if (offsetXDisplay) offsetXDisplay.textContent = sillSettings.offsetXDisplay || '0';
+      const offsetXState = {
+        min: sillSettings.offsetMin,
+        max: sillSettings.offsetMax,
+        step: sillSettings.offsetStep,
+        value: sillSettings.offsetX ?? 0,
+        defaultValue: sillSettings.offsetXDefault,
+        display: sillSettings.offsetXDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (offsetXSlider) {
+        if (offsetXState.min !== undefined) offsetXSlider.min = String(offsetXState.min);
+        if (offsetXState.max !== undefined) offsetXSlider.max = String(offsetXState.max);
+        if (offsetXState.step !== undefined) offsetXSlider.step = String(offsetXState.step);
+        if (offsetXState.value !== undefined) {
+          const next = String(offsetXState.value);
+          if (offsetXSlider.value !== next) offsetXSlider.value = next;
+        }
+        this._applyDefaultValue(offsetXSlider, offsetXState.defaultValue);
+        offsetXSlider.disabled = !!offsetXState.disabled;
+      }
+      if (offsetXDisplay) {
+        this._syncDisplayValue(offsetXDisplay, offsetXState, { disabled: offsetXState.disabled });
+      }
       const offsetYSlider = root.querySelector('[data-fa-nexus-window-sill-offset-y]');
       const offsetYDisplay = root.querySelector('[data-fa-nexus-window-sill-offset-y-display]');
-      if (offsetYSlider) offsetYSlider.value = sillSettings.offsetY ?? 0;
-      if (offsetYDisplay) offsetYDisplay.textContent = sillSettings.offsetYDisplay || '0';
+      const offsetYState = {
+        min: sillSettings.offsetMin,
+        max: sillSettings.offsetMax,
+        step: sillSettings.offsetStep,
+        value: sillSettings.offsetY ?? 0,
+        defaultValue: sillSettings.offsetYDefault,
+        display: sillSettings.offsetYDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (offsetYSlider) {
+        if (offsetYState.min !== undefined) offsetYSlider.min = String(offsetYState.min);
+        if (offsetYState.max !== undefined) offsetYSlider.max = String(offsetYState.max);
+        if (offsetYState.step !== undefined) offsetYSlider.step = String(offsetYState.step);
+        if (offsetYState.value !== undefined) {
+          const next = String(offsetYState.value);
+          if (offsetYSlider.value !== next) offsetYSlider.value = next;
+        }
+        this._applyDefaultValue(offsetYSlider, offsetYState.defaultValue);
+        offsetYSlider.disabled = !!offsetYState.disabled;
+      }
+      if (offsetYDisplay) {
+        this._syncDisplayValue(offsetYDisplay, offsetYState, { disabled: offsetYState.disabled });
+      }
     }
     // Window texture UI
     const texturePick = root.querySelector('[data-fa-nexus-window-texture-pick]');
@@ -4747,16 +6170,79 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (textureSettings) {
       const scaleSlider = root.querySelector('[data-fa-nexus-window-texture-scale]');
       const scaleDisplay = root.querySelector('[data-fa-nexus-window-texture-scale-display]');
-      if (scaleSlider) scaleSlider.value = textureSettings.scale ?? 1;
-      if (scaleDisplay) scaleDisplay.textContent = textureSettings.scaleDisplay || '100%';
+      const scaleState = {
+        min: textureSettings.scaleMin,
+        max: textureSettings.scaleMax,
+        step: textureSettings.scaleStep,
+        value: textureSettings.scale ?? 1,
+        defaultValue: textureSettings.scaleDefault,
+        display: textureSettings.scaleDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (scaleSlider) {
+        if (scaleState.min !== undefined) scaleSlider.min = String(scaleState.min);
+        if (scaleState.max !== undefined) scaleSlider.max = String(scaleState.max);
+        if (scaleState.step !== undefined) scaleSlider.step = String(scaleState.step);
+        if (scaleState.value !== undefined) {
+          const next = String(scaleState.value);
+          if (scaleSlider.value !== next) scaleSlider.value = next;
+        }
+        this._applyDefaultValue(scaleSlider, scaleState.defaultValue);
+        scaleSlider.disabled = !!scaleState.disabled;
+      }
+      if (scaleDisplay) {
+        this._syncDisplayValue(scaleDisplay, scaleState, { disabled: scaleState.disabled });
+      }
       const offsetXSlider = root.querySelector('[data-fa-nexus-window-texture-offset-x]');
       const offsetXDisplay = root.querySelector('[data-fa-nexus-window-texture-offset-x-display]');
-      if (offsetXSlider) offsetXSlider.value = textureSettings.offsetX ?? 0;
-      if (offsetXDisplay) offsetXDisplay.textContent = textureSettings.offsetXDisplay || '0';
+      const offsetXState = {
+        min: textureSettings.offsetMin,
+        max: textureSettings.offsetMax,
+        step: textureSettings.offsetStep,
+        value: textureSettings.offsetX ?? 0,
+        defaultValue: textureSettings.offsetXDefault,
+        display: textureSettings.offsetXDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (offsetXSlider) {
+        if (offsetXState.min !== undefined) offsetXSlider.min = String(offsetXState.min);
+        if (offsetXState.max !== undefined) offsetXSlider.max = String(offsetXState.max);
+        if (offsetXState.step !== undefined) offsetXSlider.step = String(offsetXState.step);
+        if (offsetXState.value !== undefined) {
+          const next = String(offsetXState.value);
+          if (offsetXSlider.value !== next) offsetXSlider.value = next;
+        }
+        this._applyDefaultValue(offsetXSlider, offsetXState.defaultValue);
+        offsetXSlider.disabled = !!offsetXState.disabled;
+      }
+      if (offsetXDisplay) {
+        this._syncDisplayValue(offsetXDisplay, offsetXState, { disabled: offsetXState.disabled });
+      }
       const offsetYSlider = root.querySelector('[data-fa-nexus-window-texture-offset-y]');
       const offsetYDisplay = root.querySelector('[data-fa-nexus-window-texture-offset-y-display]');
-      if (offsetYSlider) offsetYSlider.value = textureSettings.offsetY ?? 0;
-      if (offsetYDisplay) offsetYDisplay.textContent = textureSettings.offsetYDisplay || '0';
+      const offsetYState = {
+        min: textureSettings.offsetMin,
+        max: textureSettings.offsetMax,
+        step: textureSettings.offsetStep,
+        value: textureSettings.offsetY ?? 0,
+        defaultValue: textureSettings.offsetYDefault,
+        display: textureSettings.offsetYDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (offsetYSlider) {
+        if (offsetYState.min !== undefined) offsetYSlider.min = String(offsetYState.min);
+        if (offsetYState.max !== undefined) offsetYSlider.max = String(offsetYState.max);
+        if (offsetYState.step !== undefined) offsetYSlider.step = String(offsetYState.step);
+        if (offsetYState.value !== undefined) {
+          const next = String(offsetYState.value);
+          if (offsetYSlider.value !== next) offsetYSlider.value = next;
+        }
+        this._applyDefaultValue(offsetYSlider, offsetYState.defaultValue);
+        offsetYSlider.disabled = !!offsetYState.disabled;
+      }
+      if (offsetYDisplay) {
+        this._syncDisplayValue(offsetYDisplay, offsetYState, { disabled: offsetYState.disabled });
+      }
     }
     // Frame UI
     const framePick = root.querySelector('[data-fa-nexus-window-frame-pick]');
@@ -4773,20 +6259,104 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (frameSettings) {
       const scaleSlider = root.querySelector('[data-fa-nexus-window-frame-scale]');
       const scaleDisplay = root.querySelector('[data-fa-nexus-window-frame-scale-display]');
-      if (scaleSlider) scaleSlider.value = frameSettings.scale ?? 1;
-      if (scaleDisplay) scaleDisplay.textContent = frameSettings.scaleDisplay || '100%';
+      const scaleState = {
+        min: frameSettings.scaleMin,
+        max: frameSettings.scaleMax,
+        step: frameSettings.scaleStep,
+        value: frameSettings.scale ?? 1,
+        defaultValue: frameSettings.scaleDefault,
+        display: frameSettings.scaleDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (scaleSlider) {
+        if (scaleState.min !== undefined) scaleSlider.min = String(scaleState.min);
+        if (scaleState.max !== undefined) scaleSlider.max = String(scaleState.max);
+        if (scaleState.step !== undefined) scaleSlider.step = String(scaleState.step);
+        if (scaleState.value !== undefined) {
+          const next = String(scaleState.value);
+          if (scaleSlider.value !== next) scaleSlider.value = next;
+        }
+        this._applyDefaultValue(scaleSlider, scaleState.defaultValue);
+        scaleSlider.disabled = !!scaleState.disabled;
+      }
+      if (scaleDisplay) {
+        this._syncDisplayValue(scaleDisplay, scaleState, { disabled: scaleState.disabled });
+      }
       const offsetXSlider = root.querySelector('[data-fa-nexus-window-frame-offset-x]');
       const offsetXDisplay = root.querySelector('[data-fa-nexus-window-frame-offset-x-display]');
-      if (offsetXSlider) offsetXSlider.value = frameSettings.offsetX ?? 0;
-      if (offsetXDisplay) offsetXDisplay.textContent = frameSettings.offsetXDisplay || '0';
+      const offsetXState = {
+        min: frameSettings.offsetMin,
+        max: frameSettings.offsetMax,
+        step: frameSettings.offsetStep,
+        value: frameSettings.offsetX ?? 0,
+        defaultValue: frameSettings.offsetXDefault,
+        display: frameSettings.offsetXDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (offsetXSlider) {
+        if (offsetXState.min !== undefined) offsetXSlider.min = String(offsetXState.min);
+        if (offsetXState.max !== undefined) offsetXSlider.max = String(offsetXState.max);
+        if (offsetXState.step !== undefined) offsetXSlider.step = String(offsetXState.step);
+        if (offsetXState.value !== undefined) {
+          const next = String(offsetXState.value);
+          if (offsetXSlider.value !== next) offsetXSlider.value = next;
+        }
+        this._applyDefaultValue(offsetXSlider, offsetXState.defaultValue);
+        offsetXSlider.disabled = !!offsetXState.disabled;
+      }
+      if (offsetXDisplay) {
+        this._syncDisplayValue(offsetXDisplay, offsetXState, { disabled: offsetXState.disabled });
+      }
       const offsetYSlider = root.querySelector('[data-fa-nexus-window-frame-offset-y]');
       const offsetYDisplay = root.querySelector('[data-fa-nexus-window-frame-offset-y-display]');
-      if (offsetYSlider) offsetYSlider.value = frameSettings.offsetY ?? 0;
-      if (offsetYDisplay) offsetYDisplay.textContent = frameSettings.offsetYDisplay || '0';
+      const offsetYState = {
+        min: frameSettings.offsetMin,
+        max: frameSettings.offsetMax,
+        step: frameSettings.offsetStep,
+        value: frameSettings.offsetY ?? 0,
+        defaultValue: frameSettings.offsetYDefault,
+        display: frameSettings.offsetYDisplay || '',
+        disabled: !!state.disabled
+      };
+      if (offsetYSlider) {
+        if (offsetYState.min !== undefined) offsetYSlider.min = String(offsetYState.min);
+        if (offsetYState.max !== undefined) offsetYSlider.max = String(offsetYState.max);
+        if (offsetYState.step !== undefined) offsetYSlider.step = String(offsetYState.step);
+        if (offsetYState.value !== undefined) {
+          const next = String(offsetYState.value);
+          if (offsetYSlider.value !== next) offsetYSlider.value = next;
+        }
+        this._applyDefaultValue(offsetYSlider, offsetYState.defaultValue);
+        offsetYSlider.disabled = !!offsetYState.disabled;
+      }
+      if (offsetYDisplay) {
+        this._syncDisplayValue(offsetYDisplay, offsetYState, { disabled: offsetYState.disabled });
+      }
       const rotationSlider = root.querySelector('[data-fa-nexus-window-frame-rotation]');
       const rotationDisplay = root.querySelector('[data-fa-nexus-window-frame-rotation-display]');
-      if (rotationSlider) rotationSlider.value = frameSettings.rotation ?? 0;
-      if (rotationDisplay) rotationDisplay.textContent = frameSettings.rotationDisplay || '0°';
+      const rotationState = {
+        min: frameSettings.rotationMin,
+        max: frameSettings.rotationMax,
+        step: frameSettings.rotationStep,
+        value: frameSettings.rotation ?? 0,
+        defaultValue: frameSettings.rotationDefault,
+        display: frameSettings.rotationDisplay || '',
+        disabled: !!state.disabled || !!frameSettings.rotationDisabled
+      };
+      if (rotationSlider) {
+        if (rotationState.min !== undefined) rotationSlider.min = String(rotationState.min);
+        if (rotationState.max !== undefined) rotationSlider.max = String(rotationState.max);
+        if (rotationState.step !== undefined) rotationSlider.step = String(rotationState.step);
+        if (rotationState.value !== undefined) {
+          const next = String(rotationState.value);
+          if (rotationSlider.value !== next) rotationSlider.value = next;
+        }
+        this._applyDefaultValue(rotationSlider, rotationState.defaultValue);
+        rotationSlider.disabled = !!rotationState.disabled;
+      }
+      if (rotationDisplay) {
+        this._syncDisplayValue(rotationDisplay, rotationState, { disabled: rotationState.disabled });
+      }
     }
   }
 

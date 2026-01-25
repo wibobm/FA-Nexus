@@ -2,6 +2,7 @@ import { AssetsDataService } from './assets-data-service.js';
 import { AssetPlacementManager } from './asset-placement-manager.js';
 import { TexturePaintManager } from '../textures/texture-paint-manager.js';
 import { PathManager } from '../paths/path-manager.js';
+import { PathManagerV2 } from '../paths/path-manager-v2.js';
 import { NexusLogger as Logger } from '../core/nexus-logger.js';
 import { collectLocalInventory, getEnabledFolders, mergeLocalAndCloudRecords, NexusContentService } from '../content/nexus-content-service.js';
 import { NexusDownloadManager } from '../content/nexus-download-manager.js';
@@ -69,6 +70,7 @@ export class AssetsTabController {
     this._placement = tab._placement || null;
     this._texturePaint = tab._texturePaint || null;
     this._pathManager = tab._pathManager || null;
+    this._pathManagerV2 = tab._pathManagerV2 || null;
     this._content = tab._content || null;
     this._download = tab._download || null;
     this._assets = tab._assets instanceof AssetsDataService ? tab._assets : new AssetsDataService();
@@ -93,6 +95,10 @@ export class AssetsTabController {
 
   get pathManager() {
     return this._pathManager || null;
+  }
+
+  get pathManagerV2() {
+    return this._pathManagerV2 || null;
   }
 
   get contentService() {
@@ -236,6 +242,10 @@ async function ensureServices(tab) {
       controller._pathManager = tab._pathManager instanceof PathManager ? tab._pathManager : new PathManager(app);
     }
     tab._pathManager = controller._pathManager;
+    if (!(controller._pathManagerV2 instanceof PathManagerV2)) {
+      controller._pathManagerV2 = tab._pathManagerV2 instanceof PathManagerV2 ? tab._pathManagerV2 : new PathManagerV2(app);
+    }
+    tab._pathManagerV2 = controller._pathManagerV2;
   }
 
   if (!controller._content) {
@@ -272,9 +282,14 @@ async function loadAssets(tab, options = {}) {
 
   if (!forceReload && !shared.dirty && Array.isArray(shared.items)) {
     tab._items = shared.items;
+    if (typeof tab._injectSolidTextureItem === 'function') {
+      tab._items = tab._injectSolidTextureItem(tab._items);
+      if (shared.items !== tab._items) shared.items = tab._items;
+    }
     const cachedStats = shared.folderStats.get(tab._mode);
-    if (cachedStats) tab._folderStats = cachedStats;
-    else {
+    if (cachedStats && !tab.isTexturesMode) {
+      tab._folderStats = cachedStats;
+    } else {
       computeFolderStats(tab, tab._items);
       shared.folderStats.set(tab._mode, tab._folderStats);
     }
@@ -301,9 +316,14 @@ async function loadAssets(tab, options = {}) {
 
     const items = Array.isArray(result?.items) ? result.items : [];
     tab._items = items;
+    if (typeof tab._injectSolidTextureItem === 'function') {
+      tab._items = tab._injectSolidTextureItem(tab._items);
+      if (shared.items !== tab._items && shared.items === items) shared.items = tab._items;
+    }
     const cachedStats = shared.folderStats.get(tab._mode);
-    if (cachedStats) tab._folderStats = cachedStats;
-    else {
+    if (cachedStats && !tab.isTexturesMode) {
+      tab._folderStats = cachedStats;
+    } else {
       computeFolderStats(tab, tab._items);
       shared.folderStats.set(tab._mode, tab._folderStats);
     }
@@ -348,7 +368,11 @@ async function loadAssets(tab, options = {}) {
 
   const finalItems = Array.isArray(result?.items) ? result.items : [];
   tab._items = finalItems;
-  computeFolderStats(tab, finalItems);
+  if (typeof tab._injectSolidTextureItem === 'function') {
+    tab._items = tab._injectSolidTextureItem(tab._items);
+    if (shared.items === finalItems && shared.items !== tab._items) shared.items = tab._items;
+  }
+  computeFolderStats(tab, tab._items);
   shared.folderStats.set(tab._mode, tab._folderStats);
   await tab.applySearchAsync(tab.getCurrentSearchValue());
   if (tab.app?._activeTab === tab.id) {
@@ -812,8 +836,10 @@ function computeFolderStats(tab, items) {
   const pathCountsMap = new Map();
   const lowerKeys = new Set();
   let unassignedCount = 0;
+  const skipSolid = tab?.isTexturesMode && typeof tab._isSolidTextureItem === 'function';
   for (const item of items) {
     if (!matchesMode(tab, item)) continue;
+    if (skipSolid && tab._isSolidTextureItem(item)) continue;
     const info = getFolderPathInfo(tab, item, true);
     if (info.lower) {
       pathCountsMap.set(info.normalized, (pathCountsMap.get(info.normalized) || 0) + 1);
