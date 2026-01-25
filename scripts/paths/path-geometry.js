@@ -15,6 +15,18 @@ let PATH_PROGRAM = null;
 const VISIBLE_ALPHA_THRESHOLD = 10;
 const LINEAR_TENSION_THRESHOLD = 0.999;
 const WIDTH_MULTIPLIER_EPSILON = 1e-3;
+const EDITING_TILES_KEY = '__faNexusPathEditingTiles';
+
+function isEditingTile(doc) {
+  try {
+    const id = doc?.id;
+    if (!id) return false;
+    const set = globalThis?.[EDITING_TILES_KEY];
+    return set instanceof Set && set.has(id);
+  } catch (_) {
+    return false;
+  }
+}
 
 function applyMeshOpacity(mesh, alpha) {
   try {
@@ -1056,6 +1068,10 @@ export async function applyPathTile(tile) {
     if (!tile || tile.destroyed) return;
     const doc = tile.document;
     if (shouldSkipV1Runtime(doc)) return;
+    if (isEditingTile(doc)) {
+      cleanupPathOverlay(tile);
+      return;
+    }
     const { payloads, kind } = resolvePathPayloads(doc);
     if (!payloads.length) {
       cleanupPathOverlay(tile);

@@ -2,12 +2,48 @@ import { NexusLogger as Logger } from '../core/nexus-logger.js';
 import { premiumFeatureBroker } from '../premium/premium-feature-broker.js';
 import { premiumEntitlementsService } from '../premium/premium-entitlements-service.js';
 import { ensurePremiumFeaturesRegistered } from '../premium/premium-feature-registry.js';
-import './path-tiles.js';
+import { applyPathTile, cleanupPathOverlay } from './path-tiles.js';
 import { toolOptionsController } from '../core/tool-options-controller.js';
 
 const MODULE_ID = 'fa-nexus';
 const PATH_SUBTOOL_SETTING_KEY = 'pathToolActiveSubtool';
 const PATH_SUBTOOL_IDS = new Set(['curve', 'draw']);
+const EDITING_TILES_KEY = '__faNexusPathEditingTiles';
+
+function getEditingTileSet() {
+  try {
+    const root = globalThis || window;
+    const existing = root?.[EDITING_TILES_KEY];
+    if (existing instanceof Set) return existing;
+    const created = new Set();
+    if (root) root[EDITING_TILES_KEY] = created;
+    return created;
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function resolveTileDocument(target) {
+  if (!target) return null;
+  const TileDocument = globalThis?.foundry?.documents?.TileDocument;
+  if (TileDocument && target instanceof TileDocument) return target;
+  if (TileDocument && target?.document instanceof TileDocument) return target.document;
+  if (target?.document) return target.document;
+  if (typeof target === 'string' && canvas?.scene?.tiles?.get) {
+    try { return canvas.scene.tiles.get(target) || null; } catch (_) { return null; }
+  }
+  return null;
+}
+
+function resolveTilePlaceableById(id) {
+  if (!id) return null;
+  try {
+    const list = Array.isArray(canvas?.tiles?.placeables) ? canvas.tiles.placeables : [];
+    return list.find((tile) => tile?.document?.id === id) || null;
+  } catch (_) {
+    return null;
+  }
+}
 
 export class PathManagerV2 {
   constructor(app) {
@@ -18,6 +54,7 @@ export class PathManagerV2 {
     this._toolMonitor = null;
     this._lastPersistedSubtool = null;
     this._toolDefaultsPersistTimer = null;
+    this._editingTileId = null;
     this._syncToolOptionsState();
   }
 
@@ -76,6 +113,8 @@ export class PathManagerV2 {
   async start(...args) {
     this._cancelPlacementSessions();
     const delegate = await this._ensureDelegate();
+    const wasActive = !!delegate?.isActive;
+    if (!wasActive) this._clearEditingTile();
     let result;
     try {
       this._refreshDelegateToolDefaults();
@@ -87,7 +126,7 @@ export class PathManagerV2 {
       });
       toolOptionsController.activateTool('path.edit.v2', { label: 'Path Editor v2' });
       this._beginToolWindowMonitor('path.edit.v2', delegate);
-      this._restoreSubtoolPreference();
+      if (!wasActive) this._restoreSubtoolPreference();
       if (result && typeof result.catch === 'function') {
         result.catch(() => {
           this._cancelToolWindowMonitor();
@@ -106,6 +145,8 @@ export class PathManagerV2 {
     if (!delegate || typeof delegate.editTile !== 'function') {
       throw new Error('Installed path editor bundle does not support editing existing tiles.');
     }
+    const doc = resolveTileDocument(targetTile);
+    if (doc) this._markEditingTile(doc);
     let result;
     try {
       this._refreshDelegateToolDefaults();
@@ -123,8 +164,14 @@ export class PathManagerV2 {
           toolOptionsController.deactivateTool('path.edit.v2');
         });
       }
+    } catch (error) {
+      this._clearEditingTile(doc);
+      throw error;
     } finally {
       this._scheduleEntitlementProbe();
+    }
+    if (result && typeof result.catch === 'function') {
+      result.catch(() => this._clearEditingTile(doc));
     }
     return result;
   }
@@ -132,6 +179,7 @@ export class PathManagerV2 {
   stop(...args) {
     this._cancelToolWindowMonitor();
     if (!this._delegate) {
+      this._clearEditingTile();
       toolOptionsController.deactivateTool('path.edit.v2');
       return;
     }
@@ -139,6 +187,7 @@ export class PathManagerV2 {
       if (this._delegate?.isActive) this._persistDelegateToolDefaults();
       return this._delegate.stop?.(...args);
     } finally {
+      this._clearEditingTile();
       toolOptionsController.deactivateTool('path.edit.v2');
     }
   }
@@ -256,6 +305,7 @@ export class PathManagerV2 {
       try { active = !!delegate?.isActive; }
       catch (_) { active = false; }
       if (!active) {
+        this._clearEditingTile();
         toolOptionsController.deactivateTool(toolId);
         this._cancelToolWindowMonitor();
         return;
@@ -277,6 +327,31 @@ export class PathManagerV2 {
       } catch (_) {}
     }
     this._toolMonitor = null;
+  }
+
+  _markEditingTile(doc) {
+    const id = doc?.id;
+    if (!id) return;
+    if (this._editingTileId && this._editingTileId !== id) {
+      this._clearEditingTile(this._editingTileId);
+    }
+    this._editingTileId = id;
+    try { getEditingTileSet().add(id); } catch (_) {}
+    const tile = doc?.object || resolveTilePlaceableById(id);
+    if (tile) {
+      try { cleanupPathOverlay(tile); } catch (_) {}
+    }
+  }
+
+  _clearEditingTile(target = null) {
+    const id = typeof target === 'string' ? target : target?.id || this._editingTileId;
+    if (!id) return;
+    try { getEditingTileSet().delete(id); } catch (_) {}
+    if (this._editingTileId === id) this._editingTileId = null;
+    const tile = (typeof target === 'object' && target?.object) ? target.object : resolveTilePlaceableById(id);
+    if (tile) {
+      try { applyPathTile(tile); } catch (_) {}
+    }
   }
 
   _buildToolOptionsState() {
