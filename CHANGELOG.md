@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-01-25
 
 ### Added
 - **Layer Manager (MVP):** Right Sidebar tab with a list of all tiles within a scene, right under the 'Scenes' button.
