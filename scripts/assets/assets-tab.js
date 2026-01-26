@@ -297,7 +297,16 @@ export class AssetsTab extends GridBrowseTab {
 
     await this._controller.ensureServices();
 
+    if (!app || app._activeTab !== this.id || this._didDeactivate) {
+      Logger.info('AssetsTab.onActivate:aborted', { tab: this.id, stage: 'services', activeTab: app?._activeTab });
+      return;
+    }
+
     await super.onActivate();
+    if (!app || app._activeTab !== this.id || this._didDeactivate) {
+      Logger.info('AssetsTab.onActivate:aborted', { tab: this.id, stage: 'grid', activeTab: app?._activeTab });
+      return;
+    }
     try { this._installProbeScrollHandler(); } catch (_) {}
 
     // Hook settings updates (while Assets tab is active)

@@ -21,8 +21,39 @@ const ARC_CIRCULAR_DOT_RATIO = 0.001;
 const ARC_CIRCULAR_CENTER_RATIO = 0.45;
 const TAU = Math.PI * 2;
 const RIGHT_ANGLE = Math.PI / 2;
+const EDITING_TILE_SET_KEY = '__faNexusTextureEditingTileIds';
 const SOLID_COLOR_FULL_RE = /^#([0-9a-f]{6})$/i;
 const SOLID_COLOR_SHORT_RE = /^#([0-9a-f]{3})$/i;
+
+function getEditingTileSet() {
+  try {
+    const root = globalThis;
+    if (!root) return null;
+    const existing = root[EDITING_TILE_SET_KEY];
+    return existing instanceof Set ? existing : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolveTileId(tile) {
+  try {
+    return tile?.document?.id || tile?.document?._id || tile?.id || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function isEditingTile(tile) {
+  try {
+    const set = getEditingTileSet();
+    if (!set) return false;
+    const id = resolveTileId(tile);
+    return !!id && set.has(id);
+  } catch (_) {
+    return false;
+  }
+}
 
 function normalizeSolidColor(value) {
   if (typeof value !== 'string') return null;
@@ -607,6 +638,12 @@ export function ensureMeshTransparent(mesh) {
     if (!mesh.faNexusOriginalTexture) mesh.faNexusOriginalTexture = mesh.texture;
     const placeholder = getTransparentTexture();
     if (mesh.texture !== placeholder) mesh.texture = placeholder;
+    if (mesh.material) mesh.material.texture = placeholder;
+    const uniforms = mesh.shader?.uniforms || null;
+    if (uniforms) {
+      if ('uSampler' in uniforms) uniforms.uSampler = placeholder;
+      if ('texture' in uniforms) uniforms.texture = placeholder;
+    }
     if (!Number.isFinite(mesh.alpha)) mesh.alpha = 1;
     mesh.renderable = true;
   } catch (_) {}
@@ -616,7 +653,14 @@ export function restoreMeshTexture(mesh) {
   try {
     if (!mesh || mesh.destroyed) return;
     if (mesh.faNexusOriginalTexture) {
-      mesh.texture = mesh.faNexusOriginalTexture;
+      const original = mesh.faNexusOriginalTexture;
+      mesh.texture = original;
+      if (mesh.material) mesh.material.texture = original;
+      const uniforms = mesh.shader?.uniforms || null;
+      if (uniforms) {
+        if ('uSampler' in uniforms) uniforms.uSampler = original;
+        if ('texture' in uniforms) uniforms.texture = original;
+      }
       mesh.faNexusOriginalTexture = null;
     }
   } catch (_) {}
@@ -886,6 +930,7 @@ export async function applyMaskedTilingToTile(tile) {
   let wasVisible = null;
   try {
     if (!tile || !tile.document) return;
+    const editing = isEditingTile(tile);
     const flags = tile.document.getFlag('fa-nexus', 'maskedTiling');
     const arrayMask = isArrayMask(flags);
     const solidColor = normalizeSolidColor(flags?.baseColor);
@@ -893,7 +938,8 @@ export async function applyMaskedTilingToTile(tile) {
     const docAlphaRaw = Number(tile?.document?.alpha ?? 1);
     const docAlpha = Number.isFinite(docAlphaRaw) ? Math.min(1, Math.max(0, docAlphaRaw)) : 1;
 
-    const cleanupOverlay = () => {
+    const cleanupOverlay = (options = {}) => {
+      const preserveTexture = !!options.preserveTexture;
       try {
         const meshRef = tile?.mesh;
         const cont = meshRef?.faNexusMaskContainer || tile?.faNexusMaskContainer;
@@ -910,7 +956,7 @@ export async function applyMaskedTilingToTile(tile) {
         if (meshRef) {
           meshRef.faNexusMaskContainer = null;
           meshRef.faNexusMaskReady = false;
-          if (meshRef.faNexusOriginalTexture) {
+          if (!preserveTexture && meshRef.faNexusOriginalTexture) {
             try { meshRef.texture = meshRef.faNexusOriginalTexture; } catch (_) {}
             meshRef.faNexusOriginalTexture = null;
           }
@@ -918,6 +964,18 @@ export async function applyMaskedTilingToTile(tile) {
         if (tile) tile.faNexusMaskContainer = null;
       } catch (_) {}
     };
+
+    if (editing) {
+      cleanupOverlay({ preserveTexture: true });
+      clearMaskedTileRetry(tile);
+      let mesh = tile.mesh;
+      if (!mesh || mesh.destroyed) mesh = await ensureTileMesh(tile);
+      if (mesh && !mesh.destroyed) {
+        ensureMeshTransparent(mesh);
+        try { mesh.alpha = 0; } catch (_) {}
+      }
+      return;
+    }
 
     if (!flags || (!flags.baseSrc && !solidColor) || (!flags.maskSrc && !arrayMask)) {
       cleanupOverlay();

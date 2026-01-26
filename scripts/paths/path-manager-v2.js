@@ -289,7 +289,7 @@ export class PathManagerV2 {
   _beginToolWindowMonitor(toolId, delegate) {
     this._cancelToolWindowMonitor();
     if (!delegate) return;
-    const token = { cancelled: false, handle: null, usingTimeout: false, toolId };
+    const token = { cancelled: false, handle: null, usingTimeout: false, toolId, lastOptionsSync: 0 };
     const schedule = (callback) => {
       if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
         token.usingTimeout = false;
@@ -298,6 +298,16 @@ export class PathManagerV2 {
         token.usingTimeout = true;
         token.handle = setTimeout(callback, 200);
       }
+    };
+    const maybeSyncToolOptions = () => {
+      const now = Date.now();
+      if (token.lastOptionsSync && now - token.lastOptionsSync < 200) return;
+      token.lastOptionsSync = now;
+      this._syncToolOptionsState({
+        suppressRender: true,
+        suppressSubtoolPersistence: true,
+        suppressToolDefaultsPersistence: true
+      });
     };
     const tick = () => {
       if (token.cancelled) return;
@@ -310,6 +320,7 @@ export class PathManagerV2 {
         this._cancelToolWindowMonitor();
         return;
       }
+      maybeSyncToolOptions();
       schedule(tick);
     };
     this._toolMonitor = token;

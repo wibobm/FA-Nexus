@@ -293,7 +293,9 @@ async function loadAssets(tab, options = {}) {
       computeFolderStats(tab, tab._items);
       shared.folderStats.set(tab._mode, tab._folderStats);
     }
-    await tab.applySearchAsync(tab.getCurrentSearchValue());
+    if (tab.app?._activeTab === tab.id && tab.app?._grid) {
+      await tab.applySearchAsync(tab.getCurrentSearchValue());
+    }
     if (tab.app?._activeTab === tab.id) {
       try { updateFolderFilter(tab); } catch (_) {}
     }
@@ -327,7 +329,9 @@ async function loadAssets(tab, options = {}) {
       computeFolderStats(tab, tab._items);
       shared.folderStats.set(tab._mode, tab._folderStats);
     }
-    await tab.applySearchAsync(tab.getCurrentSearchValue());
+    if (tab.app?._activeTab === tab.id && tab.app?._grid) {
+      await tab.applySearchAsync(tab.getCurrentSearchValue());
+    }
     if (tab.app?._activeTab === tab.id) {
       try { updateFolderFilter(tab); } catch (_) {}
     }
@@ -374,7 +378,9 @@ async function loadAssets(tab, options = {}) {
   }
   computeFolderStats(tab, tab._items);
   shared.folderStats.set(tab._mode, tab._folderStats);
-  await tab.applySearchAsync(tab.getCurrentSearchValue());
+  if (tab.app?._activeTab === tab.id && tab.app?._grid) {
+    await tab.applySearchAsync(tab.getCurrentSearchValue());
+  }
   if (tab.app?._activeTab === tab.id) {
     try { updateFolderFilter(tab); } catch (_) {}
   }

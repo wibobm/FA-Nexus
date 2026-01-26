@@ -3,13 +3,51 @@ import { premiumFeatureBroker } from '../premium/premium-feature-broker.js';
 import { premiumEntitlementsService } from '../premium/premium-entitlements-service.js';
 import { ensurePremiumFeaturesRegistered } from '../premium/premium-feature-registry.js';
 import { toolOptionsController } from '../core/tool-options-controller.js';
+import { applyBuildingTile, applyDoorFrameTile } from './building-tiles.js';
 
 const MODULE_ID = 'fa-nexus';
 const BUILDING_SUBTOOL_SETTING_KEY = 'buildingToolActiveSubtool';
 const BUILDING_SUBTOOL_IDS = new Set(['rectangle', 'ellipse', 'polygon', 'inner-wall']);
+const EDITING_TILE_SET_KEY = '__faNexusBuildingEditingTileIds';
 
 const FEATURE_ID = 'building.edit';
 const TOOL_LABEL = 'Building Editor';
+
+function getEditingTileSet() {
+  try {
+    const root = globalThis;
+    if (!root) return null;
+    let set = root[EDITING_TILE_SET_KEY];
+    if (!(set instanceof Set)) {
+      set = new Set();
+      root[EDITING_TILE_SET_KEY] = set;
+    }
+    return set;
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolveTileId(targetTile) {
+  try {
+    return targetTile?.document?.id || targetTile?.id || targetTile?.document?._id || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolvePlaceableTile(targetTile, tileId) {
+  try {
+    if (targetTile?.document && targetTile?.mesh) return targetTile;
+    const doc = targetTile?.document || targetTile;
+    if (doc?.object) return doc.object;
+    const id = tileId || doc?.id || doc?._id;
+    if (!id) return null;
+    return canvas?.tiles?.placeables?.find((tile) => tile?.document?.id === id) || null;
+  } catch (_) {
+    return null;
+  }
+}
 
 export class BuildingManager {
   constructor(app) {
@@ -22,6 +60,7 @@ export class BuildingManager {
     this._onToolOptionsChange = null;
     this._lastPersistedSubtool = null;
     this._toolDefaultsPersistTimer = null;
+    this._editingTileId = null;
   }
 
   /**
@@ -59,6 +98,7 @@ export class BuildingManager {
     const delegate = await this._ensureDelegate();
     let result;
     try {
+      this._clearEditingTile();
       if (typeof delegate?.setPortalMode === 'function') {
         delegate.setPortalMode(this._portalMode);
       }
@@ -77,6 +117,7 @@ export class BuildingManager {
       this._restoreSubtoolPreference();
       if (result && typeof result.catch === 'function') {
         result.catch(() => {
+          this._clearEditingTile();
           this._cancelToolWindowMonitor();
           toolOptionsController.deactivateTool(FEATURE_ID);
         });
@@ -97,6 +138,7 @@ export class BuildingManager {
     }
     let result;
     try {
+      this._markEditingTile(tileDocument);
       if (typeof delegate?.setPortalMode === 'function') {
         delegate.setPortalMode(this._portalMode);
       }
@@ -114,10 +156,14 @@ export class BuildingManager {
       this._beginToolWindowMonitor(delegate);
       if (result && typeof result.catch === 'function') {
         result.catch(() => {
+          this._clearEditingTile();
           this._cancelToolWindowMonitor();
           toolOptionsController.deactivateTool(FEATURE_ID);
         });
       }
+    } catch (error) {
+      this._clearEditingTile();
+      throw error;
     } finally {
       this._scheduleEntitlementProbe();
     }
@@ -208,6 +254,7 @@ export class BuildingManager {
   stop(...args) {
     this._cancelToolWindowMonitor();
     toolOptionsController.deactivateTool(FEATURE_ID);
+    this._clearEditingTile();
     if (!this._delegate) return;
     try {
       this._persistDelegateToolDefaults();
@@ -350,7 +397,7 @@ export class BuildingManager {
   _beginToolWindowMonitor(delegate) {
     this._cancelToolWindowMonitor();
     if (!delegate) return;
-    const token = { cancelled: false, handle: null, usingTimeout: false };
+    const token = { cancelled: false, handle: null, usingTimeout: false, lastOptionsSync: 0 };
     const schedule = (callback) => {
       if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
         token.usingTimeout = false;
@@ -360,13 +407,25 @@ export class BuildingManager {
         token.handle = setTimeout(callback, 200);
       }
     };
+    const maybeSyncToolOptions = () => {
+      const now = Date.now();
+      if (token.lastOptionsSync && now - token.lastOptionsSync < 200) return;
+      token.lastOptionsSync = now;
+      this._syncToolOptionsState({
+        suppressRender: true,
+        suppressSubtoolPersistence: true,
+        suppressToolDefaultsPersistence: true
+      });
+    };
     const loop = () => {
       if (token.cancelled) return;
       if (!delegate?.isActive) {
+        this._clearEditingTile();
         this._cancelToolWindowMonitor();
         toolOptionsController.deactivateTool(FEATURE_ID);
         return;
       }
+      maybeSyncToolOptions();
       schedule(loop);
     };
     schedule(loop);
@@ -382,6 +441,39 @@ export class BuildingManager {
       if (token.usingTimeout) clearTimeout(token.handle);
       else cancelAnimationFrame(token.handle);
     }
+  }
+
+  _markEditingTile(targetTile) {
+    try {
+      const tileId = resolveTileId(targetTile);
+      if (!tileId) return;
+      if (this._editingTileId && this._editingTileId !== tileId) {
+        this._clearEditingTile();
+      }
+      this._editingTileId = tileId;
+      const set = getEditingTileSet();
+      if (set) set.add(tileId);
+      const tile = resolvePlaceableTile(targetTile, tileId);
+      if (tile) {
+        applyBuildingTile(tile);
+        applyDoorFrameTile(tile);
+      }
+    } catch (_) {}
+  }
+
+  _clearEditingTile() {
+    try {
+      const tileId = this._editingTileId;
+      if (!tileId) return;
+      this._editingTileId = null;
+      const set = getEditingTileSet();
+      if (set) set.delete(tileId);
+      const tile = resolvePlaceableTile(null, tileId);
+      if (tile) {
+        applyBuildingTile(tile);
+        applyDoorFrameTile(tile);
+      }
+    } catch (_) {}
   }
 
   requestToolOptionsUpdate(options = {}) {

@@ -17,6 +17,11 @@ const IGNORE_FOREGROUND_SETTING = 'layerManagerIgnoreForeground';
 const LAYER_HIDDEN_FLAG = 'layerHidden';
 const CONTEXT_DOUBLE_CLICK_MS = 350;
 const BG_RENDER_OVERRIDE_KEY = 'faNexusBgBandRenderElevation';
+const EDITING_TILE_SET_KEYS = [
+  '__faNexusTextureEditingTileIds',
+  '__faNexusBuildingEditingTileIds',
+  '__faNexusPathEditingTiles'
+];
 
 const selectionFilterState = {
   active: false,
@@ -70,12 +75,121 @@ function isAltModifierActive() {
   }
 }
 
+function collectEditedTileIds() {
+  const hiddenIds = new Set();
+  try {
+    for (const key of EDITING_TILE_SET_KEYS) {
+      const set = globalThis?.[key];
+      if (!(set instanceof Set)) continue;
+      for (const id of set) {
+        if (id) hiddenIds.add(id);
+      }
+    }
+
+    const buildingSet = globalThis?.__faNexusBuildingEditingTileIds;
+    if (!(buildingSet instanceof Set) || !buildingSet.size) return hiddenIds;
+
+    const wallGroupIds = new Set();
+    const primaryIds = new Set();
+    const tiles = canvas?.scene?.tiles
+      ? Array.from(canvas.scene.tiles)
+      : (Array.isArray(canvas?.tiles?.placeables) ? canvas.tiles.placeables.map(tile => tile?.document).filter(Boolean) : []);
+
+    for (const doc of tiles) {
+      const id = doc?.id;
+      if (!id || !buildingSet.has(id)) continue;
+      primaryIds.add(id);
+      hiddenIds.add(id);
+      const data = doc.getFlag?.('fa-nexus', 'building');
+      const meta = data?.meta || {};
+      if (meta?.wallGroupId) wallGroupIds.add(meta.wallGroupId);
+      if (meta?.fillTileId) hiddenIds.add(meta.fillTileId);
+    }
+
+    if (!wallGroupIds.size && !primaryIds.size) return hiddenIds;
+
+    for (const doc of tiles) {
+      const id = doc?.id;
+      if (!id || hiddenIds.has(id)) continue;
+      const data = doc.getFlag?.('fa-nexus', 'building');
+      if (data) {
+        const meta = data?.meta || {};
+        if (meta?.parentWallTileId && primaryIds.has(meta.parentWallTileId)) {
+          hiddenIds.add(id);
+          continue;
+        }
+        if (meta?.parentWallGroupId && wallGroupIds.has(meta.parentWallGroupId)) {
+          hiddenIds.add(id);
+          continue;
+        }
+        if (meta?.wallGroupId && wallGroupIds.has(meta.wallGroupId)) {
+          hiddenIds.add(id);
+          continue;
+        }
+      }
+      const door = doc.getFlag?.('fa-nexus', 'buildingDoorFrame');
+      if (door?.wallGroupId && wallGroupIds.has(door.wallGroupId)) {
+        hiddenIds.add(id);
+        continue;
+      }
+      const sill = doc.getFlag?.('fa-nexus', 'buildingWindowSill');
+      const window = doc.getFlag?.('fa-nexus', 'buildingWindowWindow');
+      const frame = doc.getFlag?.('fa-nexus', 'buildingWindowFrame');
+      const windowFlag = sill || window || frame;
+      if (windowFlag?.wallGroupId && wallGroupIds.has(windowFlag.wallGroupId)) {
+        hiddenIds.add(id);
+      }
+    }
+
+    return hiddenIds;
+  } catch (_) {
+    return hiddenIds;
+  }
+}
+
+function isTileBeingEdited(tile, hiddenIds) {
+  try {
+    const id = tile?.document?.id || tile?.id;
+    if (!id) return false;
+    if (hiddenIds instanceof Set) return hiddenIds.has(id);
+    for (const key of EDITING_TILE_SET_KEYS) {
+      const set = globalThis?.[key];
+      if (set instanceof Set && set.has(id)) return true;
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 function isTilesLayerActive() {
   try {
     return !!canvas?.tiles && canvas?.activeLayer === canvas.tiles;
   } catch (_) {
     return false;
   }
+}
+
+function forceHideEditedTile(tile) {
+  try {
+    if (!tile || tile.destroyed) return;
+    if (!isTileBeingEdited(tile)) return;
+    try { tile.visible = false; } catch (_) {}
+    try { if (typeof tile.renderable === 'boolean') tile.renderable = false; } catch (_) {}
+    try { tile.alpha = 0; } catch (_) {}
+    if (tile.mesh && tile.mesh.visible !== false) {
+      try { tile.mesh.visible = false; } catch (_) {}
+    }
+    if (tile.bg && tile.bg.visible !== false) {
+      try { tile.bg.visible = false; } catch (_) {}
+    }
+    if (tile.frame && tile.frame.visible !== false) {
+      try { tile.frame.visible = false; } catch (_) {}
+    }
+    if (typeof tile.eventMode !== 'undefined') {
+      try { tile.eventMode = 'none'; } catch (_) {}
+    }
+  } catch (_) {}
 }
 
 function shouldSuppressTileHover() {
@@ -448,19 +562,24 @@ function ensureTileForegroundSelectionPatch() {
 
   Tile.prototype._refreshState = function (...args) {
     if (!selectionIgnoresForeground()) {
-      return original.apply(this, args);
+      const result = original.apply(this, args);
+      try { forceHideEditedTile(this); } catch (_) {}
+      return result;
     }
     const fgTool = ui?.controls?.control?.tools?.foreground;
     if (!fgTool || typeof fgTool.active !== 'boolean') {
-      original.apply(this, args);
+      const result = original.apply(this, args);
       if (this.layer?.active && this.eventMode !== 'static') this.eventMode = 'static';
-      return;
+      try { forceHideEditedTile(this); } catch (_) {}
+      return result;
     }
     const prev = fgTool.active;
     const overhead = Number(this.document?.elevation ?? 0) >= Number(this.document?.parent?.foregroundElevation ?? 0);
     fgTool.active = overhead;
     try {
-      return original.apply(this, args);
+      const result = original.apply(this, args);
+      try { forceHideEditedTile(this); } catch (_) {}
+      return result;
     } finally {
       fgTool.active = prev;
     }
@@ -753,10 +872,11 @@ function collectPreviewEntries() {
 
 function buildEntriesFromCanvas() {
   if (!canvas?.ready || !canvas?.tiles) return [];
+  const hiddenIds = collectEditedTileIds();
   const entries = [];
   const tiles = canvas.tiles.placeables || [];
   const sortedTiles = tiles
-    .filter((tile) => tile && !tile.destroyed)
+    .filter((tile) => tile && !tile.destroyed && !isTileBeingEdited(tile, hiddenIds))
     .slice()
     .sort((a, b) => {
       const elevDiff = (Number(b.document?.elevation ?? 0) - Number(a.document?.elevation ?? 0));
@@ -1421,6 +1541,7 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     this._clearHover();
     const tile = canvas?.tiles?.placeables?.find((t) => (t?.document?.id || t?.id) === tileId);
     if (!tile) return;
+    if (isTileBeingEdited(tile)) return;
     try { tile._onHoverIn(hoverEventStub, { hoverOutOthers: true }); } catch (_) {}
     this._hoveredTileId = tileId;
   }

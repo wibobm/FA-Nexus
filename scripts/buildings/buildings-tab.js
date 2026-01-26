@@ -149,6 +149,7 @@ export class BuildingsTab extends AssetsTab {
 
   async onActivate() {
     await super.onActivate();
+    if (!this.app || this.app._activeTab !== this.id) return;
     this._setActiveSubtab(this._activeSubtab, { silent: true });
     this._syncSearchField({ apply: false });
   }

@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+
+
+## [0.3.1 & 0.3.2] - 2026-01-26
+### Changed
+- Sliders in 'Tool Options' menu are not adjustable by scroll wheel anymore (except for 'Subgrid Density' slider)as it was interfeering with container scrolling abit too much.  Adjust sliders with draggin the sliders or typing in the desired value in new input boxes.
+
+### Fixed
+- 'Edit Path/Texture/Building' behaving  all kinds of weird because of some stuff introduced for 'Layer Manager'
+- Path control points now render above ohter tiles in the scene so they are no longer blocked visually if you have tiles above higher elevation
+- Other small fixes
+
+### Known Bug
+- 'Inner Wall' scale in Building tool being set to '25' in some instances.
+
+
 ## [0.3.0] - 2026-01-25
 
 ### Added

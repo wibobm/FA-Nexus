@@ -6,9 +6,41 @@ import {
   getTransparentTexture
 } from '../textures/texture-render.js';
 
+const EDITING_TILE_SET_KEY = '__faNexusBuildingEditingTileIds';
+
 function shouldSkipLinkedBuildingDeletes() {
   try { return !!globalThis?.FA_NEXUS_SUPPRESS_BUILDING_TILE_DELETE; }
   catch (_) { return false; }
+}
+
+function getEditingTileSet() {
+  try {
+    const root = globalThis;
+    if (!root) return null;
+    const existing = root[EDITING_TILE_SET_KEY];
+    return existing instanceof Set ? existing : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolveTileId(tile) {
+  try {
+    return tile?.document?.id || tile?.document?._id || tile?.id || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function isEditingTile(tile) {
+  try {
+    const set = getEditingTileSet();
+    if (!set) return false;
+    const id = resolveTileId(tile);
+    return !!id && set.has(id);
+  } catch (_) {
+    return false;
+  }
 }
 
 function ensureBuildingMeshTransparent(mesh) {
@@ -88,8 +120,9 @@ function normalizeTextureFlip(flip) {
   };
 }
 
-export function cleanupBuildingOverlay(tile) {
+export function cleanupBuildingOverlay(tile, options = {}) {
   try {
+    const preserveTexture = !!options.preserveTexture;
     if (!tile) return;
     const mesh = tile.mesh;
     const container = tile.faNexusBuildingContainer || mesh?.faNexusBuildingContainer;
@@ -100,7 +133,7 @@ export function cleanupBuildingOverlay(tile) {
     }
     if (mesh) {
       mesh.faNexusBuildingContainer = null;
-      restoreMeshTexture(mesh);
+      if (!preserveTexture) restoreMeshTexture(mesh);
     }
     tile.faNexusBuildingContainer = null;
   } catch (_) {}
@@ -320,6 +353,14 @@ export async function applyBuildingTile(tile) {
   try {
     if (!tile || tile.destroyed) return;
     const doc = tile.document;
+    if (isEditingTile(tile)) {
+      cleanupBuildingOverlay(tile, { preserveTexture: true });
+      let mesh = tile.mesh;
+      if (!mesh || mesh.destroyed) mesh = await ensureTileMesh(tile);
+      if (!mesh || mesh.destroyed) return;
+      ensureBuildingMeshTransparent(mesh);
+      return;
+    }
     const data = doc?.getFlag?.('fa-nexus', 'building');
     if (!data) {
       cleanupBuildingOverlay(tile);
@@ -449,6 +490,14 @@ export async function applyDoorFrameTile(tile) {
   try {
     if (!tile || tile.destroyed) return;
     const doc = tile.document;
+    if (isEditingTile(tile)) {
+      cleanupDoorFrameOverlay(tile);
+      let mesh = tile.mesh;
+      if (!mesh || mesh.destroyed) mesh = await ensureTileMesh(tile);
+      if (!mesh || mesh.destroyed) return;
+      ensureBuildingMeshTransparent(mesh);
+      return;
+    }
     const data = doc?.getFlag?.('fa-nexus', 'buildingDoorFrame');
     if (!data) {
       cleanupDoorFrameOverlay(tile);

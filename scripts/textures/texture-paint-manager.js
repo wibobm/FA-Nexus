@@ -3,7 +3,46 @@ import { premiumFeatureBroker } from '../premium/premium-feature-broker.js';
 import { premiumEntitlementsService } from '../premium/premium-entitlements-service.js';
 import { ensurePremiumFeaturesRegistered } from '../premium/premium-feature-registry.js';
 import './masked-tiles.js';
+import { applyMaskedTilingToTile } from './texture-render.js';
 import { toolOptionsController } from '../core/tool-options-controller.js';
+
+const EDITING_TILE_SET_KEY = '__faNexusTextureEditingTileIds';
+
+function getEditingTileSet() {
+  try {
+    const root = globalThis;
+    if (!root) return null;
+    let set = root[EDITING_TILE_SET_KEY];
+    if (!(set instanceof Set)) {
+      set = new Set();
+      root[EDITING_TILE_SET_KEY] = set;
+    }
+    return set;
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolveTileId(targetTile) {
+  try {
+    return targetTile?.document?.id || targetTile?.id || targetTile?.document?._id || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolvePlaceableTile(targetTile, tileId) {
+  try {
+    if (targetTile?.document && targetTile?.mesh) return targetTile;
+    const doc = targetTile?.document || targetTile;
+    if (doc?.object) return doc.object;
+    const id = tileId || doc?.id || doc?._id;
+    if (!id) return null;
+    return canvas?.tiles?.placeables?.find((tile) => tile?.document?.id === id) || null;
+  } catch (_) {
+    return null;
+  }
+}
 
 export class TexturePaintManager {
   constructor(app) {
@@ -13,6 +52,7 @@ export class TexturePaintManager {
     this._entitlementProbe = null;
     this._toolMonitor = null;
     this._delegateListenerBound = false;
+    this._editingTileId = null;
     this._syncToolOptionsState();
   }
 
@@ -72,6 +112,9 @@ export class TexturePaintManager {
     const delegate = await this._ensureDelegate();
     let result;
     try {
+      if (!this._editingTileId) {
+        this._clearEditingTile();
+      }
       result = delegate.start?.(...args);
       try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
       this._syncToolOptionsState({ suppressRender: false });
@@ -96,17 +139,22 @@ export class TexturePaintManager {
     }
     let result;
     try {
+      this._markEditingTile(targetTile);
       result = delegate.editTile(targetTile, options);
-      try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
-      this._syncToolOptionsState({ suppressRender: false });
-      toolOptionsController.activateTool('texture.paint', { label: 'Texture Painter' });
-      this._beginToolWindowMonitor('texture.paint', delegate);
       if (result && typeof result.catch === 'function') {
         result.catch(() => {
+          this._clearEditingTile();
           this._cancelToolWindowMonitor();
           toolOptionsController.deactivateTool('texture.paint');
         });
       }
+      try { canvas?.tiles?.releaseAll?.(); } catch (_) {}
+      this._syncToolOptionsState({ suppressRender: false });
+      toolOptionsController.activateTool('texture.paint', { label: 'Texture Painter' });
+      this._beginToolWindowMonitor('texture.paint', delegate);
+    } catch (error) {
+      this._clearEditingTile();
+      throw error;
     } finally {
       this._scheduleEntitlementProbe();
     }
@@ -115,6 +163,7 @@ export class TexturePaintManager {
 
   stop(...args) {
     this._cancelToolWindowMonitor();
+    this._clearEditingTile();
     if (!this._delegate) {
       toolOptionsController.deactivateTool('texture.paint');
       return;
@@ -224,6 +273,7 @@ export class TexturePaintManager {
       try { active = !!delegate?.isActive; }
       catch (_) { active = false; }
       if (!active) {
+        this._clearEditingTile();
         toolOptionsController.deactivateTool(toolId);
         this._cancelToolWindowMonitor();
         return;
@@ -245,6 +295,33 @@ export class TexturePaintManager {
       } catch (_) {}
     }
     this._toolMonitor = null;
+  }
+
+  _markEditingTile(targetTile) {
+    try {
+      const tileId = resolveTileId(targetTile);
+      if (!tileId) return;
+      if (this._editingTileId && this._editingTileId !== tileId) {
+        this._clearEditingTile();
+      }
+      this._editingTileId = tileId;
+      const set = getEditingTileSet();
+      if (set) set.add(tileId);
+      const tile = resolvePlaceableTile(targetTile, tileId);
+      if (tile) applyMaskedTilingToTile(tile);
+    } catch (_) {}
+  }
+
+  _clearEditingTile() {
+    try {
+      const tileId = this._editingTileId;
+      if (!tileId) return;
+      this._editingTileId = null;
+      const set = getEditingTileSet();
+      if (set) set.delete(tileId);
+      const tile = resolvePlaceableTile(null, tileId);
+      if (tile) applyMaskedTilingToTile(tile);
+    } catch (_) {}
   }
 
   _buildToolOptionsState() {

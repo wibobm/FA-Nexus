@@ -118,6 +118,8 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     this._boundResettableContext = (event) => this._handleResettableContext(event);
     this._customToggleBindings = new Map();
     this._resettableContextRoot = null;
+    this._sliderWheelRoot = null;
+    this._boundSliderWheel = (event) => this._handleSliderWheel(event);
     this._placementRoot = null;
     this._placementPushTopButton = null;
     this._placementPushBottomButton = null;
@@ -534,6 +536,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       this._syncDropShadowControl();
       this._syncDropShadowControls();
       this._syncTextureToolControls();
+      this._syncEditorActions();
       this._syncTextureOpacityControl();
       this._syncTextureBrushControls();
       this._syncAssetScatterControls();
@@ -1742,7 +1745,9 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       const root = this.element;
       if (!root) return;
       root.addEventListener('contextmenu', this._boundResettableContext);
+      root.addEventListener('wheel', this._boundSliderWheel, { passive: false });
       this._resettableContextRoot = root;
+      this._sliderWheelRoot = root;
       const gridToggle = root.querySelector('#fa-nexus-grid-snap-toggle');
       if (gridToggle) {
         gridToggle.checked = !!this._gridSnapEnabled;
@@ -1850,6 +1855,10 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       try { this._resettableContextRoot.removeEventListener('contextmenu', this._boundResettableContext); }
       catch (_) {}
       this._resettableContextRoot = null;
+    }
+    if (this._sliderWheelRoot) {
+      try { this._sliderWheelRoot.removeEventListener('wheel', this._boundSliderWheel); } catch (_) {}
+      this._sliderWheelRoot = null;
     }
     if (this._gridSnapToggle) {
       try { this._gridSnapToggle.removeEventListener('change', this._boundGridSnapChange); }
@@ -1964,6 +1973,24 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
     } catch (_) {}
+  }
+
+  _handleSliderWheel(event) {
+    if (!event || event.defaultPrevented) return;
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const slider = target.closest('input[type="range"]');
+    if (!slider || slider.disabled) return;
+    if (typeof slider.matches === 'function' && slider.matches('[data-fa-nexus-grid-snap-slider]')) return;
+    const container = this._getScrollContainer();
+    if (container) {
+      const deltaY = Number(event.deltaY) || 0;
+      const deltaX = Number(event.deltaX) || 0;
+      if (deltaY) container.scrollTop += deltaY;
+      if (deltaX) container.scrollLeft += deltaX;
+    }
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   _handleGridSnapChange(event) {
@@ -3677,7 +3704,6 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (input) {
       input.addEventListener('input', this._boundFillElevationInput);
       input.addEventListener('change', this._boundFillElevationCommit);
-      input.addEventListener('wheel', this._boundFillElevationWheel, { passive: false });
     }
     this._fillElevationInput = input;
     this._fillElevationDisplay = root.querySelector('[data-fa-nexus-fill-elevation-display]') || null;
@@ -3687,7 +3713,6 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (this._fillElevationInput) {
       try { this._fillElevationInput.removeEventListener('input', this._boundFillElevationInput); } catch (_) {}
       try { this._fillElevationInput.removeEventListener('change', this._boundFillElevationCommit); } catch (_) {}
-      try { this._fillElevationInput.removeEventListener('wheel', this._boundFillElevationWheel); } catch (_) {}
     }
     this._fillElevationRoot = null;
     this._fillElevationInput = null;
@@ -3806,7 +3831,6 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (slider) {
       slider.addEventListener('input', this._boundPathScaleInput);
       slider.addEventListener('change', this._boundPathScaleCommit);
-      slider.addEventListener('wheel', this._boundPathScaleWheel, { passive: false });
     }
     this._pathScaleSlider = slider;
     this._pathScaleDisplay = root.querySelector('[data-fa-nexus-path-scale-display]') || null;
@@ -3817,7 +3841,6 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (this._pathScaleSlider) {
       try { this._pathScaleSlider.removeEventListener('input', this._boundPathScaleInput); } catch (_) {}
       try { this._pathScaleSlider.removeEventListener('change', this._boundPathScaleCommit); } catch (_) {}
-      try { this._pathScaleSlider.removeEventListener('wheel', this._boundPathScaleWheel); } catch (_) {}
     }
     this._unbindDisplayInput(this._pathScaleDisplay, this._boundPathScaleInput, this._boundPathScaleCommit);
     this._pathScaleRoot = null;

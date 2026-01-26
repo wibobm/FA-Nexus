@@ -7,7 +7,7 @@
 FA Nexus is the all-in-one hub for Forgotten Adventures—bringing *fully featured mapmaking capabilities* and *advanced token management inside* Foundry VTT as well as other QoL improvements.
 
 ## Freemium Model
-###Free content & Features**
+### Free content & Features**
 
 - **Advanced Tokens placement and Assets placement tools** - backed by entire free section of *Forgotten Adventures library* - available instantly via cloud with no extra setup or cost. 
 - This includes *over 141 000 Mapmaking Assets & over 1390 Unique topdown Tokens* available for free.
@@ -18,7 +18,7 @@ FA Nexus is the all-in-one hub for Forgotten Adventures—bringing *fully featur
 - Smart Search, Folders, and Bookmarks
 - Pixel Perfect tiles selection
 
-###Premium content & Features - ([Patreon Adventurer tier ($7) or higher](https://www.patreon.com/forgottenadventures/membership))**
+### Premium content & Features - ([Patreon Adventurer tier ($7) or higher](https://www.patreon.com/forgottenadventures/membership))**
 - **Content unlocks** - All Token Color variants, Premium Tokens, Assets, Paths & Textures 
 - **Texture painting** - Brush and fill tools with height-map masking for rapid terrain blending.
 - **Paths** - Place or freehand draw curved paths with optional Foundry Walls & Drop Shadow support.
