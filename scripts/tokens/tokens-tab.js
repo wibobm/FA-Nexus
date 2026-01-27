@@ -59,6 +59,7 @@ export class TokensTab extends GridBrowseTab {
       version: 0
     };
     this._deferredActivationTimeout = null;
+    this._didDeactivate = false;
   }
 
   get id() { return 'tokens'; }
@@ -155,6 +156,7 @@ export class TokensTab extends GridBrowseTab {
   async onActivate() {
     const app = this.app;
     Logger.info('TokensTab.onActivate');
+    this._didDeactivate = false;
     const gridContainer = this.getGridContainer();
     if (gridContainer) {
       const currentGrid = this._dragDrop?.grid || null;
@@ -252,6 +254,8 @@ export class TokensTab extends GridBrowseTab {
   }
 
   onDeactivate() {
+    this._didDeactivate = true;
+    this._loadId = (this._loadId || 0) + 1;
     if (this._deferredActivationTimeout) {
       try { clearTimeout(this._deferredActivationTimeout); } catch (_) {}
       this._deferredActivationTimeout = null;
@@ -560,20 +564,23 @@ export class TokensTab extends GridBrowseTab {
   async loadTokens() {
     const app = this.app;
     Logger.info('TokensTab.loadTokens:start');
-    if (!app.rendered || !app.element || !app._grid) return;
+    if (!app?.rendered || !app?.element) return;
     const loadId = (++this._loadId);
-    const isCancelled = () => (loadId !== this._loadId) || !app.rendered || !app.element || !app._grid;
+    const isUiActive = () => !!(app?.rendered && app?.element && app?._grid && app?._activeTab === this.id && !this._didDeactivate);
+    const isCancelled = () => (loadId !== this._loadId) || !app?.rendered || !app?.element;
 
     const folders = getEnabledFolders('tokenFolders');
     Logger.info('TokensTab.loadTokens:folders', { count: folders.length, folders });
 
     const showGridLoader = (message) => {
+      if (!isUiActive()) return;
       try { this.app?.showGridLoader?.(message, { owner: this.id }); } catch (_) {}
     };
     const hideGridLoader = () => {
       try { this.app?.hideGridLoader?.(this.id); } catch (_) {}
     };
     const updateGridLoader = (message) => {
+      if (!isUiActive()) return;
       try { this.app?.updateGridLoader?.(message, { owner: this.id }); } catch (_) {}
     };
 
@@ -605,7 +612,7 @@ export class TokensTab extends GridBrowseTab {
       let locked = false; let label = 'Indexing cloud tokens…';
       try {
         const st = await getCloudIndexingState();
-        if (st?.indexing) { this._setIndexingLock(true, st.label || label); locked = true; }
+        if (st?.indexing && isUiActive()) { this._setIndexingLock(true, st.label || label); locked = true; }
       } catch (_) {}
       try { return await fn(); } finally { if (locked) this._setIndexingLock(false); }
     };
@@ -614,15 +621,21 @@ export class TokensTab extends GridBrowseTab {
       // No local folders: show cloud only. Clear current locals immediately and show a loader.
       this._items = [];
       this._computeFolderStats(this._items);
-      try { app._grid.setData([]); } catch (_) {}
+      if (isUiActive()) {
+        try { app._grid.setData([]); } catch (_) {}
+      }
       if (cloudEnabled) {
-        showGridLoader(await cloudLoaderMessage());
+        if (isUiActive()) showGridLoader(await cloudLoaderMessage());
         await withCloudLock(async () => {
+          if (isCancelled()) return;
           await this._loadAndMergeCloud(false, async (collected) => {
+            if (isCancelled()) return;
             hideGridLoader();
             this._items = collected;
             this._computeFolderStats(this._items);
-            await this.applySearchAsync(this.getCurrentSearchValue());
+            if (isUiActive()) {
+              await this.applySearchAsync(this.getCurrentSearchValue());
+            }
             if (this.app?._activeTab === this.id) {
               try { this._updateFolderFilter(); } catch (_) {}
             }
@@ -631,7 +644,9 @@ export class TokensTab extends GridBrowseTab {
       } else {
         hideGridLoader();
         this._computeFolderStats(this._items);
-        await this.applySearchAsync(this.getCurrentSearchValue());
+        if (isUiActive()) {
+          await this.applySearchAsync(this.getCurrentSearchValue());
+        }
         if (this.app?._activeTab === this.id) {
           try { this._updateFolderFilter(); } catch (_) {}
         }
@@ -653,7 +668,7 @@ export class TokensTab extends GridBrowseTab {
         if (isCancelled()) return;
         this._items = cachedItems;
         if (cachedItems.length) {
-        showGridLoader(`Loading tokens… (cached ${cachedItems.length})`);
+          showGridLoader(`Loading tokens… (cached ${cachedItems.length})`);
           Logger.info('TokensTab.cache.ready', { cached: cachedItems.length });
         } else {
           showGridLoader('Indexing local tokens… 0');
@@ -662,11 +677,11 @@ export class TokensTab extends GridBrowseTab {
       onStreamProgress: (count) => {
         if (isCancelled()) return;
         updateGridLoader(`Indexing local tokens… ${count}`);
-        if (!localLockActive) { this._setIndexingLock(true, 'Indexing local tokens...'); localLockActive = true; }
+        if (!localLockActive && isUiActive()) { this._setIndexingLock(true, 'Indexing local tokens...'); localLockActive = true; }
       }
     });
 
-    if (localResult.cancelled) { hideGridLoader(); if (localLockActive) this._setIndexingLock(false); return; }
+    if (localResult.cancelled || isCancelled()) { hideGridLoader(); if (localLockActive) this._setIndexingLock(false); return; }
 
     this._items = localResult.localItems;
     this._computeFolderStats(this._items);
@@ -675,14 +690,18 @@ export class TokensTab extends GridBrowseTab {
     if (localLockActive) this._setIndexingLock(false);
 
     if (cloudEnabled) {
-      showGridLoader(await cloudLoaderMessage());
+      if (isUiActive()) showGridLoader(await cloudLoaderMessage());
       await withCloudLock(async () => {
-          await this._loadAndMergeCloud(true, async (merged) => {
-            hideGridLoader();
-            this._items = merged;
-            this._computeFolderStats(this._items);
+        if (isCancelled()) return;
+        await this._loadAndMergeCloud(true, async (merged) => {
+          if (isCancelled()) return;
+          hideGridLoader();
+          this._items = merged;
+          this._computeFolderStats(this._items);
+          if (isUiActive()) {
             await this.applySearchAsync(this.getCurrentSearchValue());
-            Logger.info('TokensTab.streaming:done', { total: this._items.length, streamed: localResult.streamedCount });
+          }
+          Logger.info('TokensTab.streaming:done', { total: this._items.length, streamed: localResult.streamedCount });
           if (this.app?._activeTab === this.id) {
             try { this._updateFolderFilter(); } catch (_) {}
           }
@@ -691,7 +710,9 @@ export class TokensTab extends GridBrowseTab {
     } else {
       hideGridLoader();
       this._computeFolderStats(this._items);
-      await this.applySearchAsync(this.getCurrentSearchValue());
+      if (isUiActive()) {
+        await this.applySearchAsync(this.getCurrentSearchValue());
+      }
       if (this.app?._activeTab === this.id) {
         try { this._updateFolderFilter(); } catch (_) {}
       }
