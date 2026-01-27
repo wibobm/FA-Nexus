@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 
-## [0.3.1 - 0.3.35] - 2026-01-26
+## [0.3.1 - 0.3.36] - 2026-01-26
 ### Changed
 - Tool Options sliders no longer respond to plain scroll (except Subgrid Density) to avoid scroll interference; use Ctrl+wheel, drag, or type a value and commit with Enter/blur.
 
