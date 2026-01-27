@@ -207,8 +207,8 @@ export class TileFlattenManager {
       }
       let backgroundTiles = tiles;
       let foregroundTiles = tiles;
+      const fgElevation = exportSplitLayers ? this._getForegroundElevation() : null;
       if (exportSplitLayers) {
-        const fgElevation = this._getForegroundElevation();
         backgroundTiles = tiles.filter((doc) => this._getTileElevation(doc) < fgElevation);
         foregroundTiles = tiles.filter((doc) => this._getTileElevation(doc) >= fgElevation);
       }
@@ -222,13 +222,25 @@ export class TileFlattenManager {
               label: 'Background',
               suffix: 'background',
               tiles: backgroundTiles,
-              visibility: { keepBackground: true, keepTiles: true, keepForeground: false }
+              visibility: {
+                keepBackground: true,
+                keepTiles: true,
+                keepForeground: false,
+                keepDoors: true,
+                doorVisibility: Number.isFinite(fgElevation) ? { maxElevation: fgElevation } : null
+              }
             },
             {
               label: 'Foreground',
               suffix: 'foreground',
               tiles: foregroundTiles,
-              visibility: { keepBackground: false, keepTiles: true, keepForeground: true }
+              visibility: {
+                keepBackground: false,
+                keepTiles: true,
+                keepForeground: true,
+                keepDoors: true,
+                doorVisibility: Number.isFinite(fgElevation) ? { minElevation: fgElevation } : null
+              }
             }
           ]
           : [
@@ -236,7 +248,12 @@ export class TileFlattenManager {
               label: 'Scene',
               suffix: '',
               tiles,
-              visibility: { keepBackground: true, keepTiles: true, keepForeground: true }
+              visibility: {
+                keepBackground: true,
+                keepTiles: true,
+                keepForeground: true,
+                keepDoors: true
+              }
             }
           ];
 
@@ -262,7 +279,7 @@ export class TileFlattenManager {
               chunkPad: false,
               chunkAuto,
               suspendRender: true,
-              visibility: task.visibility,
+                  visibility: task.visibility,
               onChunk: async (entry, index, total) => {
                 const label = Number.isFinite(total) && total > 0
                   ? `Saving ${layerLabel.toLowerCase()} chunk ${index + 1} of ${total}...`
@@ -361,6 +378,9 @@ export class TileFlattenManager {
               const layerLabel = task.label || 'Scene';
               const layerSuffix = task.suffix ? `-${task.suffix}` : '';
               const flattenProgressBase = 0.9 + (flattenSpan * i);
+              const doorVisibility = exportSplitLayers && Number.isFinite(fgElevation)
+                ? (task.suffix === 'foreground' ? { minElevation: fgElevation } : { maxElevation: fgElevation })
+                : null;
 
               overlay.setStatus(`Flattening ${layerLabel.toLowerCase()} tiles...`);
               overlay.setProgress?.(flattenProgressBase);
@@ -386,7 +406,13 @@ export class TileFlattenManager {
                   chunkPad: false,
                   chunkAuto,
                   suspendRender: true,
-                  visibility: { keepBackground: false, keepTiles: true, keepForeground: false },
+                  visibility: {
+                    keepBackground: false,
+                    keepTiles: true,
+                    keepForeground: false,
+                    keepDoors: true,
+                    doorVisibility
+                  },
                   onChunk: async (entry, index, total) => {
                     const label = Number.isFinite(total) && total > 0
                       ? `Saving ${layerLabel.toLowerCase()} tile chunk ${index + 1} of ${total}...`
@@ -446,7 +472,13 @@ export class TileFlattenManager {
                   paddingExtra,
                   trimToContent: false,
                   suspendRender: true,
-                  visibility: { keepBackground: false, keepTiles: true, keepForeground: false }
+                  visibility: {
+                    keepBackground: false,
+                    keepTiles: true,
+                    keepForeground: false,
+                    keepDoors: true,
+                    doorVisibility
+                  }
                 });
                 if (!canvasData?.canvas) {
                   throw new Error(`Failed to flatten ${layerLabel.toLowerCase()} tiles`);
@@ -2005,11 +2037,122 @@ export class TileFlattenManager {
     return 8192;
   }
 
+  _resolveDoorElevation(doc) {
+    try {
+      const directElevation = doc?.elevation;
+      if (Number.isFinite(directElevation)) return Number(directElevation);
+    } catch (_) {}
+    try {
+      const flagElevation = doc?.getFlag?.('fa-nexus', 'buildingWall')?.elevation;
+      if (Number.isFinite(flagElevation)) return Number(flagElevation);
+    } catch (_) {}
+    try {
+      const coreElevation = doc?.getFlag?.('core', 'elevation');
+      if (Number.isFinite(coreElevation)) return Number(coreElevation);
+    } catch (_) {}
+    try {
+      const flags = doc?.flags || doc?._source?.flags || {};
+      const faElevation = flags?.['fa-nexus']?.buildingWall?.elevation;
+      if (Number.isFinite(Number(faElevation))) return Number(faElevation);
+      const coreElevation = flags?.core?.elevation;
+      if (Number.isFinite(Number(coreElevation))) return Number(coreElevation);
+    } catch (_) {}
+    const fg = Number(canvas?.scene?.foregroundElevation);
+    return Number.isFinite(fg) ? fg - 1 : 0;
+  }
+
+  _isDoorElevationIncluded(elevation, visibility = null) {
+    if (!visibility || typeof visibility !== 'object') return true;
+    const minElevation = Number(visibility.minElevation);
+    const maxElevation = Number(visibility.maxElevation);
+    if (Number.isFinite(minElevation) && elevation < minElevation) return false;
+    if (Number.isFinite(maxElevation) && elevation >= maxElevation) return false;
+    return true;
+  }
+
+  async _extractDoorMeshesForExport(doorVisibility = null) {
+    try {
+      const wallsLayer = canvas?.walls;
+      const placeables = Array.isArray(wallsLayer?.placeables) ? wallsLayer.placeables : [];
+      if (!placeables.length) return null;
+
+      const entries = [];
+      const candidateWalls = [];
+      for (const wall of placeables) {
+        const doc = wall?.document || wall;
+        const hasDoorFlag = !!(doc?.getFlag?.('fa-nexus', 'buildingDoor') || doc?.getFlag?.('fa-nexus', 'buildingWindow'));
+        const doorType = Number(doc?.door ?? doc?._source?.door ?? doc?.data?.door ?? 0);
+        if (hasDoorFlag || doorType) candidateWalls.push(wall);
+      }
+
+      if (!candidateWalls.length) return null;
+
+      let waitCount = 0;
+      while (waitCount < 6) {
+        let missing = false;
+        for (const wall of candidateWalls) {
+          const meshes = wall?.doorMeshes ? Array.from(wall.doorMeshes) : [];
+          if (!meshes.length) {
+            missing = true;
+            break;
+          }
+        }
+        if (!missing) break;
+        waitCount += 1;
+        await this._nextFrame();
+      }
+
+      for (const wall of candidateWalls) {
+        const doorMeshes = wall?.doorMeshes ? Array.from(wall.doorMeshes) : [];
+        if (!doorMeshes.length) continue;
+        const doc = wall?.document || wall;
+        const elevation = this._resolveDoorElevation(doc);
+        const include = this._isDoorElevationIncluded(elevation, doorVisibility);
+        for (const mesh of doorMeshes) {
+          if (!mesh || mesh.destroyed) continue;
+          entries.push({
+            mesh,
+            visible: typeof mesh.visible === 'boolean' ? mesh.visible : null,
+            renderable: typeof mesh.renderable === 'boolean' ? mesh.renderable : null
+          });
+          try {
+            mesh.visible = !!include;
+            if (typeof mesh.renderable === 'boolean') mesh.renderable = !!include;
+          } catch (_) {}
+        }
+      }
+
+      if (!entries.length) return null;
+
+      return { entries };
+    } catch (error) {
+      Logger.debug?.('TileFlatten.doorMeshes.captureFailed', { error: String(error?.message || error) });
+      return null;
+    }
+  }
+
+  _restoreDoorMeshesForExport(state) {
+    if (!state || typeof state !== 'object') return;
+    const entries = Array.isArray(state.entries) ? state.entries : [];
+    for (const entry of entries) {
+      const mesh = entry?.mesh;
+      if (!mesh || mesh.destroyed) continue;
+      try {
+        if (entry?.visible !== null && typeof entry?.visible === 'boolean') mesh.visible = entry.visible;
+        if (entry?.renderable !== null && typeof entry?.renderable === 'boolean') mesh.renderable = entry.renderable;
+      } catch (_) {}
+    }
+  }
+
   async _applyFlattenVisibility(tiles, renderBounds, options = {}) {
     const selectedIds = new Set();
     for (const doc of Array.isArray(tiles) ? tiles : []) {
       if (doc?.id) selectedIds.add(doc.id);
     }
+
+    const doorMeshState = options?.keepDoors
+      ? await this._extractDoorMeshesForExport(options?.doorVisibility)
+      : null;
 
     const tilesLayer = canvas?.tiles;
     const placeables = Array.isArray(tilesLayer?.placeables) ? tilesLayer.placeables : [];
@@ -2048,10 +2191,13 @@ export class TileFlattenManager {
 
     const primary = canvas?.primary;
     const hiddenPrimary = [];
+    const retainWallsLayer = !!options?.keepDoors && !doorMeshState;
     if (primary?.children) {
       for (const child of primary.children) {
         if (!child) continue;
-        const keep = this._shouldRetainPrimaryChild(child, options);
+        const name = typeof child?.name === 'string' ? child.name : '';
+        const keep = this._shouldRetainPrimaryChild(child, options)
+          || (retainWallsLayer && (child === canvas?.walls || name === 'walls'));
         if (!keep && child.visible) {
           hiddenPrimary.push({ child, visible: true });
           child.visible = false;
@@ -2148,6 +2294,7 @@ export class TileFlattenManager {
       interfaceHighlightStates,
       interfaceState,
       effectsState,
+      doorMeshState,
       ...shadowState
     };
   }
@@ -2162,7 +2309,10 @@ export class TileFlattenManager {
       if (child === canvas.foreground) return keepForeground;
       if (child === canvas?.primary?.background) return keepBackground;
       if (child === canvas?.primary?.foreground) return keepForeground;
+      const ctorName = typeof child?.constructor?.name === 'string' ? child.constructor.name : '';
+      if (ctorName === 'DoorMesh') return true;
       const name = typeof child?.name === 'string' ? child.name : '';
+      if (name.startsWith('Door.')) return true;
       if (name === 'background') return keepBackground;
       if (name === 'foreground') return keepForeground;
       if (!name) return false;
@@ -2356,6 +2506,10 @@ export class TileFlattenManager {
       for (const entry of state.hiddenPrimary || []) {
         if (entry?.child) entry.child.visible = !!entry.visible;
       }
+    } catch (_) {}
+
+    try {
+      this._restoreDoorMeshesForExport(state.doorMeshState);
     } catch (_) {}
 
     try {
