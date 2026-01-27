@@ -31,6 +31,7 @@ const selectionFilterState = {
   skipHidden: false,
   ignoreForeground: false
 };
+const SELECTION_FILTER_BLOCK_KEY = '_faNexusSelectionFilterBlocked';
 const layerHiddenState = {
   hooksBound: false
 };
@@ -217,10 +218,13 @@ function getForegroundElevation() {
   try {
     const fg = canvas?.scene?.foregroundElevation ?? canvas?.scene?._source?.foregroundElevation;
     const numeric = Number(fg);
-    return Number.isFinite(numeric) ? numeric : null;
-  } catch (_) {
-    return null;
-  }
+    if (Number.isFinite(numeric)) return numeric;
+  } catch (_) {}
+  try {
+    const gridDistance = Number(canvas?.scene?.grid?.distance || 0);
+    if (Number.isFinite(gridDistance)) return gridDistance * 4;
+  } catch (_) {}
+  return 0;
 }
 
 function sceneHasBackgroundImage() {
@@ -462,7 +466,12 @@ function canSelectPlaceable(placeable, { ignoreForeground = false, filterActive 
   if (filterActive) {
     const elevation = Number(placeable?.document?.elevation ?? 0);
     if (!elevationInRange(elevation)) return false;
-    if (selectionFilterState.skipLocked && placeable?.document?.locked) return false;
+    if (selectionFilterState.skipLocked) {
+      const doc = placeable?.document;
+      const sourceLocked = typeof doc?._source?.locked === 'boolean' ? doc._source.locked : null;
+      const locked = sourceLocked !== null ? sourceLocked : !!doc?.locked;
+      if (locked) return false;
+    }
     if (selectionFilterState.skipHidden && isTileHidden(placeable?.document)) return false;
   }
   return true;
@@ -479,6 +488,41 @@ function elevationInRange(value) {
 function refreshTileInteractionState() {
   if (!canvas?.ready || !canvas?.tiles?.setAllRenderFlags) return;
   try { canvas.tiles.setAllRenderFlags({ refreshState: true }); } catch (_) {}
+}
+
+function pruneSelectionForFilter() {
+  if (!selectionFilterActive()) return;
+  const selection = Array.isArray(canvas?.tiles?.controlled) ? canvas.tiles.controlled : [];
+  if (!selection.length) return;
+  const filterActive = selectionFilterActive();
+  const ignoreForeground = selectionIgnoresForeground();
+  for (const tile of selection) {
+    if (canSelectPlaceable(tile, { ignoreForeground, filterActive })) continue;
+    try { tile?.release?.(); } catch (_) {}
+  }
+}
+
+function applySelectionFilterInteractivity(tile, { ignoreForeground = false, filterActive = false } = {}) {
+  if (!tile) return;
+  const blocked = !!filterActive && !canSelectPlaceable(tile, { ignoreForeground, filterActive });
+  const wasBlocked = !!tile[SELECTION_FILTER_BLOCK_KEY];
+  if (!blocked) {
+    if (wasBlocked) {
+      tile[SELECTION_FILTER_BLOCK_KEY] = false;
+      if (typeof tile.interactiveChildren !== 'undefined') {
+        try { tile.interactiveChildren = true; } catch (_) {}
+      }
+    }
+    return;
+  }
+  tile[SELECTION_FILTER_BLOCK_KEY] = true;
+  if (typeof tile.interactiveChildren !== 'undefined') {
+    try { tile.interactiveChildren = false; } catch (_) {}
+  }
+  if (tile.eventMode !== 'none') {
+    try { tile.eventMode = 'none'; } catch (_) {}
+    try { globalThis?.MouseInteractionManager?.emulateMoveEvent?.(); } catch (_) {}
+  }
 }
 
 function ensureTileSelectionPatch() {
@@ -561,9 +605,12 @@ function ensureTileForegroundSelectionPatch() {
   Tile.prototype._faNexusIgnoreForegroundOriginal = original;
 
   Tile.prototype._refreshState = function (...args) {
-    if (!selectionIgnoresForeground()) {
+    const filterActive = selectionFilterActive();
+    const ignoreForeground = selectionIgnoresForeground();
+    if (!ignoreForeground) {
       const result = original.apply(this, args);
       try { forceHideEditedTile(this); } catch (_) {}
+      applySelectionFilterInteractivity(this, { ignoreForeground, filterActive });
       return result;
     }
     const fgTool = ui?.controls?.control?.tools?.foreground;
@@ -571,6 +618,7 @@ function ensureTileForegroundSelectionPatch() {
       const result = original.apply(this, args);
       if (this.layer?.active && this.eventMode !== 'static') this.eventMode = 'static';
       try { forceHideEditedTile(this); } catch (_) {}
+      applySelectionFilterInteractivity(this, { ignoreForeground, filterActive });
       return result;
     }
     const prev = fgTool.active;
@@ -579,6 +627,7 @@ function ensureTileForegroundSelectionPatch() {
     try {
       const result = original.apply(this, args);
       try { forceHideEditedTile(this); } catch (_) {}
+      applySelectionFilterInteractivity(this, { ignoreForeground, filterActive });
       return result;
     } finally {
       fgTool.active = prev;
@@ -930,7 +979,7 @@ function buildEntriesFromCanvas() {
   const previewEntries = collectPreviewEntries();
   const hasBackground = sceneHasBackgroundImage();
   const hasForeground = sceneHasForegroundImage();
-  const foregroundElevation = hasForeground ? getForegroundElevation() : null;
+  const foregroundElevation = getForegroundElevation();
   const backgroundElevation = hasBackground ? getBackgroundDisplayElevation() : null;
   const markerEntries = [];
   if (hasBackground) {
@@ -980,7 +1029,7 @@ function buildEntriesFromCanvas() {
     }
     entries.push(item);
   }
-  if (hasForeground && Number.isFinite(foregroundElevation)) {
+  if (Number.isFinite(foregroundElevation)) {
     const foregroundEntry = {
       separator: true,
       foregroundSeparator: true,
@@ -1348,6 +1397,8 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     if (!isInput) {
       writeSetting(RANGE_MIN_SETTING, minValue);
       writeSetting(RANGE_MAX_SETTING, maxValue);
+      refreshTileInteractionState();
+      pruneSelectionForFilter();
     }
   }
 
@@ -1358,6 +1409,8 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     const value = !!input?.checked;
     selectionFilterState.skipLocked = value;
     writeSetting(SKIP_LOCKED_SETTING, value);
+    refreshTileInteractionState();
+    pruneSelectionForFilter();
   }
 
   _onSkipHiddenChange() {
@@ -1368,6 +1421,7 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     selectionFilterState.skipHidden = value;
     writeSetting(SKIP_HIDDEN_SETTING, value);
     refreshTileInteractionState();
+    pruneSelectionForFilter();
   }
 
   _onIgnoreForegroundChange() {
@@ -1378,6 +1432,7 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     selectionFilterState.ignoreForeground = value;
     writeSetting(IGNORE_FOREGROUND_SETTING, value);
     refreshTileInteractionState();
+    pruneSelectionForFilter();
   }
 
   _setFilterActive(active) {
@@ -1385,7 +1440,8 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     if (selectionFilterState.active === next) return;
     selectionFilterState.active = next;
     if (next) setAltKeyHeld(isAltModifierActive());
-    if (selectionFilterState.ignoreForeground) refreshTileInteractionState();
+    refreshTileInteractionState();
+    pruneSelectionForFilter();
   }
 
   _setActiveClass(active) {
