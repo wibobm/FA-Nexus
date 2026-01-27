@@ -218,6 +218,28 @@ export class NexusContentService {
       if (!onManifestProgress || signal?.aborted) return;
       try { onManifestProgress({ phase, count, total }); } catch (_) {}
     };
+    const scheduleChunkRebuild = (expectedLatest, expectedCount, expectedBuiltAt) => {
+      if (!expectedLatest) return;
+      try {
+        db.rebuildChunks(kind).then(async (ok) => {
+          if (!ok) return;
+          try {
+            const meta = await db.getMeta(kind);
+            if (!meta || meta.latest !== expectedLatest) return;
+            const count = Number.isFinite(meta.count) ? Number(meta.count) : (Number(expectedCount) || 0);
+            const builtAt = meta.builtAt || expectedBuiltAt || new Date().toISOString();
+            await db.setMeta(kind, {
+              id: 'meta',
+              latest: meta.latest,
+              count,
+              builtAt,
+              chunksLatest: meta.latest,
+              chunksBuiltAt: new Date().toISOString()
+            });
+          } catch (_) {}
+        }).catch(() => {});
+      } catch (_) {}
+    };
 
     // Emit sync start event
     this.progressEmitter.emit('sync:start', { kind });
@@ -252,6 +274,14 @@ export class NexusContentService {
       );
       if (upToDate) {
         Logger.info('ContentService.sync:noop', { kind, latest: plan.latest, mode: plan.mode });
+        try {
+          const meta = await db.getMeta(kind);
+          const latest = meta?.latest || plan.latest || null;
+          const chunksLatest = meta?.chunksLatest || null;
+          if (latest && chunksLatest !== latest) {
+            scheduleChunkRebuild(latest, meta?.count, meta?.builtAt);
+          }
+        } catch (_) {}
         this.progressEmitter.emit('sync:complete', { kind, mode: plan.mode, latest: plan.latest, upToDate: true });
         return plan.latest;
       }
@@ -282,7 +312,15 @@ export class NexusContentService {
           progressBatch: options.progressBatch,
           signal
         });
-        await db.setMeta(kind, { id: 'meta', latest: plan.latest, count: items.length, builtAt: new Date().toISOString() });
+        const builtAt = new Date().toISOString();
+        await db.setMeta(kind, {
+          id: 'meta',
+          latest: plan.latest,
+          count: items.length,
+          builtAt,
+          chunksLatest: plan.latest,
+          chunksBuiltAt: builtAt
+        });
         emitProgress('meta', items.length, items.length);
         Logger.timeEnd(`ContentService.full:${kind}`);
         Logger.info('ContentService.sync:done', { kind, mode: 'full', latest: plan.latest, count: items.length });
@@ -320,9 +358,21 @@ export class NexusContentService {
         }
 
         const count = await db.count(kind);
-        await db.setMeta(kind, { id: 'meta', latest: plan.latest, count, builtAt: new Date().toISOString() });
+        const builtAt = new Date().toISOString();
+        let prevMeta = null;
+        try { prevMeta = await db.getMeta(kind); } catch (_) {}
+        const prevChunksLatest = prevMeta?.chunksLatest ?? prevMeta?.latest ?? null;
+        const prevChunksBuiltAt = prevMeta?.chunksBuiltAt ?? null;
+        await db.setMeta(kind, {
+          id: 'meta',
+          latest: plan.latest,
+          count,
+          builtAt,
+          chunksLatest: prevChunksLatest,
+          chunksBuiltAt: prevChunksBuiltAt
+        });
         // Rebuild chunked index asynchronously so unfiltered list stays sorted by file_path
-        db.rebuildChunks(kind).catch(() => {});
+        scheduleChunkRebuild(plan.latest, count, builtAt);
         emitProgress('meta', count, count);
         Logger.timeEnd(`ContentService.deltas:${kind}`);
         Logger.info('ContentService.sync:done', { kind, mode: 'deltas', latest: plan.latest, count });

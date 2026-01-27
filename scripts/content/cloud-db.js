@@ -36,6 +36,7 @@ export class CloudDB {
     this.dbName = dbName;
     this.db = null;
     this.CHUNK_SIZE = 7000;
+    this._rebuildInFlight = new Map();
     try { CloudDB._instances.add(this); } catch (_) {}
   }
 
@@ -264,38 +265,44 @@ export class CloudDB {
    * @returns {Promise<boolean>}
    */
   async rebuildChunks(kind) {
-    const db = await this._open();
-    try {
-      const all = await new Promise((resolve) => {
-        const out = [];
-        try {
-          const s = db.transaction([`items_${kind}`], 'readonly').objectStore(`items_${kind}`);
-          const req = s.openCursor();
-          req.onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) { out.push(cursor.value); cursor.continue(); }
-            else resolve(out);
-          };
-          req.onerror = () => resolve(out);
-        } catch (_) { resolve(out); }
-      });
-      await new Promise((resolve, reject) => {
-        try {
-          const tx = db.transaction([`items2_${kind}`], 'readwrite');
-          const s2 = tx.objectStore(`items2_${kind}`);
-          s2.clear();
-          let chunkIndex = 0;
-          const sorted = all.slice().sort((a, b) => String(a?.file_path || '').localeCompare(String(b?.file_path || '')));
-          for (let i = 0; i < sorted.length; i += this.CHUNK_SIZE) {
-            const slice = sorted.slice(i, i + this.CHUNK_SIZE);
-            s2.put({ chunk: chunkIndex++, records: slice });
-          }
-          tx.oncomplete = () => resolve(true);
-          tx.onerror = () => reject(tx.error);
-        } catch (e) { resolve(false); }
-      });
-      return true;
-    } catch (_) { return false; }
+    if (this._rebuildInFlight?.has(kind)) return this._rebuildInFlight.get(kind);
+    const task = (async () => {
+      const db = await this._open();
+      try {
+        const all = await new Promise((resolve) => {
+          const out = [];
+          try {
+            const s = db.transaction([`items_${kind}`], 'readonly').objectStore(`items_${kind}`);
+            const req = s.openCursor();
+            req.onsuccess = (e) => {
+              const cursor = e.target.result;
+              if (cursor) { out.push(cursor.value); cursor.continue(); }
+              else resolve(out);
+            };
+            req.onerror = () => resolve(out);
+          } catch (_) { resolve(out); }
+        });
+        await new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([`items2_${kind}`], 'readwrite');
+            const s2 = tx.objectStore(`items2_${kind}`);
+            s2.clear();
+            let chunkIndex = 0;
+            const sorted = all.slice().sort((a, b) => String(a?.file_path || '').localeCompare(String(b?.file_path || '')));
+            for (let i = 0; i < sorted.length; i += this.CHUNK_SIZE) {
+              const slice = sorted.slice(i, i + this.CHUNK_SIZE);
+              s2.put({ chunk: chunkIndex++, records: slice });
+            }
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+          } catch (e) { resolve(false); }
+        });
+        return true;
+      } catch (_) { return false; }
+    })();
+    try { this._rebuildInFlight?.set(kind, task); } catch (_) {}
+    try { return await task; }
+    finally { try { this._rebuildInFlight?.delete(kind); } catch (_) {} }
   }
 
   /**
@@ -396,18 +403,6 @@ export class CloudDB {
     });
     const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
     const progressBatch = Math.max(25, Number(opts.progressBatch) || 1000);
-    let totalHint = 0;
-    if (onProgress) {
-      try {
-        const meta = await this.getMeta(kind);
-        totalHint = Number(meta?.count) || 0;
-        Logger.info('CloudDB.query:meta', { kind, totalHint });
-      } catch (_) {}
-    }
-    const store = db.transaction([`items_${kind}`], 'readonly').objectStore(`items_${kind}`);
-    Logger.time(`CloudDB.query:${kind}`);
-    if (signal?.aborted) throw abortError();
-
     const text = String(opts.text || '').toLowerCase();
     const tier = opts.tier || null;
     const pathPrefix = opts.pathPrefix || '';
@@ -415,6 +410,23 @@ export class CloudDB {
     const limit = Math.max(0, Number(opts.limit) || 0);
     const sortBy = opts.sortBy || 'file_path';
     const sortDir = opts.sortDir === 'desc' ? 'desc' : 'asc';
+    const wantsFastPath = !text && !tier && !pathPrefix && !offset && !limit;
+
+    let metaSnapshot = null;
+    let totalHint = 0;
+    if (onProgress || wantsFastPath) {
+      try {
+        metaSnapshot = await this.getMeta(kind);
+        if (onProgress) {
+          totalHint = Number(metaSnapshot?.count) || 0;
+          Logger.info('CloudDB.query:meta', { kind, totalHint });
+        }
+      } catch (_) {}
+    }
+
+    const store = db.transaction([`items_${kind}`], 'readonly').objectStore(`items_${kind}`);
+    Logger.time(`CloudDB.query:${kind}`);
+    if (signal?.aborted) throw abortError();
 
     // Helper to build a path range for prefix scans
     const pathRange = pathPrefix ? IDBKeyRange.bound(pathPrefix, `${pathPrefix}\uffff`) : null;
@@ -437,33 +449,41 @@ export class CloudDB {
       }
     };
 
-    if (!text && !tier && !pathPrefix && !offset && !limit) {
-      // Try chunked
-      const chunks = await promiseWithAbort(({ resolve }) => {
-        try {
-          const s2 = db.transaction([`items2_${kind}`], 'readonly').objectStore(`items2_${kind}`);
-          const req = s2.getAll();
-          req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
-          req.onerror = () => resolve([]);
-        } catch (_) { resolve([]); }
-      });
-      if (signal?.aborted) throw abortError();
-      if (Array.isArray(chunks) && chunks.length) {
-        Logger.info('CloudDB.query:mode', { kind, mode: 'chunks', chunks: chunks.length });
-        const merged = [];
-        let seen = 0;
-        for (const c of chunks) {
-          if (!Array.isArray(c?.records) || !c.records.length) continue;
-          merged.push(...c.records);
-          seen += c.records.length;
-          emitProgress(seen);
+    if (wantsFastPath) {
+      const latest = metaSnapshot?.latest || null;
+      const chunksLatest = metaSnapshot?.chunksLatest || null;
+      const chunksFresh = !!latest && !!chunksLatest && latest === chunksLatest;
+      if (!chunksFresh) {
+        Logger.info('CloudDB.query:chunks.stale', { kind, latest, chunksLatest });
+      }
+      if (chunksFresh) {
+        // Try chunked
+        const chunks = await promiseWithAbort(({ resolve }) => {
+          try {
+            const s2 = db.transaction([`items2_${kind}`], 'readonly').objectStore(`items2_${kind}`);
+            const req = s2.getAll();
+            req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+            req.onerror = () => resolve([]);
+          } catch (_) { resolve([]); }
+        });
+        if (signal?.aborted) throw abortError();
+        if (Array.isArray(chunks) && chunks.length) {
+          Logger.info('CloudDB.query:mode', { kind, mode: 'chunks', chunks: chunks.length });
+          const merged = [];
+          let seen = 0;
+          for (const c of chunks) {
+            if (!Array.isArray(c?.records) || !c.records.length) continue;
+            merged.push(...c.records);
+            seen += c.records.length;
+            emitProgress(seen);
+          }
+          if (onProgress && seen > lastProgressCount) formatProgress(seen, totalHint || seen);
+          if (sortBy === 'file_path' && sortDir === 'desc') merged.reverse();
+          const total = merged.length;
+          if (onProgress && !totalHint && total && lastProgressCount < total) formatProgress(total, total);
+          Logger.timeEnd(`CloudDB.query:${kind}`);
+          return { items: merged, total };
         }
-        if (onProgress && seen > lastProgressCount) formatProgress(seen, totalHint || seen);
-        if (sortBy === 'file_path' && sortDir === 'desc') merged.reverse();
-        const total = merged.length;
-        if (onProgress && !totalHint && total && lastProgressCount < total) formatProgress(total, total);
-        Logger.timeEnd(`CloudDB.query:${kind}`);
-        return { items: merged, total };
       }
       // Fallback to getAll and rebuild chunks in background
       Logger.info('CloudDB.query:mode', { kind, mode: 'cursor-fallback' });
