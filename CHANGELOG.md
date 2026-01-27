@@ -4,9 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 
-## [0.3.1 - 0.3.3] - 2026-01-26
+## [0.3.1 - 0.3.35] - 2026-01-26
 ### Changed
-- Sliders in 'Tool Options' menu are not adjustable by scroll wheel anymore (except for 'Subgrid Density' slider)as it was interfeering with container scrolling abit too much.  Adjust sliders with draggin the sliders or typing in the desired value in new input boxes.
+- Tool Options sliders no longer respond to plain scroll (except Subgrid Density) to avoid scroll interference; use Ctrl+wheel, drag, or type a value and commit with Enter/blur.
 
 ### Fixed
 - 'Edit Path/Texture/Building' behaving  all kinds of weird because of some stuff introduced for 'Layer Manager'

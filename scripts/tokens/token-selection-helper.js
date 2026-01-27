@@ -135,7 +135,10 @@ export class TokenSelectionHelper extends GridSelectionHelper {
       let cachedLocalPath = item?.cachedLocalPath || '';
       if (!cachedLocalPath && downloadManager && item?.filename) {
         try {
-          const local = downloadManager.getLocalPath('tokens', { filename: item.filename });
+          const local = downloadManager.getLocalPath('tokens', {
+            filename: item.filename,
+            file_path: item.file_path || item.path || ''
+          });
           if (local) cachedLocalPath = local;
         } catch (_) {}
       }

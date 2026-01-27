@@ -145,7 +145,10 @@ export class TokenDragDropManager {
       const tier = card.getAttribute('data-tier') || '';
       if (source !== 'cloud') return;
       const filename = card.getAttribute('data-filename') || '';
-      const filePath = card.getAttribute('data-url') || card.getAttribute('data-path') || '';
+      const filePathAttr = card.getAttribute('data-file-path') || '';
+      const folderPath = card.getAttribute('data-path') || '';
+      const filePath = filePathAttr || (folderPath && filename ? `${folderPath.replace(/\/+$/, '')}/${filename}` : filename);
+      const cachedUrl = card.getAttribute('data-url') || '';
       const app = this.app || foundry.applications.instances.get('fa-nexus-app');
       const svc = app?._contentService; const dl = app?._downloadManager;
       if (!svc || !dl) return;
@@ -153,6 +156,20 @@ export class TokenDragDropManager {
       if (tier === 'premium' && (!auth || !auth.authenticated || !auth.state)) return;
       const downloaded = (card.getAttribute('data-cached') === 'true') || false;
       Logger.info('TokenDrag.cloudprep.downloaded', { downloaded, tier });
+      if (downloaded) {
+        let cachedLocal = cachedUrl;
+        if (!cachedLocal && dl && typeof dl.getLocalPath === 'function' && filename) {
+          try {
+            cachedLocal = dl.getLocalPath('tokens', { filename, file_path: filePath, path: folderPath }) || '';
+          } catch (_) {}
+        }
+        if (cachedLocal) {
+          try { card.setAttribute('data-url', cachedLocal); } catch (_) {}
+          card._resolvedLocalPath = cachedLocal;
+          card._ensureLocalReady = true;
+          return;
+        }
+      }
       if (tier === 'premium' && downloaded) return; // do not prompt; dragstart will handle
       const item = { file_path: filePath, filename, tier };
       // Kick off ensureLocal early and cache the promise

@@ -1673,8 +1673,24 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
 
   _bindDisplayInput(display, inputHandler, commitHandler) {
     if (!display || display.tagName !== 'INPUT') return;
-    if (inputHandler) display.addEventListener('input', inputHandler);
-    if (commitHandler) display.addEventListener('change', commitHandler);
+    const isNumberInput = display.type === 'number';
+    if (inputHandler && !isNumberInput) display.addEventListener('input', inputHandler);
+    if (commitHandler) {
+      display.addEventListener('change', commitHandler);
+      if (isNumberInput) {
+        const existingHandler = display._faNexusCommitKeydown;
+        if (existingHandler) {
+          try { display.removeEventListener('keydown', existingHandler); } catch (_) {}
+        }
+        const keydownHandler = (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          commitHandler(event);
+        };
+        display.addEventListener('keydown', keydownHandler);
+        display._faNexusCommitKeydown = keydownHandler;
+      }
+    }
   }
 
   _unbindDisplayInput(display, inputHandler, commitHandler) {
@@ -1684,6 +1700,11 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     }
     if (commitHandler) {
       try { display.removeEventListener('change', commitHandler); } catch (_) {}
+    }
+    const keydownHandler = display._faNexusCommitKeydown;
+    if (keydownHandler) {
+      try { display.removeEventListener('keydown', keydownHandler); } catch (_) {}
+      try { delete display._faNexusCommitKeydown; } catch (_) {}
     }
   }
 
@@ -1721,12 +1742,13 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     if (!display) return;
     const text = data.display || '';
     if (display.tagName === 'INPUT') {
+      const isFocused = (typeof document !== 'undefined' && document.activeElement === display);
       const rawValue = data.value ?? '';
       const normalizedValue = (display.type === 'number')
         ? this._normalizeNumericInputValue(rawValue, data.step ?? display.step)
         : rawValue;
       const nextValue = normalizedValue === null || normalizedValue === undefined ? '' : String(normalizedValue);
-      if (display.value !== nextValue) display.value = nextValue;
+      if (!isFocused && display.value !== nextValue) display.value = nextValue;
       if (data.min !== undefined) display.min = String(data.min);
       if (data.max !== undefined) display.max = String(data.max);
       if (data.step !== undefined) display.step = String(data.step);
@@ -1982,6 +2004,30 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
     const slider = target.closest('input[type="range"]');
     if (!slider || slider.disabled) return;
     if (typeof slider.matches === 'function' && slider.matches('[data-fa-nexus-grid-snap-slider]')) return;
+    if (event.ctrlKey) {
+      const delta = Number(event.deltaY) || Number(event.deltaX) || 0;
+      if (!delta) return;
+      const min = Number(slider.min ?? 0);
+      const max = Number(slider.max ?? 0);
+      let step = Number(slider.step ?? 1);
+      if (!Number.isFinite(step) || step <= 0) step = 1;
+      const direction = delta < 0 ? 1 : -1;
+      const current = Number(slider.value);
+      const base = Number.isFinite(current) ? current : min;
+      let next = base + (step * direction);
+      const clampMin = Number.isFinite(min) ? min : 0;
+      const clampMax = Number.isFinite(max) ? max : clampMin;
+      next = Math.min(clampMax, Math.max(clampMin, next));
+      const decimals = this._inferStepDecimals(step);
+      if (decimals !== null) next = Number(next.toFixed(decimals));
+      if (next !== base) {
+        slider.value = String(next);
+        try { slider.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const container = this._getScrollContainer();
     if (container) {
       const deltaY = Number(event.deltaY) || 0;
@@ -5675,11 +5721,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const frameScaleDisplay = root.querySelector('[data-fa-nexus-door-frame-scale-display]');
       if (frameScaleDisplay) {
-        frameScaleDisplay.addEventListener('input', (ev) => {
-          const val = Number(ev.target.value);
-          this._controller?.invokeToolHandler?.('setDoorFrameScale', val, false);
-        });
-        frameScaleDisplay.addEventListener('change', (ev) => {
+        this._bindDisplayInput(frameScaleDisplay, null, (ev) => {
           const val = Number(ev.target.value);
           this._controller?.invokeToolHandler?.('setDoorFrameScale', val, true);
         });
@@ -5697,11 +5739,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const frameOffsetXDisplay = root.querySelector('[data-fa-nexus-door-frame-offset-x-display]');
       if (frameOffsetXDisplay) {
-        frameOffsetXDisplay.addEventListener('input', (ev) => {
-          const val = Number(ev.target.value);
-          this._controller?.invokeToolHandler?.('setDoorFrameOffsetX', val, false);
-        });
-        frameOffsetXDisplay.addEventListener('change', (ev) => {
+        this._bindDisplayInput(frameOffsetXDisplay, null, (ev) => {
           const val = Number(ev.target.value);
           this._controller?.invokeToolHandler?.('setDoorFrameOffsetX', val, true);
         });
@@ -5719,11 +5757,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const frameOffsetYDisplay = root.querySelector('[data-fa-nexus-door-frame-offset-y-display]');
       if (frameOffsetYDisplay) {
-        frameOffsetYDisplay.addEventListener('input', (ev) => {
-          const val = Number(ev.target.value);
-          this._controller?.invokeToolHandler?.('setDoorFrameOffsetY', val, false);
-        });
-        frameOffsetYDisplay.addEventListener('change', (ev) => {
+        this._bindDisplayInput(frameOffsetYDisplay, null, (ev) => {
           const val = Number(ev.target.value);
           this._controller?.invokeToolHandler?.('setDoorFrameOffsetY', val, true);
         });
@@ -5741,11 +5775,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const frameRotationDisplay = root.querySelector('[data-fa-nexus-door-frame-rotation-display]');
       if (frameRotationDisplay) {
-        frameRotationDisplay.addEventListener('input', (ev) => {
-          const val = Number(ev.target.value);
-          this._controller?.invokeToolHandler?.('setDoorFrameRotation', val, false);
-        });
-        frameRotationDisplay.addEventListener('change', (ev) => {
+        this._bindDisplayInput(frameRotationDisplay, null, (ev) => {
           const val = Number(ev.target.value);
           this._controller?.invokeToolHandler?.('setDoorFrameRotation', val, true);
         });
@@ -5950,8 +5980,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const sillScaleDisplay = root.querySelector('[data-fa-nexus-window-sill-scale-display]');
       if (sillScaleDisplay) {
-        sillScaleDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), false));
-        sillScaleDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), true));
+        this._bindDisplayInput(sillScaleDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowSillScale', Number(ev.target.value), true));
       }
       const sillOffsetXSlider = root.querySelector('[data-fa-nexus-window-sill-offset-x]');
       if (sillOffsetXSlider) {
@@ -5960,8 +5989,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const sillOffsetXDisplay = root.querySelector('[data-fa-nexus-window-sill-offset-x-display]');
       if (sillOffsetXDisplay) {
-        sillOffsetXDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), false));
-        sillOffsetXDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), true));
+        this._bindDisplayInput(sillOffsetXDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetX', Number(ev.target.value), true));
       }
       const sillOffsetYSlider = root.querySelector('[data-fa-nexus-window-sill-offset-y]');
       if (sillOffsetYSlider) {
@@ -5970,8 +5998,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const sillOffsetYDisplay = root.querySelector('[data-fa-nexus-window-sill-offset-y-display]');
       if (sillOffsetYDisplay) {
-        sillOffsetYDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), false));
-        sillOffsetYDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), true));
+        this._bindDisplayInput(sillOffsetYDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowSillOffsetY', Number(ev.target.value), true));
       }
       // Window texture controls
       const texturePick = root.querySelector('[data-fa-nexus-window-texture-pick]');
@@ -5985,8 +6012,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const textureScaleDisplay = root.querySelector('[data-fa-nexus-window-texture-scale-display]');
       if (textureScaleDisplay) {
-        textureScaleDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), false));
-        textureScaleDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), true));
+        this._bindDisplayInput(textureScaleDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowTextureScale', Number(ev.target.value), true));
       }
       const textureOffsetXSlider = root.querySelector('[data-fa-nexus-window-texture-offset-x]');
       if (textureOffsetXSlider) {
@@ -5995,8 +6021,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const textureOffsetXDisplay = root.querySelector('[data-fa-nexus-window-texture-offset-x-display]');
       if (textureOffsetXDisplay) {
-        textureOffsetXDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), false));
-        textureOffsetXDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), true));
+        this._bindDisplayInput(textureOffsetXDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetX', Number(ev.target.value), true));
       }
       const textureOffsetYSlider = root.querySelector('[data-fa-nexus-window-texture-offset-y]');
       if (textureOffsetYSlider) {
@@ -6005,8 +6030,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const textureOffsetYDisplay = root.querySelector('[data-fa-nexus-window-texture-offset-y-display]');
       if (textureOffsetYDisplay) {
-        textureOffsetYDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), false));
-        textureOffsetYDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), true));
+        this._bindDisplayInput(textureOffsetYDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowTextureOffsetY', Number(ev.target.value), true));
       }
       // Frame controls
       const framePick = root.querySelector('[data-fa-nexus-window-frame-pick]');
@@ -6020,8 +6044,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const frameScaleDisplay = root.querySelector('[data-fa-nexus-window-frame-scale-display]');
       if (frameScaleDisplay) {
-        frameScaleDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), false));
-        frameScaleDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), true));
+        this._bindDisplayInput(frameScaleDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowFrameScale', Number(ev.target.value), true));
       }
       const frameOffsetXSlider = root.querySelector('[data-fa-nexus-window-frame-offset-x]');
       if (frameOffsetXSlider) {
@@ -6030,8 +6053,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const frameOffsetXDisplay = root.querySelector('[data-fa-nexus-window-frame-offset-x-display]');
       if (frameOffsetXDisplay) {
-        frameOffsetXDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), false));
-        frameOffsetXDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), true));
+        this._bindDisplayInput(frameOffsetXDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetX', Number(ev.target.value), true));
       }
       const frameOffsetYSlider = root.querySelector('[data-fa-nexus-window-frame-offset-y]');
       if (frameOffsetYSlider) {
@@ -6040,8 +6062,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const frameOffsetYDisplay = root.querySelector('[data-fa-nexus-window-frame-offset-y-display]');
       if (frameOffsetYDisplay) {
-        frameOffsetYDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), false));
-        frameOffsetYDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), true));
+        this._bindDisplayInput(frameOffsetYDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowFrameOffsetY', Number(ev.target.value), true));
       }
       const frameRotationSlider = root.querySelector('[data-fa-nexus-window-frame-rotation]');
       if (frameRotationSlider) {
@@ -6050,8 +6071,7 @@ class ToolOptionsWindow extends HandlebarsApplicationMixin(ApplicationV2) {
       }
       const frameRotationDisplay = root.querySelector('[data-fa-nexus-window-frame-rotation-display]');
       if (frameRotationDisplay) {
-        frameRotationDisplay.addEventListener('input', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), false));
-        frameRotationDisplay.addEventListener('change', (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), true));
+        this._bindDisplayInput(frameRotationDisplay, null, (ev) => this._controller?.invokeToolHandler?.('setWindowFrameRotation', Number(ev.target.value), true));
       }
       root._faWindowBound = true;
     }

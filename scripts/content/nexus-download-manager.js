@@ -509,14 +509,24 @@ export class NexusDownloadManager {
 
   _candidateKeysForItem(item) {
     const names = new Set();
-    if (item?.filename) names.add(String(item.filename));
-    const fp = item?.file_path || item?.path;
-    if (fp) {
-      const fpStr = String(fp);
-      const tail = fpStr.split('/').pop();
-      if (tail) names.add(tail);
-      const rel = this._sanitizeRelativePath(fpStr);
-      if (rel) names.add(rel);
+    if (!item) return [];
+    const filename = item?.filename != null ? String(item.filename).trim() : '';
+    const rawFilePath = String(item?.file_path || '').trim();
+    const rawPath = String(item?.path || '').trim();
+    const usePathFallback = rawPath && (!rawFilePath || rawFilePath === filename);
+    const relSource = usePathFallback ? { path: rawPath, filename } : item;
+    const relRaw = this._normalizeRelativePathFromItem(relSource, filename);
+    const rel = relRaw ? this._sanitizeRelativePath(relRaw) : '';
+    const hasDir = rel.includes('/');
+    if (rel) names.add(rel);
+    // Avoid filename-only fallback when a directory-qualified path is present.
+    if (filename && (!hasDir || !rel)) names.add(filename);
+    if (!filename && !rel) {
+      const fp = item?.file_path || item?.path;
+      if (fp) {
+        const tail = String(fp).split('/').pop();
+        if (tail) names.add(tail);
+      }
     }
     const keys = new Set();
     for (const name of names) {

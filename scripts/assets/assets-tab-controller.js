@@ -629,11 +629,47 @@ async function loadAndMergeCloud(tab, includeLocal, options = {}) {
 
   const svc = tab._controller?.contentService || tab._content || tab.app?._contentService;
   const kind = 'assets';
+  const normalizePathKey = (value) => String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+/, '');
+  const baseNameKey = (rec) => {
+    if (!rec) return '';
+    const filename = String(rec?.filename || '').trim();
+    let raw = filename;
+    if (!raw) {
+      raw = normalizePathKey(rec?.file_path || rec?.path || '');
+      if (raw) {
+        const parts = raw.split('/');
+        raw = parts[parts.length - 1] || '';
+      }
+    }
+    if (!raw) return '';
+    return raw.replace(/\.[^/.]+$/, '').toLowerCase();
+  };
+  const pathKey = (rec) => {
+    const raw = normalizePathKey(rec?.file_path || rec?.path || '');
+    if (!raw) return '';
+    return raw.replace(/\.[^/.]+$/, '').toLowerCase();
+  };
+  const localBaseNames = new Set(localItems.map((rec) => baseNameKey(rec)).filter(Boolean));
   const merged = mergeLocalAndCloudRecords({
     kind,
     local: localItems,
     cloud: cloudItems,
-    keySelector: (rec) => String(rec?.filename || rec?.file_path || rec?.path || '').replace(/\.[^/.]+$/, '').toLowerCase(),
+    // Keep local/cloud filename matching, but don't collapse cloud-only items that differ by path.
+    keySelector: (rec) => {
+      const base = baseNameKey(rec);
+      if (!base) return '';
+      const source = String(rec?.source || '').toLowerCase();
+      if (source === 'cloud') {
+        if (localBaseNames.has(base)) return `local:${base}`;
+        const pKey = pathKey(rec);
+        return pKey ? `cloud:${pKey}` : `cloud:${base}`;
+      }
+      return `local:${base}`;
+    },
     choosePreferred: (existing, incoming) => {
       const rank = (it) => {
         if (!it) return 0;

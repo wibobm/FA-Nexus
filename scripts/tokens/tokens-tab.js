@@ -324,7 +324,10 @@ export class TokensTab extends GridBrowseTab {
           if (!isLockedToken) return true;
           try {
             if (token.filename && this.app?._downloadManager) {
-              const localPath = this.app._downloadManager.getLocalPath('tokens', { filename: token.filename });
+              const localPath = this.app._downloadManager.getLocalPath('tokens', {
+                filename: token.filename,
+                file_path: token.file_path || token.path || ''
+              });
               return !!localPath;
             }
           } catch (_) {}
@@ -1021,7 +1024,10 @@ export class TokensTab extends GridBrowseTab {
         if (String(item.source||'') === 'cloud' && item.filename) {
           const dl = this.app?._downloadManager;
           if (dl && typeof dl.getLocalPath === 'function') {
-            const localPath = dl.getLocalPath('tokens', { filename: item.filename });
+            const localPath = dl.getLocalPath('tokens', {
+              filename: item.filename,
+              file_path: item.file_path || item.path || ''
+            });
             if (localPath) {
               try { cardElement.setAttribute('data-url', localPath); } catch (_) {}
               try { cardElement.setAttribute('data-cached', 'true'); } catch (_) {}
@@ -1302,7 +1308,10 @@ export class TokensTab extends GridBrowseTab {
       let cachedLocalPath = record.cachedLocalPath || '';
       if (!cachedLocalPath && downloadManager && record.filename) {
         try {
-          const local = downloadManager.getLocalPath('tokens', { filename: record.filename });
+          const local = downloadManager.getLocalPath('tokens', {
+            filename: record.filename,
+            file_path: record.file_path || record.path || ''
+          });
           if (local) cachedLocalPath = local;
         } catch (_) {}
       }
@@ -1351,7 +1360,10 @@ export class TokensTab extends GridBrowseTab {
       try {
         const dl = this.app?._downloadManager;
         if (dl && item?.filename) {
-          const local = dl.getLocalPath('tokens', { filename: item.filename });
+          const local = dl.getLocalPath('tokens', {
+            filename: item.filename,
+            file_path: item.file_path || item.path || ''
+          });
           if (local) {
             item.cachedLocalPath = local;
             return false;
@@ -1427,12 +1439,13 @@ export class TokensTab extends GridBrowseTab {
       const item = card._assetItem || null;
       const dl = this.app?._downloadManager;
       const filename = card.getAttribute('data-filename') || item?.filename || '';
-      const filePathAttr = card.getAttribute('data-file-path') || card.getAttribute('data-url') || '';
+      const filePathAttr = card.getAttribute('data-file-path') || '';
       const folderPathAttr = card.getAttribute('data-path') || '';
+      const resolvedPath = filePathAttr || (folderPathAttr && filename ? `${folderPathAttr.replace(/\/+$/, '')}/${filename}` : '');
       if (!dl || typeof dl.probeLocal !== 'function' || !filename) { L.running = false; this._drainProbeQueue(); return; }
       const job = card._probeJob || { cancelled: false, item };
       card._probeJob = job;
-      dl.probeLocal('tokens', { filename, file_path: filePathAttr, path: folderPathAttr }).then((found) => {
+      dl.probeLocal('tokens', { filename, file_path: resolvedPath, path: folderPathAttr }).then((found) => {
         if (job.cancelled || !found || !card.isConnected) return;
         try { card.setAttribute('data-url', found); } catch (_) {}
         try { card.setAttribute('data-cached', 'true'); } catch (_) {}
@@ -1539,7 +1552,12 @@ export class TokensTab extends GridBrowseTab {
       // Resolve auth and cached state for correct status icon
       let authed = false; let cachedLocalPath = '';
       try { const auth = game.settings.get('fa-nexus', 'patreon_auth_data'); authed = !!(auth && auth.authenticated && auth.state); } catch (_) {}
-      try { if (String(it.source||'') === 'cloud' && it.filename) { const dl = this.app?._downloadManager; if (dl) cachedLocalPath = dl.getLocalPath('tokens', { filename: it.filename }) || ''; } } catch (_) {}
+      try {
+        if (String(it.source||'') === 'cloud' && it.filename) {
+          const dl = this.app?._downloadManager;
+          if (dl) cachedLocalPath = dl.getLocalPath('tokens', { filename: it.filename, file_path: it.file_path || it.path || '' }) || '';
+        }
+      } catch (_) {}
       Logger.info('TokensTab._showColorVariantsPanel', { cachedLocalPath });
       if (cachedLocalPath) { try { item.setAttribute('data-url', cachedLocalPath); } catch(_) {} try { item.setAttribute('data-cached', 'true'); } catch(_) {} }
       const isLocal = String(it.source||'').toLowerCase() === 'local';
