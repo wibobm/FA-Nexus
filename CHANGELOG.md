@@ -4,13 +4,15 @@ All notable changes to this project will be documented in this file.
 
 
 
-## [0.3.1 & 0.3.2] - 2026-01-26
+## [0.3.1 - 0.3.3] - 2026-01-26
 ### Changed
 - Sliders in 'Tool Options' menu are not adjustable by scroll wheel anymore (except for 'Subgrid Density' slider)as it was interfeering with container scrolling abit too much.  Adjust sliders with draggin the sliders or typing in the desired value in new input boxes.
 
 ### Fixed
 - 'Edit Path/Texture/Building' behaving  all kinds of weird because of some stuff introduced for 'Layer Manager'
 - Path control points now render above ohter tiles in the scene so they are no longer blocked visually if you have tiles above higher elevation
+- Cloud assets grids now refresh after delta manifest updates without requiring a full reindex.
+- Cloud assets with identical filenames but different folder paths no longer collapse into a single entry.
 - Other small fixes
 
 ### Known Bug
