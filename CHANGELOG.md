@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Cloud assets grids now refresh after delta manifest updates without requiring a full reindex.
 - Cloud assets with identical filenames but different folder paths no longer collapse into a single entry.
 - Other small fixes
+- Flatten Tiles from v0.2 not displaying properly
 
 ### Known Bug
 - 'Inner Wall' scale in Building tool being set to '25' in some instances.
