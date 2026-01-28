@@ -410,7 +410,7 @@ export class TileFlattenManager {
                     keepBackground: false,
                     keepTiles: true,
                     keepForeground: false,
-                    keepDoors: true,
+                    keepDoors: false,
                     doorVisibility
                   },
                   onChunk: async (entry, index, total) => {
@@ -476,7 +476,7 @@ export class TileFlattenManager {
                     keepBackground: false,
                     keepTiles: true,
                     keepForeground: false,
-                    keepDoors: true,
+                    keepDoors: false,
                     doorVisibility
                   }
                 });
@@ -2309,10 +2309,11 @@ export class TileFlattenManager {
       if (child === canvas.foreground) return keepForeground;
       if (child === canvas?.primary?.background) return keepBackground;
       if (child === canvas?.primary?.foreground) return keepForeground;
+      const keepDoors = !!options?.keepDoors;
       const ctorName = typeof child?.constructor?.name === 'string' ? child.constructor.name : '';
-      if (ctorName === 'DoorMesh') return true;
+      if (keepDoors && ctorName === 'DoorMesh') return true;
       const name = typeof child?.name === 'string' ? child.name : '';
-      if (name.startsWith('Door.')) return true;
+      if (keepDoors && name.startsWith('Door.')) return true;
       if (name === 'background') return keepBackground;
       if (name === 'foreground') return keepForeground;
       if (!name) return false;

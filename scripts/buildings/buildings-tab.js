@@ -116,6 +116,8 @@ export class BuildingsTab extends AssetsTab {
     this._portalPreviewImageCache = new Map();
     this._portalPreviewMissingCache = new Map();
     this._portalPreviewRenderSeq = 0;
+    this._portalPanelCanUse = null;
+    this._portalPreviewSignature = null;
   }
 
   setFolderSelectionScope(scope) {
@@ -1270,12 +1272,23 @@ export class BuildingsTab extends AssetsTab {
     const manager = this._buildingManager;
     if (!manager || typeof manager.setToolOptionsChangeCallback !== 'function') return;
 
-    this._portalToolOptionsCallback = () => {
+    this._portalToolOptionsCallback = (state) => {
       // Refresh thumbnails when tool options change (texture selection)
-      if (this._activeSubtab === 'portals' && this._portalPanel) {
-        this._refreshPortalTextureThumbnails();
+      if (this._activeSubtab !== 'portals' || !this._portalPanel) return;
+      const canUsePortals = this._canUsePortals();
+      if (this._portalPanelCanUse !== canUsePortals) {
+        this._portalPanelCanUse = canUsePortals;
+        this._portalPreviewSignature = null;
         this._updatePortalPanelState();
+        if (canUsePortals) this._refreshPortalTextureThumbnails();
+        return;
       }
+      const nextKind = this._resolvePortalKindFromState(state);
+      if (nextKind && nextKind !== this._activePortalType) {
+        this._setActivePortalType(nextKind);
+        return;
+      }
+      this._refreshPortalTextureThumbnails();
     };
     manager.setToolOptionsChangeCallback(this._portalToolOptionsCallback);
   }
@@ -1303,6 +1316,7 @@ export class BuildingsTab extends AssetsTab {
 
     // Check if we can show the panel (need active session or walls)
     const canUsePortals = this._canUsePortals();
+    this._portalPanelCanUse = canUsePortals;
     if (!canUsePortals) {
       panel.innerHTML = `
         <div class="fa-portals-panel__blocker">
@@ -1327,6 +1341,13 @@ export class BuildingsTab extends AssetsTab {
     if (canUsePortals) {
       this._bindPortalPanelHandlers();
     }
+  }
+
+  _resolvePortalKindFromState(state) {
+    if (!state || !state.portalMode) return null;
+    if (state.doorControls) return GAP_KIND_DOOR;
+    if (state.windowControls) return GAP_KIND_WINDOW;
+    return null;
   }
 
   _buildPortalPanelContent() {
@@ -1534,6 +1555,7 @@ export class BuildingsTab extends AssetsTab {
     if (this._activePortalType === type) return;
 
     this._activePortalType = type;
+    this._portalPreviewSignature = null;
 
     // Update building manager's gap edit mode
     const manager = this._buildingManager;
@@ -1552,10 +1574,12 @@ export class BuildingsTab extends AssetsTab {
     if (!panel) return;
 
     const canUsePortals = this._canUsePortals();
+    this._portalPanelCanUse = canUsePortals;
     const currentBlocker = panel.querySelector('.fa-portals-panel__blocker');
 
     if (!canUsePortals && !currentBlocker) {
       // Need to show blocker
+      this._portalPreviewSignature = null;
       panel.innerHTML = `
         <div class="fa-portals-panel__blocker">
           <i class="fas fa-info-circle" aria-hidden="true"></i>
@@ -1569,6 +1593,7 @@ export class BuildingsTab extends AssetsTab {
 
     if (canUsePortals && currentBlocker) {
       // Remove blocker and rebuild panel
+      this._portalPreviewSignature = null;
       panel.innerHTML = this._buildPortalPanelContent();
       this._bindPortalPanelHandlers();
       return;
@@ -1600,6 +1625,7 @@ export class BuildingsTab extends AssetsTab {
     // Update textures section
     const texturesContainer = panel.querySelector('[data-portal-textures]');
     if (texturesContainer) {
+      this._portalPreviewSignature = null;
       texturesContainer.innerHTML = this._buildPortalTexturesHtml(this._activePortalType);
       // Rebind only texture handlers
       const thumbButtons = texturesContainer.querySelectorAll('[data-portal-picker]');
@@ -1652,6 +1678,10 @@ export class BuildingsTab extends AssetsTab {
       }
     }
 
+    const signature = this._buildPortalPreviewSignature(doorConfig, windowConfig);
+    if (signature === this._portalPreviewSignature) return;
+    this._portalPreviewSignature = signature;
+
     // Update door texture thumbnails
     this._updateTextureThumbnail(panel, 'door', doorConfig.textureLocal || doorConfig.textureKey);
     this._updateTextureThumbnail(panel, 'door-frame', doorConfig.frame?.textureLocal || doorConfig.frame?.textureKey);
@@ -1674,7 +1704,13 @@ export class BuildingsTab extends AssetsTab {
       textureKey = '';
     }
 
+    const existingImg = thumb.querySelector('img.fa-portals-panel__thumb-img');
+    const existingSrc = existingImg?.getAttribute('src') || '';
     if (textureKey) {
+      if (existingImg && existingSrc === textureKey) {
+        if (wrap) wrap.dataset.hasTexture = 'true';
+        return;
+      }
       const filename = textureKey.split('/').pop() || 'Selected';
       const img = document.createElement('img');
       img.className = 'fa-portals-panel__thumb-img';
@@ -1692,6 +1728,8 @@ export class BuildingsTab extends AssetsTab {
       thumb.appendChild(img);
       if (wrap) wrap.dataset.hasTexture = 'true';
     } else {
+      const placeholder = thumb.querySelector('.fa-portals-panel__thumb-placeholder');
+      if (!existingImg && placeholder && wrap?.dataset?.hasTexture === 'false') return;
       // Show placeholder based on picker type
       const icons = {
         'door': 'fa-door-closed',
@@ -1709,6 +1747,51 @@ export class BuildingsTab extends AssetsTab {
       `;
       if (wrap) wrap.dataset.hasTexture = 'false';
     }
+  }
+
+  _buildPortalPreviewSignature(doorConfig = {}, windowConfig = {}) {
+    const safeString = (value) => String(value || '');
+    const round = (value) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return null;
+      return Math.round(numeric * 1000) / 1000;
+    };
+    const normalizeFrame = (frame) => {
+      const cfg = frame && typeof frame === 'object' ? frame : {};
+      return {
+        texture: safeString(cfg.textureLocal || cfg.textureKey),
+        mode: cfg.mode || 'split',
+        scale: round(cfg.scale),
+        offsetX: round(cfg.offsetX),
+        offsetY: round(cfg.offsetY),
+        rotation: round(cfg.rotation)
+      };
+    };
+    const door = doorConfig && typeof doorConfig === 'object' ? doorConfig : {};
+    const window = windowConfig && typeof windowConfig === 'object' ? windowConfig : {};
+    return JSON.stringify({
+      door: {
+        texture: safeString(door.textureLocal || door.textureKey),
+        flip: !!door.flip,
+        frame: normalizeFrame(door.frame)
+      },
+      window: {
+        flip: !!window.flip,
+        sill: {
+          texture: safeString(window.sill?.textureLocal || window.sill?.textureKey),
+          scale: round(window.sill?.scale),
+          offsetX: round(window.sill?.offsetX),
+          offsetY: round(window.sill?.offsetY)
+        },
+        texture: {
+          texture: safeString(window.texture?.textureLocal || window.texture?.textureKey),
+          scale: round(window.texture?.scale),
+          offsetX: round(window.texture?.offsetX),
+          offsetY: round(window.texture?.offsetY)
+        },
+        frame: normalizeFrame(window.frame)
+      }
+    });
   }
 
   _isPortalTextureMissing(path) {

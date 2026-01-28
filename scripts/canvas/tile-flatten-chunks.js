@@ -1,7 +1,90 @@
 import { NexusLogger as Logger } from '../core/nexus-logger.js';
-import { ensureTileMesh, getTransparentTexture, loadTexture } from '../textures/texture-render.js';
+import {
+  encodeTexturePath,
+  ensureTileMesh,
+  getTransparentTexture,
+  getTransparentTextureSrc,
+  loadTexture
+} from '../textures/texture-render.js';
 
 const MODULE_ID = 'fa-nexus';
+const REPAIR_ATTEMPTS = new Map();
+const REPAIR_COOLDOWN_MS = 10000;
+
+function normalizeSrc(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  return trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+}
+
+function resolveMetaTextureSrc(meta) {
+  return normalizeSrc(meta?.filePath || '');
+}
+
+function isTransparentSrc(src) {
+  if (!src) return true;
+  const placeholder = normalizeSrc(getTransparentTextureSrc());
+  return src === placeholder;
+}
+
+function shouldAttemptRepair(doc) {
+  const id = doc?.id || null;
+  if (!id) return true;
+  const last = REPAIR_ATTEMPTS.get(id) || 0;
+  const now = Date.now();
+  if (now - last < REPAIR_COOLDOWN_MS) return false;
+  REPAIR_ATTEMPTS.set(id, now);
+  return true;
+}
+
+async function repairFlattenedTileTexture(doc, meta, tile = null) {
+  try {
+    if (!doc || !meta) return false;
+    if (Array.isArray(meta?.chunks) && meta.chunks.length) return false;
+    const rawTextureSrc = normalizeSrc(doc?.texture?.src || '');
+    const fallbackSrc = normalizeSrc(doc?.img || doc?._source?.img || doc?._source?.texture?.src);
+    const targetSrc = resolveMetaTextureSrc(meta) || fallbackSrc;
+    const needsRepair = isTransparentSrc(rawTextureSrc);
+    if (!targetSrc || isTransparentSrc(targetSrc) || !needsRepair) return false;
+    if (!shouldAttemptRepair(doc)) return false;
+    const encoded = encodeTexturePath(targetSrc);
+    let updated = false;
+    if (typeof doc.update === 'function') {
+      try {
+        const updateData = { 'texture.src': encoded };
+        if (doc?.img !== undefined) updateData.img = encoded;
+        await doc.update(updateData);
+        updated = true;
+      } catch (error) {
+        Logger.debug?.('TileFlatten.repairTexture.updateFailed', {
+          error: String(error?.message || error),
+          tileId: doc?.id
+        });
+      }
+    }
+    if (!updated && tile) {
+      try {
+        const mesh = await ensureTileMesh(tile);
+        if (mesh && !mesh.destroyed) {
+          const texture = await loadTexture(encoded, { attempts: 2, timeout: 4000 });
+          if (texture) {
+            mesh.texture = texture;
+            mesh.alpha = 1;
+            mesh.renderable = true;
+          }
+        }
+      } catch (error) {
+        Logger.debug?.('TileFlatten.repairTexture.meshFailed', {
+          error: String(error?.message || error),
+          tileId: doc?.id
+        });
+      }
+    }
+    return updated;
+  } catch (_) {
+    return false;
+  }
+}
 
 function resolveFlattenedMeta(doc) {
   if (!doc) return null;
@@ -16,8 +99,7 @@ function resolveFlattenedMeta(doc) {
   return null;
 }
 
-function resolveChunkEntries(doc) {
-  const meta = resolveFlattenedMeta(doc);
+function resolveChunkEntriesFromMeta(meta) {
   const chunks = Array.isArray(meta?.chunks) ? meta.chunks : [];
   if (!chunks.length) return [];
   const normalized = [];
@@ -36,6 +118,11 @@ function resolveChunkEntries(doc) {
     });
   }
   return normalized;
+}
+
+function resolveChunkEntries(doc) {
+  const meta = resolveFlattenedMeta(doc);
+  return resolveChunkEntriesFromMeta(meta);
 }
 
 function buildRenderKey(chunks) {
@@ -68,8 +155,10 @@ export async function applyFlattenedChunks(tile) {
   try {
     if (!tile || tile.destroyed) return;
     const doc = tile.document;
-    const chunks = resolveChunkEntries(doc);
+    const meta = resolveFlattenedMeta(doc);
+    const chunks = resolveChunkEntriesFromMeta(meta);
     if (!chunks.length) {
+      if (meta) await repairFlattenedTileTexture(doc, meta, tile);
       cleanupFlattenedChunks(tile);
       return;
     }
@@ -208,12 +297,23 @@ export function cleanupFlattenedChunks(tile) {
   } catch (_) {}
 }
 
-export function rehydrateAllFlattenedChunks() {
+export async function rehydrateAllFlattenedChunks() {
   try {
-    const tiles = canvas?.tiles?.placeables;
-    if (!Array.isArray(tiles)) return;
+    const tiles = Array.isArray(canvas?.tiles?.placeables) ? canvas.tiles.placeables : [];
     for (const tile of tiles) {
       try { applyFlattenedChunks(tile); } catch (_) {}
+    }
+
+    const docs = canvas?.scene?.tiles ? Array.from(canvas.scene.tiles) : [];
+    if (!docs.length) return;
+    for (const doc of docs) {
+      if (!doc) continue;
+      const meta = resolveFlattenedMeta(doc);
+      if (!meta) continue;
+      if (Array.isArray(meta?.chunks) && meta.chunks.length) continue;
+      const hasPlaceable = !!tiles.find((tile) => tile?.document?.id === doc.id);
+      if (hasPlaceable) continue;
+      await repairFlattenedTileTexture(doc, meta, null);
     }
   } catch (_) {}
 }

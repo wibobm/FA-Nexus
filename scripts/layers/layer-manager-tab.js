@@ -923,53 +923,70 @@ function buildEntriesFromCanvas() {
   if (!canvas?.ready || !canvas?.tiles) return [];
   const hiddenIds = collectEditedTileIds();
   const entries = [];
-  const tiles = canvas.tiles.placeables || [];
-  const sortedTiles = tiles
-    .filter((tile) => tile && !tile.destroyed && !isTileBeingEdited(tile, hiddenIds))
+  const tiles = Array.isArray(canvas.tiles.placeables) ? canvas.tiles.placeables : [];
+  const placeablesById = new Map();
+  for (const tile of tiles) {
+    const id = tile?.document?.id || tile?.id;
+    if (id) placeablesById.set(id, tile);
+  }
+  const sceneDocs = canvas?.scene?.tiles ? Array.from(canvas.scene.tiles) : [];
+  const sourceDocs = sceneDocs.length
+    ? sceneDocs
+    : tiles.map((tile) => tile?.document).filter(Boolean);
+  const sortedDocs = sourceDocs
+    .filter((doc) => {
+      if (!doc) return false;
+      const id = doc?.id || doc?._id;
+      if (id && hiddenIds instanceof Set && hiddenIds.has(id)) return false;
+      const placeable = id ? placeablesById.get(id) : null;
+      if (placeable && placeable.destroyed) return false;
+      if (placeable && isTileBeingEdited(placeable, hiddenIds)) return false;
+      return true;
+    })
     .slice()
     .sort((a, b) => {
-      const elevDiff = (Number(b.document?.elevation ?? 0) - Number(a.document?.elevation ?? 0));
+      const elevDiff = (Number(b.elevation ?? 0) - Number(a.elevation ?? 0));
       if (elevDiff) return elevDiff;
-      const sortDiff = (Number(b.document?.sort ?? 0) - Number(a.document?.sort ?? 0));
+      const sortDiff = (Number(b.sort ?? 0) - Number(a.sort ?? 0));
       if (sortDiff) return sortDiff;
-      const aId = String(a.document?.id ?? a.id ?? '');
-      const bId = String(b.document?.id ?? b.id ?? '');
+      const aId = String(a.id ?? a._id ?? '');
+      const bId = String(b.id ?? b._id ?? '');
       if (aId && bId) return aId.localeCompare(bId);
       if (aId) return -1;
       if (bId) return 1;
       return 0;
     });
   const elevationGroups = new Map();
-  for (const tile of sortedTiles) {
-    const elevation = quantizeElevation(Number(tile.document?.elevation ?? 0));
+  for (const doc of sortedDocs) {
+    const elevation = quantizeElevation(Number(doc?.elevation ?? 0));
     let group = elevationGroups.get(elevation);
     if (!group) {
       group = { tiles: [], canToggleVisibility: false, canToggleLock: false };
       elevationGroups.set(elevation, group);
     }
-    group.tiles.push(tile);
-    if (tile.document?.canUserModify?.(game.user, 'update')) {
+    group.tiles.push(doc);
+    if (doc?.canUserModify?.(game.user, 'update')) {
       group.canToggleVisibility = true;
       group.canToggleLock = true;
     }
   }
   const controlled = new Set((canvas.tiles.controlled || []).map(tile => tile.document?.id || tile.id));
   const tileEntries = [];
-  for (let i = 0; i < sortedTiles.length; i += 1) {
-    const tile = sortedTiles[i];
-    const elevation = quantizeElevation(Number(tile.document?.elevation ?? 0));
-    const id = tile.document?.id || tile.id;
-    const typeInfo = resolveTileType(tile.document);
+  for (let i = 0; i < sortedDocs.length; i += 1) {
+    const doc = sortedDocs[i];
+    const elevation = quantizeElevation(Number(doc?.elevation ?? 0));
+    const id = doc?.id || doc?._id;
+    const typeInfo = resolveTileType(doc);
     tileEntries.push({
       id,
-      name: computeTileName(tile, i),
+      name: computeTileName({ document: doc }, i),
       elevation,
-      sort: Number(tile.document?.sort ?? 0),
+      sort: Number(doc?.sort ?? 0),
       selected: controlled.has(id),
-      hidden: isLayerHidden(tile.document),
-      locked: !!tile.document?.locked,
-      canToggleVisibility: !!tile.document?.canUserModify?.(game.user, 'update'),
-      canToggleLock: !!tile.document?.canUserModify?.(game.user, 'update'),
+      hidden: isLayerHidden(doc),
+      locked: !!doc?.locked,
+      canToggleVisibility: !!doc?.canUserModify?.(game.user, 'update'),
+      canToggleLock: !!doc?.canUserModify?.(game.user, 'update'),
       typeIcon: typeInfo.icon,
       typeLabel: typeInfo.label,
       index: i
@@ -1014,8 +1031,8 @@ function buildEntriesFromCanvas() {
     if (lastElevation === null || elevation !== lastElevation) {
       const group = elevationGroups.get(elevation);
       const groupTiles = group?.tiles || [];
-      const groupHidden = groupTiles.length ? groupTiles.every((groupTile) => isLayerHidden(groupTile.document)) : false;
-      const groupLocked = groupTiles.length ? groupTiles.every((groupTile) => !!groupTile.document?.locked) : false;
+      const groupHidden = groupTiles.length ? groupTiles.every((groupTile) => isLayerHidden(groupTile)) : false;
+      const groupLocked = groupTiles.length ? groupTiles.every((groupTile) => !!groupTile?.locked) : false;
       entries.push({
         separator: true,
         elevation: formatElevation(elevation),
@@ -1796,17 +1813,20 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     if (!item) return;
     const tileId = item.dataset.tileId;
     if (!tileId) return;
-    const tile = canvas?.tiles?.placeables?.find((t) => (t?.document?.id || t?.id) === tileId);
-    if (!tile) return;
+    const tile = canvas?.tiles?.placeables?.find((t) => (t?.document?.id || t?.id) === tileId) || null;
+    const doc = tile?.document || canvas?.scene?.tiles?.get?.(tileId) || null;
+    if (!doc) return;
     const selection = Array.isArray(canvas?.tiles?.controlled) ? canvas.tiles.controlled : [];
-    const useSelection = tile.controlled && selection.length > 1;
-    const targets = useSelection ? selection : [tile];
-    const toggleTargets = targets.filter((target) => target?.document?.canUserModify?.(game.user, 'update'));
+    const useSelection = !!tile?.controlled && selection.length > 1;
+    const targets = useSelection
+      ? selection.map((target) => target?.document).filter(Boolean)
+      : [doc];
+    const toggleTargets = targets.filter((target) => target?.canUserModify?.(game.user, 'update'));
     if (!toggleTargets.length) return;
-    const allHidden = toggleTargets.every((target) => isLayerHidden(target.document));
+    const allHidden = toggleTargets.every((target) => isLayerHidden(target));
     const nextHidden = !allHidden;
     for (const target of toggleTargets) {
-      setLayerHidden(target.document, nextHidden);
+      setLayerHidden(target, nextHidden);
     }
   }
 
@@ -1815,18 +1835,18 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     const rawElevation = buttonEl?.dataset?.elevation || separator?.dataset?.elevation;
     const elevation = Number(rawElevation);
     if (!Number.isFinite(elevation)) return;
-    const tiles = Array.isArray(canvas?.tiles?.placeables) ? canvas.tiles.placeables : [];
-    const targets = tiles.filter((tile) => {
-      if (!tile || tile.destroyed) return false;
-      const docElevation = Number(tile.document?.elevation ?? 0);
+    const docs = canvas?.scene?.tiles ? Array.from(canvas.scene.tiles) : [];
+    const targets = docs.filter((doc) => {
+      if (!doc) return false;
+      const docElevation = Number(doc?.elevation ?? 0);
       return docElevation === elevation;
     });
-    const toggleTargets = targets.filter((target) => target?.document?.canUserModify?.(game.user, 'update'));
+    const toggleTargets = targets.filter((target) => target?.canUserModify?.(game.user, 'update'));
     if (!toggleTargets.length) return;
-    const allHidden = toggleTargets.every((target) => isLayerHidden(target.document));
+    const allHidden = toggleTargets.every((target) => isLayerHidden(target));
     const nextHidden = !allHidden;
     for (const target of toggleTargets) {
-      setLayerHidden(target.document, nextHidden);
+      setLayerHidden(target, nextHidden);
     }
   }
 
@@ -1835,17 +1855,20 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     if (!item) return;
     const tileId = item.dataset.tileId;
     if (!tileId) return;
-    const tile = canvas?.tiles?.placeables?.find((t) => (t?.document?.id || t?.id) === tileId);
-    if (!tile) return;
+    const tile = canvas?.tiles?.placeables?.find((t) => (t?.document?.id || t?.id) === tileId) || null;
+    const doc = tile?.document || canvas?.scene?.tiles?.get?.(tileId) || null;
+    if (!doc) return;
     const selection = Array.isArray(canvas?.tiles?.controlled) ? canvas.tiles.controlled : [];
-    const useSelection = tile.controlled && selection.length > 1;
-    const targets = useSelection ? selection : [tile];
-    const toggleTargets = targets.filter((target) => target?.document?.canUserModify?.(game.user, 'update'));
+    const useSelection = !!tile?.controlled && selection.length > 1;
+    const targets = useSelection
+      ? selection.map((target) => target?.document).filter(Boolean)
+      : [doc];
+    const toggleTargets = targets.filter((target) => target?.canUserModify?.(game.user, 'update'));
     if (!toggleTargets.length) return;
-    const allLocked = toggleTargets.every((target) => !!target.document?.locked);
+    const allLocked = toggleTargets.every((target) => !!target?.locked);
     const nextLocked = !allLocked;
     for (const target of toggleTargets) {
-      try { target.document.update({ locked: nextLocked }); } catch (_) {}
+      try { target.update({ locked: nextLocked }); } catch (_) {}
     }
   }
 
@@ -1854,18 +1877,18 @@ export class LayerManagerTab extends HandlebarsApplicationMixin(AbstractSidebarT
     const rawElevation = buttonEl?.dataset?.elevation || separator?.dataset?.elevation;
     const elevation = Number(rawElevation);
     if (!Number.isFinite(elevation)) return;
-    const tiles = Array.isArray(canvas?.tiles?.placeables) ? canvas.tiles.placeables : [];
-    const targets = tiles.filter((tile) => {
-      if (!tile || tile.destroyed) return false;
-      const docElevation = Number(tile.document?.elevation ?? 0);
+    const docs = canvas?.scene?.tiles ? Array.from(canvas.scene.tiles) : [];
+    const targets = docs.filter((doc) => {
+      if (!doc) return false;
+      const docElevation = Number(doc?.elevation ?? 0);
       return docElevation === elevation;
     });
-    const toggleTargets = targets.filter((target) => target?.document?.canUserModify?.(game.user, 'update'));
+    const toggleTargets = targets.filter((target) => target?.canUserModify?.(game.user, 'update'));
     if (!toggleTargets.length) return;
-    const allLocked = toggleTargets.every((target) => !!target.document?.locked);
+    const allLocked = toggleTargets.every((target) => !!target?.locked);
     const nextLocked = !allLocked;
     for (const target of toggleTargets) {
-      try { target.document.update({ locked: nextLocked }); } catch (_) {}
+      try { target.update({ locked: nextLocked }); } catch (_) {}
     }
   }
 
