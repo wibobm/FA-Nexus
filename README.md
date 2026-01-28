@@ -53,8 +53,11 @@ FA Nexus is the all-in-one hub for Forgotten Adventures—bringing *fully featur
 - **Shadow presets per elevation:** Customize drop shadow alpha, blur, dilation, angle, and distance for each elevation level. Save up to five presets and reapply them with a click.
 - **Multi-select randomizer:** Select several assets and let Nexus randomize which one lands next. Combine with random rotation and scale!
 
+Scatter preview:
+![20260128_1327_Foundry_Virtual_Tabletop_WhK9zqaxAr](https://github.com/user-attachments/assets/4bce8052-427f-4e03-9fe9-cc50cae40462)
 
-[Asset_placement_shadows_editing_v2.webm](https://github.com/user-attachments/assets/4c3b1b28-7206-49d8-9004-42e67bfa2b50)
+Single Placement preview:
+![20260128_1329_Foundry_Virtual_Tabletop_jca134gVYv](https://github.com/user-attachments/assets/8e67a407-8c67-493d-930e-a95ca9cf8c9f)
 
 ---
 
@@ -69,7 +72,7 @@ FA Nexus is the all-in-one hub for Forgotten Adventures—bringing *fully featur
 - **Save as Tile**: Once you are happy with the masked texture, press S to save as Foundry Tile!
 
 
-[texture_painting_v2.webm](https://github.com/user-attachments/assets/c80209fd-eaf6-4fd2-84ab-6a16b7a526d0)
+![20260128_1340_Foundry_Virtual_Tabletop_xW4LveO7Y6](https://github.com/user-attachments/assets/441078a0-587a-496a-a5e3-5fc96d85a5c9)
 
 ---
 
@@ -95,7 +98,8 @@ FA Nexus is the all-in-one hub for Forgotten Adventures—bringing *fully featur
 - **Save as Tile**: Once you are happy with the masked texture, press S to save as Foundry Tile!
 
 
-[path_creation_v2.webm](https://github.com/user-attachments/assets/68f1d65b-3888-4264-b05e-92531aced376)
+![20260128_1443_Foundry_Virtual_Tabletop_sEjSIgY1KS](https://github.com/user-attachments/assets/e0eb837f-9b1d-4abd-b416-8fd6eab54f4a)
+
 
 ---
 
@@ -106,6 +110,8 @@ FA Nexus is the all-in-one hub for Forgotten Adventures—bringing *fully featur
 - **Selection sync:** Click, Ctrl, or Shift to multi-select; canvas selection and `Ctrl+A` respect the same rules.
 - **Selection limits:** Set min/max elevation ranges, skip hidden/locked tiles, and ignore foreground when box-selecting.
 - **Elevation nudges:** Alt+scroll (with Shift/Ctrl modifiers) adjusts selected elevations; placement tools start at the highest selected elevation.
+
+<img width="863" height="852" alt="image" src="https://github.com/user-attachments/assets/56364fea-7db8-449d-b012-62b1139cb287" />
 
 ---
 
@@ -118,6 +124,9 @@ FA Nexus is the all-in-one hub for Forgotten Adventures—bringing *fully featur
 - **Smart deconstruct:** Moved flattened tiles deconstruct in their new position.
 - **Chunking:** Large flattened tiles are split automatically and stitched at runtime for better performance.
 - **Scene export:** Export or flatten the full scene (optional foreground split) to `fa-nexus-assets/exports`.
+
+<img width="409" height="819" alt="image" src="https://github.com/user-attachments/assets/9f176bb7-c08b-4ec7-859c-e36b07b2b685" />
+
 
 ---
 
