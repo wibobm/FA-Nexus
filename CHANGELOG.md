@@ -2,7 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-
+## [0.3.38] - 2026-01-29
+### Fixed
+- Layer Manager panel si now only visible to GMs
+- 'Inner Wall' scale in 'Building tool' being set to '25'
 
 ## [0.3.1 - 0.3.37] - 2026-01-27
 ### Changed
