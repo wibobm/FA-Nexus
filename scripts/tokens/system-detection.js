@@ -154,7 +154,7 @@ const ACTOR_TYPE_MAPPINGS = {
   // Rolemaster Unified
   'rmu': {
     defaultType: 'Creature',
-    supportedTypes: ['Creature','Character'],
+    supportedTypes: ['Creature','Character'], 
     requiredFields: ['name', 'type'],
     optionalFields: ['img'],
     description: 'Rolemaster Unified'
