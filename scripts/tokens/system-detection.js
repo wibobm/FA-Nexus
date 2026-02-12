@@ -151,6 +151,15 @@ const ACTOR_TYPE_MAPPINGS = {
     description: 'Shadowdark RPG'
   },
 
+  // Rolemaster Unified
+  'rmu': {
+    defaultType: 'Creature',
+    supportedTypes: ['Creature'],
+    requiredFields: ['name', 'type'],
+    optionalFields: ['img'],
+    description: 'Rolemaster Unified'
+  },
+
   // Generic fallback for unknown systems
   'generic': {
     defaultType: 'character',
